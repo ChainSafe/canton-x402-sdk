@@ -1,0 +1,16 @@
+{
+  "documentType": "Trade Confirmation",
+  "tradeId": "TRD-2025-00847",
+  "tradeDate": "2025-01-15",
+  "settlementDate": "2025-01-17",
+  "buyer": "Acme Fund LP",
+  "seller": "Canton Capital LLC",
+  "instrument": "Canton Coin (CC)",
+  "quantity": "50000.00",
+  "price": "1.00 USD",
+  "notionalValue": "$50,000.00",
+  "settlementMethod": "Canton Network DVP",
+  "venue": "Canton OTC",
+  "status": "Confirmed",
+  "generatedAt": "2025-01-15T14:30:00Z"
+}

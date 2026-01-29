@@ -1,0 +1,9 @@
+{
+  "name": "x402-examples-shared",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "canton-x402-sdk": "file:../../",
+    "dotenv": "^16.4.5"
+  }
+}
