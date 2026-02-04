@@ -8,3 +8,8 @@ export { verify, validatePaymentCommand } from "./verify.js";
 export { generatePaymentObject } from "./payment-object.js";
 export { CantonJsonClient } from "./json-client.js";
 export { settleLocal, settle } from "./settle.js";
+export {
+  isValidPartyId,
+  isValidAmount,
+  isValidResourceId,
+} from "./validation.js";

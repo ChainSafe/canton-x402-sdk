@@ -1,7 +1,8 @@
 // Canton x402 SDK -- Auth Providers
 
 import * as jose from "jose";
-import type { AuthMode } from "../types.js";
+import type { AuthMode, CantonSdkConfig } from "../types.js";
+import { validateConfig } from "../config.js";
 
 // ─── AuthProvider Interface ────────────────────────────────────────────────
 
@@ -123,7 +124,18 @@ export class OAuth2AuthProvider implements AuthProvider {
 
 // ─── Factory ───────────────────────────────────────────────────────────────
 
-export function createAuthProvider(auth: AuthMode): AuthProvider {
+/**
+ * Create an auth provider from an AuthMode config.
+ * When the full SDK config is passed, validates it for production safety.
+ */
+export function createAuthProvider(
+  auth: AuthMode,
+  config?: CantonSdkConfig,
+): AuthProvider {
+  if (config) {
+    validateConfig(config);
+  }
+
   switch (auth.type) {
     case "shared-secret":
       return new SharedSecretAuthProvider(

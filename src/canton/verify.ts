@@ -7,6 +7,8 @@ import type {
   CantonPayload,
   CreatePaymentCommand,
 } from "../types.js";
+import type { CantonJsonClient } from "./json-client.js";
+import { isValidPartyId, isValidAmount, isValidResourceId } from "./validation.js";
 
 const SUPPORTED_SCHEME = "exact-canton";
 const SUPPORTED_NETWORKS = [
@@ -16,15 +18,23 @@ const SUPPORTED_NETWORKS = [
   "canton-devnet",
 ];
 
+export interface VerifyOptions {
+  /** Skip on-ledger transaction check (for unit testing / localnet without tx) */
+  skipLedgerCheck?: boolean;
+}
+
 /**
  * Verify a Canton x402 payment payload against requirements.
  *
  * Checks: scheme, network, payload structure, required fields,
- * payee/resource match, amount, currency, nonce presence.
+ * payee/resource match, amount, currency, nonce presence, expiry,
+ * input format validation, and on-chain transaction proof.
  */
 export async function verify(
   payload: PaymentPayload,
   requirements: PaymentRequirements,
+  client?: CantonJsonClient,
+  options?: VerifyOptions,
 ): Promise<VerifyResponse> {
   try {
     if (payload.scheme !== SUPPORTED_SCHEME) {
@@ -70,6 +80,37 @@ export async function verify(
         payer: cmd.payer,
       };
     }
+
+    // Input format validation
+    if (!isValidPartyId(cmd.payer)) {
+      return {
+        isValid: false,
+        invalidReason: "invalid_payer_format",
+        payer: cmd.payer,
+      };
+    }
+    if (!isValidPartyId(cmd.payee)) {
+      return {
+        isValid: false,
+        invalidReason: "invalid_payee_format",
+        payer: cmd.payer,
+      };
+    }
+    if (!isValidAmount(cmd.amount)) {
+      return {
+        isValid: false,
+        invalidReason: "invalid_amount_format",
+        payer: cmd.payer,
+      };
+    }
+    if (!isValidResourceId(cmd.resourceId)) {
+      return {
+        isValid: false,
+        invalidReason: "invalid_resource_id_format",
+        payer: cmd.payer,
+      };
+    }
+
     if (cmd.payee !== requirements.payTo) {
       return {
         isValid: false,
@@ -121,6 +162,89 @@ export async function verify(
         invalidReason: "missing_or_empty_nonce",
         payer: cmd.payer,
       };
+    }
+
+    // Expiry enforcement
+    if (cmd.expiresAt) {
+      const expiryTime = new Date(cmd.expiresAt).getTime();
+      if (isNaN(expiryTime)) {
+        return {
+          isValid: false,
+          invalidReason: "invalid_expiry_format",
+          payer: cmd.payer,
+        };
+      }
+      if (Date.now() > expiryTime) {
+        return {
+          isValid: false,
+          invalidReason: "payment_expired",
+          payer: cmd.payer,
+        };
+      }
+    }
+
+    // On-chain transaction proof verification
+    if (client && cmd.transactionId && !options?.skipLedgerCheck) {
+      try {
+        const txData = (await client.getTransactionById(cmd.transactionId, [
+          cmd.payer,
+          cmd.payee,
+        ])) as { transaction?: { events?: unknown[] } };
+
+        const transaction = txData.transaction;
+        if (!transaction) {
+          return {
+            isValid: false,
+            invalidReason: "transaction_not_found",
+            payer: cmd.payer,
+          };
+        }
+
+        // Verify a matching transfer event exists on-ledger
+        const events = (transaction.events ?? []) as Record<string, unknown>[];
+        let matchFound = false;
+        for (const event of events) {
+          const exercisedEvent = (event.ExercisedEvent ??
+            event.exercisedEvent) as Record<string, unknown> | undefined;
+          if (!exercisedEvent) continue;
+          const templateId = String(exercisedEvent.templateId ?? "");
+          const choice = String(exercisedEvent.choice ?? "");
+          if (
+            templateId.includes("TransferPreapproval") &&
+            (choice === "Send" || choice === "TransferPreapproval_Send")
+          ) {
+            const args = exercisedEvent.choiceArgument as Record<
+              string,
+              unknown
+            >;
+            const eventAmount = parseFloat(String(args?.amount ?? ""));
+            const witnessParties = (exercisedEvent.witnessParties ??
+              []) as string[];
+            if (
+              !isNaN(eventAmount) &&
+              Math.abs(eventAmount - paymentAmount) < 0.0001 &&
+              witnessParties.includes(cmd.payee)
+            ) {
+              matchFound = true;
+              break;
+            }
+          }
+        }
+
+        if (!matchFound) {
+          return {
+            isValid: false,
+            invalidReason: "transaction_mismatch",
+            payer: cmd.payer,
+          };
+        }
+      } catch {
+        return {
+          isValid: false,
+          invalidReason: "ledger_check_failed",
+          payer: cmd.payer,
+        };
+      }
     }
 
     return { isValid: true, payer: cmd.payer };

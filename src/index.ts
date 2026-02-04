@@ -36,10 +36,11 @@ export {
   CantonError,
   VerificationError,
   SettlementError,
+  InsufficientBalanceError,
 } from "./types.js";
 
 // Config
-export { localnetConfig, devnetConfig } from "./config.js";
+export { localnetConfig, devnetConfig, mainnetConfig, validateConfig } from "./config.js";
 
 // Canton
 export {
@@ -53,11 +54,23 @@ export { generatePaymentObject } from "./canton/payment-object.js";
 export { CantonJsonClient } from "./canton/json-client.js";
 export { settleLocal, settle } from "./canton/settle.js";
 
-// Facilitator
-export { createFacilitatorRouter, startFacilitator, NonceStore } from "./facilitator/index.js";
+// Validation
+export {
+  isValidPartyId,
+  isValidAmount,
+  isValidResourceId,
+} from "./canton/validation.js";
 
 // Middleware
 export { paymentRequired } from "./middleware/index.js";
 
 // Client
 export { createX402Fetch } from "./client/index.js";
+
+// Logger
+export {
+  type Logger,
+  JsonLogger,
+  noopLogger,
+  redactSensitive,
+} from "./logger.js";

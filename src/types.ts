@@ -35,6 +35,8 @@ export interface CreatePaymentCommand {
   currency: string;
   resourceId: string;
   nonce: string;
+  transactionId?: string;
+  expiresAt?: string;
 }
 
 // ─── Response Types ────────────────────────────────────────────────────────
@@ -276,5 +278,19 @@ export class SettlementError extends Error {
   ) {
     super(message);
     this.name = "SettlementError";
+  }
+}
+
+export class InsufficientBalanceError extends Error {
+  constructor(
+    public payer: string,
+    public required?: string,
+  ) {
+    super(
+      `Insufficient Canton Coin balance for ${payer}.` +
+      (required ? ` Required: ${required} CC.` : '') +
+      ` Please fund the account and try again.`
+    );
+    this.name = "InsufficientBalanceError";
   }
 }

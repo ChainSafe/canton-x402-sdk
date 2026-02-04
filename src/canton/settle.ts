@@ -90,7 +90,7 @@ export async function settleLocal(
 
   // 3. Build and submit exercise command via direct submission
   const userId = auth.getUserId();
-  const commandId = `x402-settle-${Date.now()}`;
+  const commandId = `x402-settle-${randomUUID()}`;
 
   const result = await client.submitAndWait({
     userId,
@@ -235,7 +235,7 @@ export async function settle(
   const disclosedContracts =
     (choiceContext as Record<string, unknown>).disclosedContracts ?? [];
   const synchronizerId = `global-domain::${config.dsoParty.split("::")[1]}`;
-  const commandId = `x402-settle-${Date.now()}`;
+  const commandId = `x402-settle-${randomUUID()}`;
 
   // 3. Prepare transaction
   const prepareResponse = await fetch(
@@ -345,7 +345,7 @@ export async function settle(
           ],
         },
         deduplicationPeriod: {
-          DeduplicationDuration: { value: { seconds: 300, nanos: 0 } },
+          DeduplicationDuration: { value: { seconds: 86400, nanos: 0 } },
         },
         submissionId: randomUUID(),
         userId,
