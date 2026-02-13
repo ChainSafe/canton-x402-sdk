@@ -28,3 +28,7 @@ npm-debug.log*
 
 # Claude
 .claude/
+
+# Canton key files (never commit)
+*-key.json
+*.key.json

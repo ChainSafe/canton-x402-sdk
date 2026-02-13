@@ -13,3 +13,21 @@ export {
   isValidAmount,
   isValidResourceId,
 } from "./validation.js";
+
+// Billing
+export {
+  queryPaymentsFromChain,
+  queryChargesFromChain,
+  createChargeReceipt,
+  computeBalance,
+  createChargeManager,
+  findChargeManager,
+  getOrCreateChargeManager,
+  type ChargeRecord,
+  type PaymentRecord,
+  type BalanceResult,
+  type BalanceOptions,
+  type CreateChargeOptions,
+  type CreateChargeResult,
+  type QueryResult,
+} from "./billing.js";

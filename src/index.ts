@@ -61,6 +61,24 @@ export {
   isValidResourceId,
 } from "./canton/validation.js";
 
+// Billing
+export {
+  queryPaymentsFromChain,
+  queryChargesFromChain,
+  createChargeReceipt,
+  computeBalance,
+  createChargeManager,
+  findChargeManager,
+  getOrCreateChargeManager,
+  type ChargeRecord,
+  type PaymentRecord,
+  type BalanceResult,
+  type BalanceOptions,
+  type CreateChargeOptions,
+  type CreateChargeResult,
+  type QueryResult,
+} from "./canton/billing.js";
+
 // Middleware
 export { paymentRequired } from "./middleware/index.js";
 
