@@ -10,8 +10,6 @@ Monorepo for the `@chainsafe/x402-*` packages — x402 payments on the Canton Ne
 | `@chainsafe/x402-server-sdk` | Payer SDK — prepare + sign a transfer with a party key + ledger access; auto-pay `fetch`; facilitator client. |
 | `@chainsafe/x402-express` | Merchant middleware — `paymentRequired()` gating for Express. |
 
-> Browser packages (`x402-fetch`, `x402-nextjs`) are deferred until browser flows are in scope.
-
 ## Development
 
 Requires Node ≥ 20 and pnpm (see `.nvmrc` / `packageManager`).

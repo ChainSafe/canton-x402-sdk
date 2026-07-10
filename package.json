@@ -1,7 +1,7 @@
 {
   "name": "@chainsafe/x402-monorepo",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "description": "x402 SDK — monorepo for the @chainsafe/x402-* packages.",
   "license": "Apache-2.0",
