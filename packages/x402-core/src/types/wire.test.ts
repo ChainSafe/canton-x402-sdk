@@ -3,6 +3,9 @@ import { HashingSchemeVersion } from "./index";
 import type {
   CantonPaymentRequirements,
   CantonPaymentPayload,
+  PaymentRequiredResponse,
+  CantonPaymentObjectRequest,
+  CantonPaymentObjectResponse,
   VerifyRequest,
   SettleRequest,
   SettleResponse,
@@ -64,9 +67,16 @@ describe("x402-core wire types", () => {
       kinds: [{ x402Version: 2, scheme: "exact-canton", network: requirements.network }],
     };
 
+    const paymentRequired: PaymentRequiredResponse = {
+      x402Version: 2,
+      accepts: [requirements],
+      error: "payment_required",
+    };
+
     expect(verifyReq.x402Version).toBe(2);
     expect(settleReq.paymentPayload).toBe(payload);
     expect(supported.kinds).toHaveLength(1);
+    expect(paymentRequired.accepts[0]).toBe(requirements);
   });
 
   it("narrows the discriminated response unions", () => {
@@ -89,6 +99,46 @@ describe("x402-core wire types", () => {
     };
     if (settleOk.success) expect(settleOk.transaction).toBe("1220update");
     if (!settleErr.success) expect(settleErr.errorReason).toBe("execution_failed");
+  });
+
+  it("accepts a payment-object request/response", () => {
+    const req: CantonPaymentObjectRequest = {
+      amount: "0.01",
+      merchantParty: "merchant::1220dead",
+      payerParty: "alice::1220beef",
+      resource: "/api/resource",
+      asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+    };
+
+    const res: CantonPaymentObjectResponse = {
+      paymentObject: {
+        amount: req.amount,
+        merchantParty: req.merchantParty,
+        payerParty: req.payerParty,
+        expiresAt: "2026-01-01T00:00:00.000Z",
+        resource: req.resource,
+        facilitatorFee: "0.00",
+        totalAmount: "0.01",
+        transferFactory: {
+          contractId: "00factory",
+          disclosedContracts: [
+            {
+              templateId: "pkg:Mod:Ent",
+              contractId: "00abc",
+              createdEventBlob: "YmxvYg==",
+              synchronizerId: "global-domain::1220be58c29e",
+            },
+          ],
+        },
+        choiceContext: { choiceContextData: { values: {} } },
+      },
+      paymentId: "pay-1",
+      status: "ready",
+    };
+
+    expect(res.paymentObject.transferFactory.contractId).toBe("00factory");
+    expect(res.status).toBe("ready");
+    expect(req.asset?.instrumentId.id).toBe("Amulet");
   });
 
   it("exposes the hashing-scheme enum values", () => {
