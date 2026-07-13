@@ -4,11 +4,28 @@
 //
 // v2 (exact-canton) only; legacy v1 shapes are intentionally not carried over.
 //
-// FUTURE (flexibility, not yet applied): several types below are pinned to the
-// single exact-canton scheme. When a second scheme lands (batch-settlement /
-// USDCx) we should (a) parameterize the envelope over its inner payload + extra
-// shapes, (b) turn `scheme`/`hashingSchemeVersion` into open unions for
-// autocomplete, and (c) decide open-vs-closed reason unions. Markers inline.
+// FUTURE (multi-scheme generics — not yet applied): the types below are bound to
+// the single exact-canton scheme. When a SECOND scheme lands (batch-settlement /
+// USDCx), lift a chain-agnostic layer and keep the Canton types as thin aliases:
+//
+//   interface X402PaymentPayload<TInner> { x402Version; scheme; network; payload: TInner }
+//   interface X402PaymentRequirements<TAsset, TExtra> { …; asset: TAsset; extra?: TExtra }
+//   interface X402Request<TInner, TAsset, TExtra> { paymentPayload; paymentRequirements }
+//   type CantonPaymentPayload      = X402PaymentPayload<CantonPaymentInner>
+//   type CantonPaymentRequirements = X402PaymentRequirements<AssetSpec>
+// 
+// Chain-specific seams: the payload's ENTIRE `payload` object (→ TInner); in
+// requirements the ONLY chain-specific field is `asset` (→ TAsset); scheme-specific
+// `extra` (→ TExtra). Use defaulted type params so existing call sites don't change.
+// Also pending (markers inline): `scheme` open union; reason-union open-vs-closed.
+// Factor against the REAL second-scheme shapes, not speculatively.
+
+/**
+ * x402 protocol version — the envelope discriminant. Pinned to `2` today; widen
+ * to a union (`2 | 3 | …`) here when a new protocol version lands, and every
+ * envelope updates in one place.
+ */
+export type X402Version = 2;
 
 /**
  * Network identifier carried in the (scheme-generic) envelope. Its concrete
@@ -64,6 +81,7 @@ export interface CantonPaymentRequirements {
   /** Decimal-string CC amount, up to 10 decimal places. */
   // FUTURE: a branded `DecimalString` type would document the format at the type level.
   maxAmountRequired: string;
+  // FUTURE: the ONLY chain-specific field here — becomes the `TAsset` slot (see header).
   asset: AssetSpec;
   /** Recipient Canton party ID. */
   payTo: string;
@@ -75,9 +93,8 @@ export interface CantonPaymentRequirements {
   /** ISO 8601 timestamp; facilitator rejects /settle after this. */
   validBefore: string;
   maxTimeoutSeconds?: number;
-  // FUTURE: make requirements generic over `TExtra` (default Record<string,unknown>)
-  // so a scheme can declare its extra shape (e.g. bridge's `cantonRecipient`)
-  // instead of an untyped bag: `CantonPaymentRequirements<TExtra = Record<string, unknown>>`.
+  // FUTURE: scheme-specific shape → the `TExtra` slot (see header); e.g. the
+  // bridge's `cantonRecipient` instead of an untyped bag.
   extra?: Record<string, unknown>;
 }
 
@@ -130,25 +147,28 @@ export interface CantonPaymentInner {
 }
 
 export interface CantonPaymentPayload {
-  // FUTURE: widen to an `X402Version` union (2 | 3 | …) as the protocol evolves.
-  x402Version: 2;
+  x402Version: X402Version;
   // Widened (see CantonPaymentRequirements). Different schemes carry different
   // inner-payload shapes; the declared type stays the exact-canton shape.
   scheme: string;
   network: NetworkId;
-  // FUTURE: make the envelope generic — `CantonPaymentPayload<TInner = CantonPaymentInner>` —
-  // so other schemes carry their own inner shape without `as unknown as`.
+  // FUTURE: the entire inner object is chain-specific → the `TInner` slot (see
+  // header); other schemes carry their own shape without `as unknown as`.
   payload: CantonPaymentInner;
 }
 
-/** /verify and /settle request envelope. */
-export interface FacilitatorRequest {
-  x402Version: 2;
-  // FUTURE: parameterize as `FacilitatorRequest<TInner, TExtra>` to match the
-  // payload/requirements generics above (multi-scheme).
+/**
+ * Shared request body for POST /v2/verify and /v2/settle. The two operations
+ * take the identical envelope, so `SettleRequest` is an alias of `VerifyRequest`.
+ */
+export interface VerifyRequest {
+  x402Version: X402Version;
+  // FUTURE: parameterize as `X402Request<TInner, TAsset, TExtra>` (see header).
   paymentPayload: CantonPaymentPayload;
   paymentRequirements: CantonPaymentRequirements;
 }
+
+export type SettleRequest = VerifyRequest;
 
 // FUTURE: appending `| (string & {})` to the reason unions below would let a
 // newer facilitator return a reason an older client doesn't know without
@@ -216,7 +236,7 @@ export interface SettleResponseError {
 export type SettleResponse = SettleResponseSuccess | SettleResponseError;
 
 export interface SupportedKind {
-  x402Version: 2;
+  x402Version: X402Version;
   scheme: string;
   network: NetworkId;
   extra?: Record<string, unknown>;

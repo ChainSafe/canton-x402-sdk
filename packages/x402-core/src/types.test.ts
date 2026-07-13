@@ -3,7 +3,8 @@ import { HashingSchemeVersion } from "./index";
 import type {
   CantonPaymentRequirements,
   CantonPaymentPayload,
-  FacilitatorRequest,
+  VerifyRequest,
+  SettleRequest,
   SettleResponse,
   SupportedResponse,
   VerifyResponse,
@@ -51,17 +52,20 @@ describe("x402-core wire types", () => {
       },
     };
 
-    const envelope: FacilitatorRequest = {
+    const verifyReq: VerifyRequest = {
       x402Version: 2,
       paymentPayload: payload,
       paymentRequirements: requirements,
     };
+    // SettleRequest is an alias of VerifyRequest — the identical envelope.
+    const settleReq: SettleRequest = verifyReq;
 
     const supported: SupportedResponse = {
       kinds: [{ x402Version: 2, scheme: "exact-canton", network: requirements.network }],
     };
 
-    expect(envelope.x402Version).toBe(2);
+    expect(verifyReq.x402Version).toBe(2);
+    expect(settleReq.paymentPayload).toBe(payload);
     expect(supported.kinds).toHaveLength(1);
   });
 
