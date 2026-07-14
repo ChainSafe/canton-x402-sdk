@@ -29,14 +29,17 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Build first: packages resolve their workspace deps from `dist/` (the
+      # `exports`/`types` targets), so typecheck and test need it present. `pnpm -r`
+      # builds in topological order (x402-core before x402-client).
+      - name: Build
+        run: pnpm build
+
       - name: Typecheck
         run: pnpm typecheck
 
       - name: Lint
         run: pnpm lint
-
-      - name: Build
-        run: pnpm build
 
       - name: Test
         run: pnpm test
