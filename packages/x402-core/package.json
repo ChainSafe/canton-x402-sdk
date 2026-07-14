@@ -22,6 +22,9 @@
   "files": [
     "dist"
   ],
+  "devDependencies": {
+    "@noble/hashes": "^2.2.0"
+  },
   "scripts": {
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
