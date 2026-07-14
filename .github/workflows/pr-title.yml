@@ -1,0 +1,32 @@
+name: PR Title
+
+# Squash-merge uses the PR title as the commit message, so that's what must be
+# a valid Conventional Commit (Release Please reads it). Re-checks on edit.
+on:
+  pull_request:
+    types: [opened, edited, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  lint-title:
+    name: conventional PR title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            build
+            chore
+            ci
+            docs
+            feat
+            fix
+            perf
+            refactor
+            revert
+            style
+            test
