@@ -10,5 +10,17 @@ export default tseslint.config(
       ecmaVersion: 2022,
       sourceType: "module",
     },
+    rules: {
+      // Underscore-prefixed identifiers are intentionally unused (e.g. mock
+      // params kept only to shape a tuple type).
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
+    },
   },
 );
