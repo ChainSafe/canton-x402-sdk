@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { canonicalJson, requirementsHash, canonicalSha256Hex } from "./index";
+// requirementsHash is the public entry; canonicalJson is a package-internal
+// helper imported directly from the module (not re-exported by the barrel).
+import { canonicalJson, requirementsHash } from "./hashing";
 import type { CantonPaymentRequirements } from "./index";
 
 // Golden vector generated from the FACILITATOR's actual canonicalize.ts
@@ -34,7 +36,6 @@ describe("requirements hashing — facilitator parity", () => {
 
   it("hashes to the golden hex (byte-for-byte parity with the facilitator)", () => {
     expect(requirementsHash(REQUIREMENTS)).toBe(GOLDEN_HASH);
-    expect(canonicalSha256Hex(REQUIREMENTS)).toBe(GOLDEN_HASH);
   });
 
   it("is order-independent (field order in the object doesn't change the hash)", () => {

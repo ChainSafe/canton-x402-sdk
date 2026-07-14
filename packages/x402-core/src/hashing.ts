@@ -5,9 +5,9 @@ import type { CantonPaymentRequirements } from "./types/requirements";
 // RFC 8785 (JSON Canonicalization Scheme). The client and the facilitator both
 // canonicalize PaymentRequirements identically and SHA-256 the UTF-8 bytes, so a
 // payload signed for one (resource, amount, payTo) can't be replayed against
-// another. `canonicalJson` is pure; only the hash pulls @noble/hashes (isomorphic
-// — works in browser and node). Ported verbatim from the facilitator's
-// canonicalize.ts (kept byte-identical; see the parity test).
+// another. `canonicalJson` is pure; only the hash pulls @noble/hashes (bundled).
+// Ported verbatim from the facilitator's canonicalize.ts (kept byte-identical;
+// see the parity test).
 //
 // Reference: https://datatracker.ietf.org/doc/html/rfc8785
 
@@ -16,17 +16,17 @@ export function canonicalJson(value: unknown): string {
   return serialize(value);
 }
 
-/** SHA-256 (hex) of the canonical JSON of a value. */
-export function canonicalSha256Hex(value: unknown): string {
-  return bytesToHex(sha256(utf8ToBytes(canonicalJson(value))));
-}
-
 /**
  * requirementsHash — SHA-256 hex of the canonical `CantonPaymentRequirements`.
  * Binds a signed payload to this exact (resource, amount, payTo, …).
  */
 export function requirementsHash(requirements: CantonPaymentRequirements): string {
   return canonicalSha256Hex(requirements);
+}
+
+/** Internal: SHA-256 (hex) of the canonical JSON of a value. */
+function canonicalSha256Hex(value: unknown): string {
+  return bytesToHex(sha256(utf8ToBytes(canonicalJson(value))));
 }
 
 function serialize(v: unknown): string {
