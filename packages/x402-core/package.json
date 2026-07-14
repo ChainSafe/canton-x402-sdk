@@ -23,6 +23,7 @@
     "dist"
   ],
   "devDependencies": {
+    "@noble/ed25519": "^3.0.0",
     "@noble/hashes": "^2.2.0"
   },
   "scripts": {
