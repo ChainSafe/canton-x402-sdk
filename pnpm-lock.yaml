@@ -41,6 +41,13 @@ importers:
       '@noble/hashes':
         specifier: ^2.2.0
         version: 2.2.0
+  
+  packages/x402-client:
+    dependencies:
+      '@chainsafe/x402-core':
+        specifier: workspace:*
+        version: link:../x402-core
+
 
 packages:
 
