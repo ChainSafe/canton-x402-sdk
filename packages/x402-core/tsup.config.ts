@@ -7,5 +7,5 @@ import { baseTsup } from "../../tsup.base";
 export default defineConfig({
   ...baseTsup,
   entry: ["src/index.ts"],
-  noExternal: ["@noble/hashes"],
+  noExternal: ["@noble/hashes", "@noble/ed25519"],
 });
