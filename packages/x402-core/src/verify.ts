@@ -123,6 +123,23 @@ export function isCantonPaymentInner(v: unknown): v is CantonPaymentInner {
   );
 }
 
+/**
+ * Loose guard for the outer `CantonPaymentPayload` envelope: any non-empty scheme
+ * (per-scheme handlers validate the inner `payload` shape), x402 v2, a network,
+ * and a `payload` object. Intentionally does NOT assert the inner exact-canton
+ * fields — use {@link isCantonPaymentInner} for that.
+ */
+export function isCantonPaymentPayload(v: unknown): v is CantonPaymentPayload {
+  if (!isObj(v)) return false;
+  return (
+    v.x402Version === 2 &&
+    typeof v.scheme === "string" &&
+    v.scheme.length > 0 &&
+    typeof v.network === "string" &&
+    isObj(v.payload)
+  );
+}
+
 export function isVerifyRequest(v: unknown): v is VerifyRequest {
   if (!isObj(v)) return false;
   const payload = v.paymentPayload;
