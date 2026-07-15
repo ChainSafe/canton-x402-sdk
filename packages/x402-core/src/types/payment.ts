@@ -28,11 +28,6 @@ export interface CantonPaymentInner {
   partySignature: string;
   /** Hex SHA256(0x0000000c || publicKey); MUST equal payer's fingerprint suffix. */
   keyFingerprint: string;
-  /** Contract ID of the TransferFactory used during prepare. */
-  transferFactoryId: string;
-  /** Opaque object returned by Splice Token Standard's transfer-factory API. */
-  // FUTURE: type per registry, or make Inner generic over the choice-context shape.
-  choiceContext: Record<string, unknown>;
   /** Disclosed contracts required by the prepared transaction. */
   disclosedContracts: DisclosedContract[];
   /** SHA-256 of the canonical (RFC-8785) PaymentRequirements. */

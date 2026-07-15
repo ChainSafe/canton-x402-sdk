@@ -6,6 +6,7 @@ import {
   fingerprintForPublicKey,
   matchesFingerprint,
   verifySignature,
+  signHash,
   isValidAmount,
   isExpired,
   schemeNetworkMatches,
@@ -60,6 +61,20 @@ describe("verifySignature", () => {
   it("rejects malformed lengths without throwing", () => {
     expect(verifySignature(hashHex, "abcd", pubB64)).toBe(false);
     expect(verifySignature(hashHex, sigHex, btoa("short"))).toBe(false);
+  });
+});
+
+describe("signHash", () => {
+  const priv = new Uint8Array(32).fill(7);
+  const pub = getPublicKey(priv);
+  const hashHex = bytesToHex(new Uint8Array(32).fill(9));
+
+  it("produces a signature that verifySignature accepts (round-trip)", () => {
+    const sig = signHash(hashHex, toB64(priv));
+    expect(verifySignature(hashHex, sig, toB64(pub))).toBe(true);
+  });
+  it("throws on a non-32-byte seed", () => {
+    expect(() => signHash(hashHex, btoa("short"))).toThrow(/32-byte seed/);
   });
 });
 

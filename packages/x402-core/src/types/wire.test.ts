@@ -39,8 +39,6 @@ describe("x402-core wire types", () => {
         preparedTransactionHash: "deadbeef",
         partySignature: "cafe",
         keyFingerprint: "1220beef",
-        transferFactoryId: "00factory",
-        choiceContext: {},
         disclosedContracts: [
           {
             templateId: "pkg:Mod:Ent",
