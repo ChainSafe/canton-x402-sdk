@@ -14,10 +14,10 @@ import {
   parseCantonNetworkId,
   isCantonPaymentRequirements,
   isCantonPaymentInner,
-  isCantonPaymentPayload,
+  isX402PaymentPayload,
   isVerifyRequest,
-} from "./verify";
-import type { CantonPaymentPayload, CantonPaymentRequirements } from "./index";
+} from "./index";
+import type { CantonPaymentPayload, CantonPaymentRequirements } from "../index";
 
 hashes.sha512 = sha512; // wire ed25519 for key/sig generation in this test
 
@@ -139,19 +139,19 @@ describe("shape guards + scheme/network match", () => {
     expect(isCantonPaymentRequirements({})).toBe(false);
     expect(isCantonPaymentInner(inner)).toBe(true);
     expect(isCantonPaymentInner({})).toBe(false);
-    expect(isCantonPaymentPayload(payload)).toBe(true);
+    expect(isX402PaymentPayload(payload)).toBe(true);
     // Loose: accepts any non-empty scheme (per-scheme inner validated elsewhere).
     expect(
-      isCantonPaymentPayload({
+      isX402PaymentPayload({
         x402Version: 2,
         scheme: "batch-settlement-canton",
         network: "canton:1220x",
         payload: { ethereumTxHash: "0x" },
       }),
     ).toBe(true);
-    expect(isCantonPaymentPayload({ x402Version: 2, scheme: "", network: "canton:1220x", payload: {} })).toBe(false);
-    expect(isCantonPaymentPayload({ x402Version: 1, scheme: "exact-canton", network: "n", payload: {} })).toBe(false);
-    expect(isCantonPaymentPayload({})).toBe(false);
+    expect(isX402PaymentPayload({ x402Version: 2, scheme: "", network: "canton:1220x", payload: {} })).toBe(false);
+    expect(isX402PaymentPayload({ x402Version: 1, scheme: "exact-canton", network: "n", payload: {} })).toBe(false);
+    expect(isX402PaymentPayload({})).toBe(false);
     expect(isVerifyRequest({ x402Version: 2, paymentPayload: payload, paymentRequirements: requirements })).toBe(true);
     expect(isVerifyRequest({ x402Version: 2 })).toBe(false);
   });

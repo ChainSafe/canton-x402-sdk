@@ -1,4 +1,4 @@
-import type { AssetSpec, NetworkId, X402Version } from "./common";
+import type { AssetSpec, NetworkId, Scheme, X402Version } from "./common";
 import type { CantonPaymentInner, X402PaymentPayload } from "./payment";
 import type { X402PaymentRequirements } from "./requirements";
 
@@ -20,6 +20,31 @@ export interface X402Request<
 /** exact-canton verify/settle request. */
 export type VerifyRequest = X402Request;
 export type SettleRequest = VerifyRequest;
+
+/**
+ * The pure verification contract every scheme implements. Core owns it as the
+ * single source of truth; the facilitator and any client conform to it. `verify`
+ * is a stateless payload-against-requirements check — the shared shape is
+ * identical across schemes, only the proof mechanics differ (exact-canton:
+ * Ed25519 over the prepared-tx hash + fingerprint + requirementsHash binding).
+ *
+ * Stateful concerns — nonce replay, on-chain execution, public-key *resolution*
+ * from a party id — are deliberately NOT here; they stay in the facilitator and
+ * compose on top of this.
+ *
+ * The params are the widest envelope (`unknown` inner/asset), so a heterogeneous
+ * registry of verifiers type-checks and each verifier narrows via its own guard —
+ * adding a scheme is "register a new verifier", with no dispatcher change.
+ */
+export interface SchemeVerifier {
+  readonly schemeId: string;
+  /** The concrete network this verifier is bound to, e.g. `canton:<synchronizer>`. */
+  readonly networkId: NetworkId;
+  verify(
+    payload: X402PaymentPayload<unknown>,
+    requirements: X402PaymentRequirements<unknown>,
+  ): VerifyResponse;
+}
 
 // FUTURE: appending `| (string & {})` to the reason unions below would let a
 // newer facilitator return a reason an older client doesn't know without
@@ -88,7 +113,7 @@ export type SettleResponse = SettleResponseSuccess | SettleResponseError;
 
 export interface SupportedKind {
   x402Version: X402Version;
-  scheme: string;
+  scheme: Scheme;
   network: NetworkId;
   extra?: Record<string, unknown>;
 }

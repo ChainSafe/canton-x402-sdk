@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
-import type { CantonPaymentRequirements } from "./types/requirements";
+import type { X402PaymentRequirements } from "./types/requirements";
 
 // RFC 8785 (JSON Canonicalization Scheme). The client and the facilitator both
 // canonicalize PaymentRequirements identically and SHA-256 the UTF-8 bytes, so a
@@ -17,10 +17,12 @@ export function canonicalJson(value: unknown): string {
 }
 
 /**
- * requirementsHash — SHA-256 hex of the canonical `CantonPaymentRequirements`.
- * Binds a signed payload to this exact (resource, amount, payTo, …).
+ * requirementsHash — SHA-256 hex of the canonical PaymentRequirements. Binds a
+ * signed payload to this exact (resource, amount, payTo, …). The canonicalizer
+ * walks the whole object structurally, so it's scheme-agnostic in the asset/extra
+ * seams — hence the widened `X402PaymentRequirements<unknown>` parameter.
  */
-export function requirementsHash(requirements: CantonPaymentRequirements): string {
+export function requirementsHash(requirements: X402PaymentRequirements<unknown>): string {
   return canonicalSha256Hex(requirements);
 }
 

@@ -1,4 +1,4 @@
-import type { NetworkId, X402Version } from "./common";
+import type { NetworkId, Scheme, X402Version } from "./common";
 
 /**
  * Canton interactive-submission hashing-scheme versions. These are the protobuf
@@ -45,12 +45,13 @@ export interface CantonPaymentInner {
 
 /**
  * Generic x402 payment envelope. `TInner` is the scheme-specific inner payload —
- * the whole `payload` object is the one chain-specific seam. `scheme` stays a plain
- * string so schemes share the envelope; each scheme guards on the literal it knows.
+ * the whole `payload` object is the one chain-specific seam. `scheme` is the open
+ * {@link Scheme} union so schemes share the envelope; each scheme guards on the
+ * literal it knows.
  */
 export interface X402PaymentPayload<TInner = CantonPaymentInner> {
   x402Version: X402Version;
-  scheme: string;
+  scheme: Scheme;
   network: NetworkId;
   payload: TInner;
 }
