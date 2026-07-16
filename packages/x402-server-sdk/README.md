@@ -22,7 +22,11 @@ npm install @chainsafe/x402-server-sdk @canton-network/wallet-sdk
 import { SDK, type TokenProviderConfig } from "@canton-network/wallet-sdk";
 import { CantonX402Payer, devnetConfig } from "@chainsafe/x402-server-sdk";
 
-const net = devnetConfig({ ledgerClientUrl: "https://<validator>/…", registryUrl: "https://<scan>/…" });
+const net = devnetConfig({ ledgerClientUrl: "https://<your-participant>/…" });
+
+// Your Token Standard registries (asset-specific — you own these). Amulet is the
+// validator scan-proxy; other assets (e.g. USDCx) have their own registries.
+const amuletRegistry = "https://<your-validator>/api/validator/v0/scan-proxy";
 
 // Auth — see below. DevNet/TestNet/MainNet use OAuth2 client_credentials:
 const auth: TokenProviderConfig = {
@@ -37,7 +41,7 @@ const auth: TokenProviderConfig = {
 const sdk = await SDK.create({
   auth,
   ledgerClientUrl: net.ledgerClientUrl,
-  token: { auth, registries: [net.registryUrl] },
+  token: { auth, registries: [amuletRegistry] },
 });
 
 // 2. Construct the payer with your party key + the assets it supports.
@@ -47,7 +51,7 @@ const payer = new CantonX402Payer({
   network: net.network,
   registries: [
     // one entry per supported asset (Amulet here; add USDCx etc. with their registries)
-    { instrumentId: { id: "Amulet", admin: "DSO::1220…" }, registryUrl: net.registryUrl },
+    { instrumentId: { id: "Amulet", admin: "DSO::1220…" }, registryUrl: amuletRegistry },
   ],
 });
 
@@ -110,10 +114,11 @@ from the prepared-tx hash), so the payer doesn't track in-flight requests.
 
 ## Config presets
 
-`localnetConfig` / `devnetConfig` / `mainnetConfig` return `{ network, ledgerClientUrl, registryUrl, auth }`
-to feed `SDK.create`. LocalNet URLs default to the well-known localhost endpoints
-(network id is per-instance, so pass it); DevNet/MainNet fill the network id from
-`x402-core` and take deployment-specific URLs. Every field is overridable.
+`localnetConfig` / `devnetConfig` / `mainnetConfig` return `{ network, ledgerClientUrl, auth }`
+to feed `SDK.create`. LocalNet defaults the localhost ledger URL (network id is
+per-instance, so pass it); DevNet/MainNet fill the network id from `x402-core` and
+take your participant's ledger URL. Every field is overridable. **Registries are not
+here** — they're asset-specific (Amulet vs USDCx), so you pass them to `CantonX402Payer`.
 
 ## Settling
 

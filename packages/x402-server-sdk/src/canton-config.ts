@@ -1,4 +1,4 @@
-import { DEVNET_NETWORK, MAINNET_NETWORK } from "@chainsafe/x402-core";
+import { DEVNET_NETWORK, MAINNET_NETWORK, type NetworkId } from "@chainsafe/x402-core";
 
 /**
  * Auth defaults for building a wallet-sdk `TokenProviderConfig`. The caller adds
@@ -11,17 +11,14 @@ export interface AuthDefaults {
 }
 
 /**
- * The Canton network values a payer needs: the network id (for `X402Payer`), plus
- * the endpoints/auth used to build the wallet-sdk `SDK` (`SDK.create`). Every field
- * is overridable; deployment-specific URLs are required where there's no safe default.
+ * The Canton connection values a payer needs to build a wallet-sdk `SDK`: the
+ * network id (for `X402Payer`) + the ledger endpoint + auth defaults.
  */
 export interface CantonNetworkConfig {
   /** Network id, e.g. `canton:1220…`. */
-  network: string;
+  network: NetworkId;
   /** JSON Ledger API base URL (`SDK.create({ ledgerClientUrl })`). */
   ledgerClientUrl: string;
-  /** Token Standard registry URL (`token.transfer.create({ registryUrl })`). */
-  registryUrl: string;
   /** Auth defaults for `SDK.create`. */
   auth: AuthDefaults;
 }
@@ -29,43 +26,40 @@ export interface CantonNetworkConfig {
 const CN_AUDIENCE = "https://canton.network.global";
 
 /**
- * LocalNet: URLs are the well-known `localNetStaticConfig` defaults, but the network
- * id is per-instance (the local synchronizer's fingerprint), so pass `network`.
+ * LocalNet: the ledger URL is the well-known localhost default, but the network id
+ * is per-instance (the local synchronizer's fingerprint), so pass `network`.
  */
 export function localnetConfig(
-  opts: { network: string } & Partial<Omit<CantonNetworkConfig, "network">>,
+  opts: { network: NetworkId } & Partial<Omit<CantonNetworkConfig, "network">>,
 ): CantonNetworkConfig {
   return {
     network: opts.network,
     ledgerClientUrl: opts.ledgerClientUrl ?? "http://localhost:2975",
-    registryUrl: opts.registryUrl ?? "http://localhost:2000/api/validator/v0/scan-proxy",
     auth: opts.auth ?? { audience: CN_AUDIENCE, scope: "", issuer: "unsafe-auth" },
   };
 }
 
 /**
- * DevNet: the network id is fixed (from x402-core), but ledger/registry URLs are
- * deployment-specific (your validator/scan), so pass them.
+ * DevNet: the network id is fixed (from x402-core); the ledger URL is your own
+ * participant, so pass it.
  */
 export function devnetConfig(
-  opts: { ledgerClientUrl: string; registryUrl: string } & Partial<CantonNetworkConfig>,
+  opts: { ledgerClientUrl: string } & Partial<CantonNetworkConfig>,
 ): CantonNetworkConfig {
   return {
     network: opts.network ?? DEVNET_NETWORK,
     ledgerClientUrl: opts.ledgerClientUrl,
-    registryUrl: opts.registryUrl,
     auth: opts.auth ?? { audience: CN_AUDIENCE, scope: "" },
   };
 }
 
-/** MainNet: fixed network id (from x402-core); ledger/registry URLs are deployment-specific. */
+/** MainNet: fixed network id (from x402-core); the ledger URL is your own participant. */
 export function mainnetConfig(
-  opts: { ledgerClientUrl: string; registryUrl: string } & Partial<CantonNetworkConfig>,
+  opts: { ledgerClientUrl: string } & Partial<CantonNetworkConfig>,
 ): CantonNetworkConfig {
   return {
     network: opts.network ?? MAINNET_NETWORK,
     ledgerClientUrl: opts.ledgerClientUrl,
-    registryUrl: opts.registryUrl,
     auth: opts.auth ?? { audience: CN_AUDIENCE, scope: "" },
   };
 }

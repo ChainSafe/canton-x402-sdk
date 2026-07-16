@@ -19,7 +19,7 @@ export {
   mainnetConfig,
   type CantonNetworkConfig,
   type AuthDefaults,
-} from "./config.js";
+} from "./canton-config.js";
 
 // The facilitator client is the same one merchants use — re-exported for consumers
 // that also drive verify/settle themselves.

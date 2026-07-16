@@ -126,7 +126,7 @@ describe("CantonX402Payer.authorize", () => {
     const { sdk, prepare } = mockSdk();
     await expect(
       makePayer(sdk).authorize(makeRequirements({ asset: { instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
-    ).rejects.toThrow(/no registry configured/);
+    ).rejects.toThrow(/unsupported requirement/);
     expect(prepare).not.toHaveBeenCalled();
   });
 });

@@ -7,8 +7,8 @@ import {
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
   type DisclosedContract,
-  type HashingSchemeVersion,
   type InstrumentId,
+  type NetworkId,
 } from "@chainsafe/x402-core";
 import type { SDKInterface } from "@canton-network/wallet-sdk";
 import type { X402Payer } from "./payer.js";
@@ -37,11 +37,9 @@ export interface CantonX402PayerOptions {
   /** The paying party's Ed25519 key. */
   key: CantonPartyKey;
   /** The network id this payer's `sdk` is connected to (rejects requirements for others). */
-  network: string;
+  network: NetworkId;
   /** The assets this payer supports, each with its Token Standard registry. */
   registries: AssetRegistry[];
-  /** Override the hashing scheme (defaults to what prepare returns). */
-  hashingSchemeVersion?: HashingSchemeVersion;
 }
 
 /**
@@ -69,18 +67,16 @@ export class CantonX402Payer implements X402Payer {
   }
 
   async authorize(requirements: CantonPaymentRequirements): Promise<CantonPaymentPayload> {
-    if (requirements.scheme !== EXACT_CANTON) {
-      throw new Error(`x402: unsupported scheme "${requirements.scheme}"`);
-    }
-    if (requirements.network !== this.opts.network) {
-      throw new Error(`x402: requirement network "${requirements.network}" != payer network "${this.opts.network}"`);
-    }
+    // Capability gate — supports() covers scheme + network + a configured registry.
     const registryUrl = this.registryFor(requirements.asset.instrumentId);
-    if (!registryUrl) {
+    if (!this.supports(requirements) || !registryUrl) {
+      const { id, admin } = requirements.asset.instrumentId;
       throw new Error(
-        `x402: no registry configured for asset "${requirements.asset.instrumentId.id}" (admin ${requirements.asset.instrumentId.admin})`,
+        `x402: unsupported requirement (scheme "${requirements.scheme}", network "${requirements.network}", asset "${id}" admin "${admin}")`,
       );
     }
+
+    // Per-request validity — not a capability, so checked here rather than in supports().
     if (!isValidAmount(requirements.maxAmountRequired)) {
       throw new Error(`x402: invalid amount "${requirements.maxAmountRequired}"`);
     }
@@ -123,7 +119,9 @@ export class CantonX402Payer implements X402Payer {
         disclosedContracts: disclosed.map(toDisclosedContract),
         requirementsHash: requirementsHash(requirements),
         publicKey: key.publicKey,
-        hashingSchemeVersion: this.opts.hashingSchemeVersion ?? response.hashingSchemeVersion,
+        // Must be exactly what prepare used — the signature is bound to a hash
+        // computed with this version, so the facilitator's execute must match it.
+        hashingSchemeVersion: response.hashingSchemeVersion,
       },
     };
   }
