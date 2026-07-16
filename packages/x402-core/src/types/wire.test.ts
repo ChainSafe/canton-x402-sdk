@@ -11,6 +11,9 @@ import type {
   SettleResponse,
   SupportedResponse,
   VerifyResponse,
+  X402PaymentPayload,
+  X402PaymentRequirements,
+  X402Request,
 } from "./index";
 
 // These fixtures are type-checked by `tsc --noEmit`: if a wire type's shape
@@ -66,6 +69,58 @@ describe("x402-core wire types", () => {
     expect(settleReq.paymentPayload).toBe(payload);
     expect(supported.kinds).toHaveLength(1);
     expect(paymentRequired.accepts[0]).toBe(requirements);
+  });
+
+  it("expresses a second scheme's payload/asset/extra via the generics — no casts", () => {
+    // A future EVM→Canton scheme: different inner payload, asset descriptor, and
+    // `extra` bag. It instantiates the X402* generics directly; the fact that this
+    // block type-checks (no `as`/`as unknown as`) is the acceptance criterion.
+    interface EvmInner {
+      ethereumTxHash: string;
+      quoteId: string;
+      quoteSignature: string;
+    }
+    interface EvmAsset {
+      chainId: number;
+      tokenAddress: string;
+    }
+    interface EvmExtra {
+      cantonRecipient: string;
+    }
+
+    const requirements: X402PaymentRequirements<EvmAsset, EvmExtra> = {
+      scheme: "exact-evm-to-canton-cc",
+      network: "eip155:1",
+      maxAmountRequired: "1000000",
+      asset: { chainId: 1, tokenAddress: "0xA0b8…" },
+      payTo: "merchant::1220dead",
+      resource: "/api/resource",
+      nonce: "550e8400-e29b-41d4-a716-446655440000",
+      validBefore: "2026-01-01T00:00:00.000Z",
+      extra: { cantonRecipient: "merchant::1220dead" },
+    };
+
+    const payload: X402PaymentPayload<EvmInner> = {
+      x402Version: 2,
+      scheme: "exact-evm-to-canton-cc",
+      network: "eip155:1",
+      payload: {
+        ethereumTxHash: "0xfeed",
+        quoteId: "q-1",
+        quoteSignature: "0xsig",
+      },
+    };
+
+    const request: X402Request<EvmInner, EvmAsset, EvmExtra> = {
+      x402Version: 2,
+      paymentPayload: payload,
+      paymentRequirements: requirements,
+    };
+
+    // Seams stay strongly typed on the way out — no widening to unknown.
+    expect(request.paymentPayload.payload.ethereumTxHash).toBe("0xfeed");
+    expect(request.paymentRequirements.asset.chainId).toBe(1);
+    expect(request.paymentRequirements.extra?.cantonRecipient).toBe("merchant::1220dead");
   });
 
   it("narrows the discriminated response unions", () => {

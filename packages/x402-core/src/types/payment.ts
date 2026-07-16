@@ -43,13 +43,17 @@ export interface CantonPaymentInner {
   hashingSchemeVersion: HashingSchemeVersion;
 }
 
-export interface CantonPaymentPayload {
+/**
+ * Generic x402 payment envelope. `TInner` is the scheme-specific inner payload —
+ * the whole `payload` object is the one chain-specific seam. `scheme` stays a plain
+ * string so schemes share the envelope; each scheme guards on the literal it knows.
+ */
+export interface X402PaymentPayload<TInner = CantonPaymentInner> {
   x402Version: X402Version;
-  // Widened (see CantonPaymentRequirements). Different schemes carry different
-  // inner-payload shapes; the declared type stays the exact-canton shape.
   scheme: string;
   network: NetworkId;
-  // FUTURE: the entire inner object is chain-specific → the `TInner` slot (see
-  // index header); other schemes carry their own shape without `as unknown as`.
-  payload: CantonPaymentInner;
+  payload: TInner;
 }
+
+/** exact-canton payload: the X-PAYMENT envelope carrying a {@link CantonPaymentInner}. */
+export type CantonPaymentPayload = X402PaymentPayload<CantonPaymentInner>;
