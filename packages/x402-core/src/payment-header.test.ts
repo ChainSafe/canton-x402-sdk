@@ -11,7 +11,6 @@ const payload = {
     preparedTransaction: "b",
     preparedTransactionHash: "h",
     partySignature: "s",
-    keyFingerprint: "1220x",
     requirementsHash: "rh",
   },
 } as unknown as CantonPaymentPayload;

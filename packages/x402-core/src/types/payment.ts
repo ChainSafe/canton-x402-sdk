@@ -1,4 +1,4 @@
-import type { DisclosedContract, NetworkId, X402Version } from "./common";
+import type { NetworkId, X402Version } from "./common";
 
 /**
  * Canton interactive-submission hashing-scheme versions. These are the protobuf
@@ -26,21 +26,21 @@ export interface CantonPaymentInner {
   preparedTransactionHash: string;
   /** Hex Ed25519 signature over preparedTransactionHash. */
   partySignature: string;
-  /** Hex SHA256(0x0000000c || publicKey); MUST equal payer's fingerprint suffix. */
-  keyFingerprint: string;
-  /** Disclosed contracts required by the prepared transaction. */
-  disclosedContracts: DisclosedContract[];
   /** SHA-256 of the canonical (RFC-8785) PaymentRequirements. */
   requirementsHash: string;
-  /** OPTIONAL in v0.1; required in v0.2. Base64 32-byte Ed25519 public key. */
-  publicKey?: string;
   /**
-   * Canton interactive-submission hashing scheme the wallet prepared with.
-   * The facilitator's execute MUST use the same version or Canton recomputes a
-   * different hash and rejects the signature. Per-request because it's a
-   * property of how the buyer prepared, not a facilitator global.
+   * Base64 32-byte Ed25519 public key. Required — the facilitator verifies the
+   * signature against it and derives the party fingerprint from it (the party id's
+   * `::<fingerprint>` suffix is a hash of this key).
    */
-  hashingSchemeVersion?: HashingSchemeVersion;
+  publicKey: string;
+  /**
+   * Canton interactive-submission hashing scheme the payload was prepared with.
+   * Required — the signature is bound to a hash computed with this version, so the
+   * facilitator's execute must use the same one. Omitting it and relying on a
+   * default risks a hash mismatch and a rejected signature.
+   */
+  hashingSchemeVersion: HashingSchemeVersion;
 }
 
 export interface CantonPaymentPayload {

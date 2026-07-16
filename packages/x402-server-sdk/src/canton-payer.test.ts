@@ -73,20 +73,12 @@ describe("CantonX402Payer.authorize", () => {
     expect(result).toMatchObject({ x402Version: 2, scheme: "exact-canton", network: NETWORK });
     expect(inner.payer).toBe(key.partyId);
     expect(inner.publicKey).toBe(publicKeyB64);
-    expect(inner.keyFingerprint).toBe(fingerprintForPublicKey(publicKeyB64));
     expect(inner.requirementsHash).toBe(requirementsHash(req));
     expect(inner.preparedTransaction).toBe("cHJlcGFyZWQ=");
     expect(inner.preparedTransactionHash).toBe(Buffer.from(preparedHashB64, "base64").toString("hex"));
     expect(inner.hashingSchemeVersion).toBe("HASHING_SCHEME_VERSION_V2");
     // The signature verifies with the same code the facilitator runs.
     expect(verifySignature(inner.preparedTransactionHash, inner.partySignature, publicKeyB64)).toBe(true);
-    // Disclosed contracts mapped to core's shape.
-    expect(inner.disclosedContracts[0]).toEqual({
-      templateId: "pkg:Mod:Ent",
-      contractId: "00disc",
-      createdEventBlob: "blob",
-      synchronizerId: "sync::x",
-    });
     // transfer built from the requirements.
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ sender: key.partyId, recipient: "merchant::y", amount: "1.5", instrumentId: "Amulet" }),

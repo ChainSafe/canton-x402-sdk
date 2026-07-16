@@ -1,12 +1,10 @@
 import {
-  fingerprintForPublicKey,
   isExpired,
   isValidAmount,
   requirementsHash,
   signHash,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
-  type DisclosedContract,
   type InstrumentId,
   type NetworkId,
 } from "@chainsafe/x402-core";
@@ -115,8 +113,6 @@ export class CantonX402Payer implements X402Payer {
         preparedTransaction: response.preparedTransaction,
         preparedTransactionHash,
         partySignature,
-        keyFingerprint: fingerprintForPublicKey(key.publicKey),
-        disclosedContracts: disclosed.map(toDisclosedContract),
         requirementsHash: requirementsHash(requirements),
         publicKey: key.publicKey,
         // Must be exactly what prepare used — the signature is bound to a hash
@@ -125,20 +121,6 @@ export class CantonX402Payer implements X402Payer {
       },
     };
   }
-}
-
-function toDisclosedContract(d: {
-  templateId?: string;
-  contractId?: string;
-  createdEventBlob: string;
-  synchronizerId?: string;
-}): DisclosedContract {
-  return {
-    templateId: d.templateId ?? "",
-    contractId: d.contractId ?? "",
-    createdEventBlob: d.createdEventBlob,
-    synchronizerId: d.synchronizerId ?? "",
-  };
 }
 
 function base64ToHex(b64: string): string {

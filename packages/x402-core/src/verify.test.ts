@@ -125,7 +125,6 @@ describe("shape guards + scheme/network match", () => {
     preparedTransaction: "b",
     preparedTransactionHash: "h",
     partySignature: "s",
-    keyFingerprint: "1220x",
     requirementsHash: "rh",
   };
   const payload = {

@@ -130,7 +130,6 @@ export function isCantonPaymentInner(v: unknown): v is CantonPaymentInner {
     typeof v.preparedTransaction === "string" &&
     typeof v.preparedTransactionHash === "string" &&
     typeof v.partySignature === "string" &&
-    typeof v.keyFingerprint === "string" &&
     typeof v.requirementsHash === "string"
   );
 }
