@@ -16,6 +16,9 @@ const baseOptions: PaymentRequiredOptions = {
     payTo: "merchant::x",
     asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
     amount: "0.05",
+    // Fixed resource so the rebuilt policy matches the echoed header deterministically
+    // (default is absoluteUrl(req), whose host/port vary per test run).
+    resource: "https://f.example/paid",
   },
 };
 
@@ -171,6 +174,18 @@ describe("paymentRequired", () => {
     expect(res.body.error).toBe("bad_signature");
   });
 
+  it("hands back a FRESH challenge (not the dead echoed one) on nonce_replayed", async () => {
+    stubFacilitator({ verify: { isValid: false, invalidReason: "nonce_replayed" } });
+    const res = await request(makeApp())
+      .get("/paid")
+      .set("X-PAYMENT", paymentHeader({ nonce: "dead-nonce" }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("nonce_replayed");
+    // The echoed nonce is spent; accepts[] must advertise a new one so a retrying
+    // agent isn't looped on the dead challenge.
+    expect(res.body.accepts[0].nonce).not.toBe("dead-nonce");
+  });
+
   it("settles when settle mode is enabled and sets X-PAYMENT-RESPONSE", async () => {
     const fetchMock = stubFacilitator();
     const res = await request(makeApp({ settle: true })).get("/paid").set("X-PAYMENT", paymentHeader());
@@ -194,5 +209,16 @@ describe("paymentRequired", () => {
       .set("X-PAYMENT", paymentHeader({ maxAmountRequired: "0.01" }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_underpriced");
+  });
+
+  it("rejects a payment minted for a different resource (request↔payment binding)", async () => {
+    // Same price/payTo/asset, but the payment was issued for another path — it
+    // must not be replayable against this one.
+    stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set("X-PAYMENT", paymentHeader({ resource: "https://f.example/other" }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_resource");
   });
 });

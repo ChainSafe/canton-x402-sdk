@@ -144,14 +144,18 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       const policyError = validateEchoedRequirements(requirements, fresh);
       if (policyError) throw new PaymentRejection(policyError, fresh);
 
+      // On any rejection, advertise `fresh` (this request's current terms) — never
+      // the client's echoed requirements. The echoed copy differs from `fresh` in
+      // nonce + validBefore, so returning it would hand a retrying agent back a
+      // dead challenge (a replayed/expired nonce) and trap it in a loop.
       const verify = await facilitator.verify(payload, requirements);
-      if (!verify.isValid) throw new PaymentRejection(verify.invalidReason ?? "verify_failed", requirements);
+      if (!verify.isValid) throw new PaymentRejection(verify.invalidReason ?? "verify_failed", fresh);
 
       let settleResponse: SettleResponse | undefined;
       if (settle) {
         settleResponse = await facilitator.settle(payload, requirements);
         if (!settleResponse.success) {
-          throw new PaymentRejection(settleResponse.errorReason ?? "settle_failed", requirements, settleResponse.errorDetails);
+          throw new PaymentRejection(settleResponse.errorReason ?? "settle_failed", fresh, settleResponse.errorDetails);
         }
         res.setHeader("X-PAYMENT-RESPONSE", settleResponse.transaction);
       }
@@ -211,6 +215,9 @@ function validateEchoedRequirements(
   if (echoed.scheme !== policy.scheme) return "policy_scheme";
   if (echoed.network !== policy.network) return "policy_network";
   if (echoed.payTo !== policy.payTo) return "policy_payTo";
+  // Bind the payment to THIS resource: without it, a payment minted for path A
+  // (matching price/payTo/asset) could be replayed against path B.
+  if (echoed.resource !== policy.resource) return "policy_resource";
   if (echoed.asset.instrumentId.id !== policy.asset.instrumentId.id) return "policy_asset";
   if (echoed.asset.instrumentId.admin !== policy.asset.instrumentId.admin) return "policy_asset";
   // The merchant priced this request; an echoed requirement must not undercut it.
