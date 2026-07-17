@@ -211,6 +211,19 @@ describe("paymentRequired", () => {
     expect(res.body.error).toBe("policy_underpriced");
   });
 
+  it("rejects a malformed echoed amount that would slip past the '<' check", async () => {
+    // Number("abc") is NaN and Number("Infinity") is Infinity — both make the
+    // underpricing comparison false, so the format must be validated first.
+    stubFacilitator();
+    for (const bad of ["abc", "Infinity", "1e3", " 5 "]) {
+      const res = await request(makeApp())
+        .get("/paid")
+        .set("X-PAYMENT", paymentHeader({ maxAmountRequired: bad }));
+      expect(res.status).toBe(402);
+      expect(res.body.error).toBe("policy_amount_invalid");
+    }
+  });
+
   it("rejects a payment minted for a different resource (request↔payment binding)", async () => {
     // Same price/payTo/asset, but the payment was issued for another path — it
     // must not be replayable against this one.

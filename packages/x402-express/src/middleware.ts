@@ -220,6 +220,10 @@ function validateEchoedRequirements(
   if (echoed.resource !== policy.resource) return "policy_resource";
   if (echoed.asset.instrumentId.id !== policy.asset.instrumentId.id) return "policy_asset";
   if (echoed.asset.instrumentId.admin !== policy.asset.instrumentId.admin) return "policy_asset";
+  // Validate the amount's FORMAT before comparing: Number("abc") is NaN and
+  // Number("Infinity") is Infinity, and both make the "<" test false — so a
+  // malformed amount would otherwise slip past the underpricing check.
+  if (!isValidAmount(echoed.maxAmountRequired)) return "policy_amount_invalid";
   // The merchant priced this request; an echoed requirement must not undercut it.
   if (Number(echoed.maxAmountRequired) < Number(policy.maxAmountRequired)) return "policy_underpriced";
   if (Date.parse(echoed.validBefore) <= Date.now()) return "requirements_expired";
