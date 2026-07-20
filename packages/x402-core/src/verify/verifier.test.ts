@@ -132,12 +132,30 @@ describe("exactCantonVerifier", () => {
     });
   });
 
-  it("reports missing_public_key when the key is absent", () => {
+  it("reports missing_public_key for a blank OR absent key (specific reason, not internal_error)", () => {
     const { payload, requirements } = buildSignedFixture();
-    const p = { ...payload, payload: { ...payload.payload, publicKey: "" } };
-    expect(verifier.verify(p, requirements)).toMatchObject({
+    // blank string
+    const blank = { ...payload, payload: { ...payload.payload, publicKey: "" } };
+    expect(verifier.verify(blank, requirements)).toMatchObject({
       isValid: false,
       invalidReason: "missing_public_key",
+    });
+    // entirely absent — the specific reason must survive the completed inner guard
+    const { publicKey: _omit, ...innerNoKey } = payload.payload;
+    const absent = { ...payload, payload: innerNoKey };
+    expect(verifier.verify(absent, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "missing_public_key",
+    });
+  });
+
+  it("rejects a payload missing hashingSchemeVersion (internal_error)", () => {
+    const { payload, requirements } = buildSignedFixture();
+    const { hashingSchemeVersion: _omit, ...innerNoScheme } = payload.payload;
+    const p = { ...payload, payload: innerNoScheme };
+    expect(verifier.verify(p, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "internal_error",
     });
   });
 });

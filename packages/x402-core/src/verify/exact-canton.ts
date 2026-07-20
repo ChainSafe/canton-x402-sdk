@@ -131,7 +131,9 @@ export function isCantonPaymentInner(v: unknown): v is CantonPaymentInner {
     typeof v.preparedTransaction === "string" &&
     typeof v.preparedTransactionHash === "string" &&
     typeof v.partySignature === "string" &&
-    typeof v.requirementsHash === "string"
+    typeof v.requirementsHash === "string" &&
+    typeof v.publicKey === "string" &&
+    typeof v.hashingSchemeVersion === "string"
   );
 }
 
@@ -171,22 +173,24 @@ function verifyExactCanton(
   if (payload.network !== requirements.network || payload.network !== networkId) {
     return fail("network_mismatch");
   }
-  // 3. shapes — narrow the unknown inner/requirements before reading fields. The
-  //    envelope was already scheme-matched, so a malformed body here is a
-  //    protocol error rather than a mismatch → internal_error.
-  if (!isCantonPaymentRequirements(requirements) || !isCantonPaymentInner(payload.payload)) {
+  // 3. shapes — narrow the unknown inner/requirements before reading fields.
+  if (!isCantonPaymentRequirements(requirements) || !isObj(payload.payload)) {
     return fail("internal_error");
   }
-  const inner = payload.payload;
+  const raw = payload.payload;
+  if (typeof raw.publicKey !== "string" || !raw.publicKey) {
+    return fail("missing_public_key", typeof raw.payer === "string" ? raw.payer : undefined);
+  }
+  if (!isCantonPaymentInner(raw)) return fail("internal_error");
+  const inner = raw;
   // 4. expiry
   if (isExpired(requirements.validBefore)) return fail("requirements_expired", inner.payer);
   // 5. requirementsHash binds the signed payload to this exact PaymentRequirements
   if (!requirementsHashMatches(requirements, inner.requirementsHash)) {
     return fail("requirements_hash_mismatch", inner.payer);
   }
-  // 6. public key present + well-formed (32-byte Ed25519). Malformed key bytes are
+  // 6. public key well-formed (32-byte Ed25519). Malformed key bytes are
   //    indistinguishable from "no usable key" here → missing_public_key.
-  if (!inner.publicKey) return fail("missing_public_key", inner.payer);
   let derivedFingerprint: string;
   try {
     derivedFingerprint = fingerprintForPublicKey(inner.publicKey);
