@@ -126,6 +126,8 @@ describe("shape guards + scheme/network match", () => {
     preparedTransactionHash: "h",
     partySignature: "s",
     requirementsHash: "rh",
+    publicKey: "cHVibGljS2V5",
+    hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
   };
   const payload = {
     x402Version: 2,
@@ -139,6 +141,9 @@ describe("shape guards + scheme/network match", () => {
     expect(isCantonPaymentRequirements({})).toBe(false);
     expect(isCantonPaymentInner(inner)).toBe(true);
     expect(isCantonPaymentInner({})).toBe(false);
+    // publicKey + hashingSchemeVersion are required — a payload missing either is rejected.
+    expect(isCantonPaymentInner({ ...inner, publicKey: undefined })).toBe(false);
+    expect(isCantonPaymentInner({ ...inner, hashingSchemeVersion: undefined })).toBe(false);
     expect(isCantonPaymentPayload(payload)).toBe(true);
     // Loose: accepts any non-empty scheme (per-scheme inner validated elsewhere).
     expect(
