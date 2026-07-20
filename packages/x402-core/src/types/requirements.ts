@@ -9,7 +9,10 @@ export interface X402PaymentRequirements<TAsset = AssetSpec, TExtra = Record<str
   // FUTURE: use the shared `Scheme` open union (common.ts) for autocomplete.
   scheme: string;
   network: NetworkId;
-  /** Decimal-string CC amount, up to 10 decimal places. */
+  /**
+   * Maximum amount to charge, as a decimal string denominated in `asset`.
+   * Precision is scheme-defined.
+   */
   // FUTURE: a branded `DecimalString` type would document the format at the type level.
   maxAmountRequired: string;
   /** The scheme-specific asset descriptor (the `TAsset` seam). */
