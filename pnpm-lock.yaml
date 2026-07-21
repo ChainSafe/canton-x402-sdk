@@ -38,6 +38,13 @@ importers:
       '@chainsafe/x402-core':
         specifier: workspace:*
         version: link:../x402-core
+    devDependencies:
+      tsup:
+        specifier: ^8.3.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.16)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
 
   packages/x402-core:
     devDependencies:
@@ -47,6 +54,12 @@ importers:
       '@noble/hashes':
         specifier: ^2.2.0
         version: 2.2.0
+      tsup:
+        specifier: ^8.3.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.16)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
 
   packages/x402-express:
     dependencies:
@@ -69,6 +82,12 @@ importers:
       supertest:
         specifier: ^7.0.0
         version: 7.2.2
+      tsup:
+        specifier: ^8.3.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.16)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
 
   packages/x402-server-sdk:
     dependencies:
@@ -88,6 +107,12 @@ importers:
       '@noble/hashes':
         specifier: ^2.2.0
         version: 2.2.0
+      tsup:
+        specifier: ^8.3.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.16)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
 
 packages:
 
