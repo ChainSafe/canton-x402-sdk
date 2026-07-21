@@ -1,0 +1,43 @@
+{
+  "name": "@chainsafe/x402-express",
+  "version": "0.0.1",
+  "description": "Express middleware for x402 payments on Canton — gate a route behind a Canton Coin payment, verified (and optionally settled) via a facilitator.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@chainsafe/x402-core": "workspace:*",
+    "@chainsafe/x402-client": "workspace:*"
+  },
+  "peerDependencies": {
+    "express": "^4 || ^5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/supertest": "^6.0.0",
+    "express": "^5.0.0",
+    "supertest": "^7.0.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  }
+}

@@ -6,6 +6,7 @@
 export * from "./types";
 export * from "./verify";
 export * from "./networks";
+export * from "./payment-header";
 // Public hashing API is the typed requirementsHash; canonicalJson stays a
 // package-internal helper (general RFC-8785 canonicalizer over `unknown`).
 export { requirementsHash } from "./hashing";
