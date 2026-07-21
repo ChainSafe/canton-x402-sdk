@@ -78,13 +78,32 @@ describe("FacilitatorClient", () => {
     expect(res).toMatchObject({ success: true, transaction: "upd1" });
   });
 
-  it("sends the api key as a bearer header from an async getter", async () => {
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => json({ kinds: [] }));
+  it("verify sends the api key as a bearer header (async getter)", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => json({ isValid: true, payer: "p" }));
     vi.stubGlobal("fetch", fetchMock);
     const client = new FacilitatorClient("https://f.example", { apiKey: async () => "tok-123" });
+    await client.verify(payload, requirements);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://f.example/v2/verify");
+    expect(init?.headers).toMatchObject({ Authorization: "Bearer tok-123" });
+  });
+
+  it("verify omits Authorization when no api key is set", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => json({ isValid: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FacilitatorClient("https://f.example"); // no opts
+    await client.verify(payload, requirements);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init?.headers).not.toHaveProperty("Authorization");
+  });
+
+  it("supported never sends an Authorization header, even with an api key", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => json({ kinds: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FacilitatorClient("https://f.example", { apiKey: "tok-123" });
     await client.supported();
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://f.example/v2/supported");
-    expect(init?.headers).toMatchObject({ Authorization: "Bearer tok-123" });
+    expect(init?.headers).not.toHaveProperty("Authorization");
   });
 });
