@@ -15,6 +15,7 @@ import {
   isCantonPaymentInner,
   isCantonPaymentPayload,
   isVerifyRequest,
+  signHash,
 } from "./verify";
 import type { CantonPaymentPayload, CantonPaymentRequirements } from "./index";
 
