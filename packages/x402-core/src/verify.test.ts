@@ -6,7 +6,6 @@ import {
   fingerprintForPublicKey,
   matchesFingerprint,
   verifySignature,
-  signHash,
   isValidAmount,
   isExpired,
   schemeNetworkMatches,
