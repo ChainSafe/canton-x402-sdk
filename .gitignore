@@ -3,6 +3,12 @@ node_modules/
 
 # Build output
 dist/
+# Exception: package dist IS committed — it's shipped for git-dependency installs
+# (consumers fetch the prebuilt package over git; there is no build-on-install).
+!packages/*/dist/
+!packages/*/dist/**
+# but not the sourcemaps — bloat, and useless in a prebuilt shipped dep
+packages/*/dist/*.map
 coverage/
 *.tsbuildinfo
 

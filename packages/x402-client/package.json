@@ -32,7 +32,6 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit",
-    "prepare": "tsup"
+    "typecheck": "tsc --noEmit"
   }
 }
