@@ -105,8 +105,8 @@ interface X402Payer {
   transfer factory via the registry);
 - prepares it (`sdk.ledger.prepare` — interactive submission) to get the hash;
 - Ed25519-signs the hash with the party key (`x402-core`'s `signHash`);
-- assembles the payload (`requirementsHash` + `keyFingerprint` from core, always
-  emits `publicKey`), **without executing** — the facilitator does that.
+- assembles the payload (`requirementsHash`, required `publicKey`, required `hashingSchemeVersion`)
+  **without executing** — facilitator derives fingerprint from `publicKey` (`fingerprintForPublicKey`; no `keyFingerprint` on the wire).
 
 `CantonX402Payer` is stateless: double-settle is prevented by the facilitator (it
 rejects a reused `nonce`) and Canton (it dedupes execute by a submissionId derived
