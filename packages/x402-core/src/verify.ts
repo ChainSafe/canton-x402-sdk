@@ -1,4 +1,4 @@
-import { verify as ed25519Verify, hashes as ed25519Hashes } from "@noble/ed25519";
+import { sign as ed25519Sign, verify as ed25519Verify, hashes as ed25519Hashes } from "@noble/ed25519";
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import type { NetworkId } from "./types/common";
@@ -57,6 +57,18 @@ export function verifySignature(
   } catch {
     return false;
   }
+}
+
+/**
+ * Ed25519-sign a prepared-transaction hash (hex) with a base64 32-byte seed,
+ * returning the signature as hex. Counterpart to {@link verifySignature} — the
+ * signature it produces is exactly what `verifySignature` (and the facilitator)
+ * accept.
+ */
+export function signHash(hashHex: string, privateKeyBase64: string): string {
+  const seed = base64ToBytes(privateKeyBase64);
+  if (seed.length !== 32) throw new Error("ed25519 private key must be a 32-byte seed");
+  return bytesToHex(ed25519Sign(hexToBytes(hashHex), seed));
 }
 
 /** Decimal string with up to 10 fractional places (matches `maxAmountRequired`). */
@@ -118,8 +130,9 @@ export function isCantonPaymentInner(v: unknown): v is CantonPaymentInner {
     typeof v.preparedTransaction === "string" &&
     typeof v.preparedTransactionHash === "string" &&
     typeof v.partySignature === "string" &&
-    typeof v.keyFingerprint === "string" &&
-    typeof v.requirementsHash === "string"
+    typeof v.requirementsHash === "string" &&
+    typeof v.publicKey === "string" &&
+    typeof v.hashingSchemeVersion === "string"
   );
 }
 

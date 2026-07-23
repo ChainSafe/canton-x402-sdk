@@ -38,17 +38,6 @@ describe("x402-core wire types", () => {
         preparedTransaction: "cHJlcGFyZWQ=",
         preparedTransactionHash: "deadbeef",
         partySignature: "cafe",
-        keyFingerprint: "1220beef",
-        transferFactoryId: "00factory",
-        choiceContext: {},
-        disclosedContracts: [
-          {
-            templateId: "pkg:Mod:Ent",
-            contractId: "00abc",
-            createdEventBlob: "YmxvYg==",
-            synchronizerId: "global-domain::1220be58c29e",
-          },
-        ],
         requirementsHash: "0f1e2d",
         publicKey: "cHVibGljS2V5",
         hashingSchemeVersion: HashingSchemeVersion.V2,

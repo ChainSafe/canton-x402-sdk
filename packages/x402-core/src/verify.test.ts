@@ -15,6 +15,7 @@ import {
   isCantonPaymentInner,
   isCantonPaymentPayload,
   isVerifyRequest,
+  signHash,
 } from "./verify";
 import type { CantonPaymentPayload, CantonPaymentRequirements } from "./index";
 
@@ -60,6 +61,20 @@ describe("verifySignature", () => {
   it("rejects malformed lengths without throwing", () => {
     expect(verifySignature(hashHex, "abcd", pubB64)).toBe(false);
     expect(verifySignature(hashHex, sigHex, btoa("short"))).toBe(false);
+  });
+});
+
+describe("signHash", () => {
+  const priv = new Uint8Array(32).fill(7);
+  const pub = getPublicKey(priv);
+  const hashHex = bytesToHex(new Uint8Array(32).fill(9));
+
+  it("produces a signature that verifySignature accepts (round-trip)", () => {
+    const sig = signHash(hashHex, toB64(priv));
+    expect(verifySignature(hashHex, sig, toB64(pub))).toBe(true);
+  });
+  it("throws on a non-32-byte seed", () => {
+    expect(() => signHash(hashHex, btoa("short"))).toThrow(/32-byte seed/);
   });
 });
 
@@ -110,8 +125,9 @@ describe("shape guards + scheme/network match", () => {
     preparedTransaction: "b",
     preparedTransactionHash: "h",
     partySignature: "s",
-    keyFingerprint: "1220x",
     requirementsHash: "rh",
+    publicKey: "cHVibGljS2V5",
+    hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
   };
   const payload = {
     x402Version: 2,
@@ -125,6 +141,9 @@ describe("shape guards + scheme/network match", () => {
     expect(isCantonPaymentRequirements({})).toBe(false);
     expect(isCantonPaymentInner(inner)).toBe(true);
     expect(isCantonPaymentInner({})).toBe(false);
+    // publicKey + hashingSchemeVersion are required — a payload missing either is rejected.
+    expect(isCantonPaymentInner({ ...inner, publicKey: undefined })).toBe(false);
+    expect(isCantonPaymentInner({ ...inner, hashingSchemeVersion: undefined })).toBe(false);
     expect(isCantonPaymentPayload(payload)).toBe(true);
     // Loose: accepts any non-empty scheme (per-scheme inner validated elsewhere).
     expect(
