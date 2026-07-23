@@ -7,6 +7,7 @@
 export const VERSION = "0.0.1";
 
 export { type X402Payer } from "./payer.js";
+export { createX402Fetch, type X402FetchOptions, type X402Selection, type FetchLike } from "./fetch.js";
 export {
   CantonX402Payer,
   type CantonX402PayerOptions,

@@ -112,6 +112,31 @@ interface X402Payer {
 rejects a reused `nonce`) and Canton (it dedupes execute by a submissionId derived
 from the prepared-tx hash), so the payer doesn't track in-flight requests.
 
+## Auto-pay fetch
+
+`createX402Fetch(payer)` wraps `fetch` so payments are transparent: it calls the
+resource, and on a `402` reads the accepted requirements, pays via the payer, and
+retries with the `X-PAYMENT` header. Non-402 responses — and 402s the payer can't
+satisfy — pass through unchanged.
+
+```ts
+import { createX402Fetch } from "@chainsafe/x402-server-sdk";
+
+const f = createX402Fetch(payer);                    // one payer
+// const f = createX402Fetch([cantonPayer, evmPayer]); // or several
+const res = await f("https://api.example/paid");     // 402 → pay → retry, transparently
+```
+
+Accepts **one payer or several**. With several, each advertised requirement routes to
+the first payer that `supports()` it (server `accepts[]` order wins) — so a mixed-scheme
+offer (e.g. Canton + EVM) is paid by the right payer. Options: `select(accepts, payers)`
+to override the routing, and `fetch` to wrap a custom fetch. Depends only on the
+`X402Payer` contract, so it's scheme-agnostic.
+
+Works for any HTTP method. The paid request is **retried**, so a request body must be
+re-readable — a value like a string, JSON, `Buffer`, or `URLSearchParams`, not a
+`ReadableStream` (and don't pass a `Request` object whose body the first call consumes).
+
 ## Config presets
 
 `localnetConfig` / `devnetConfig` / `mainnetConfig` return `{ network, ledgerClientUrl, auth }`
