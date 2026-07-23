@@ -19,7 +19,8 @@ import type {
 } from "../types/facilitator";
 import type { X402PaymentPayload } from "../types/payment";
 import type { X402PaymentRequirements } from "../types/requirements";
-import { isExpired, requirementsHashMatches } from "./common";
+import { amountGte, isExpired, requirementsHashMatches } from "./common";
+import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 
 // @noble/ed25519 v3 needs sha512 wired (same as the facilitator's wallet.ts).
 ed25519Hashes.sha512 = sha512;
@@ -207,7 +208,42 @@ function verifyExactCanton(
   if (!verifySignature(inner.preparedTransactionHash, inner.partySignature, inner.publicKey)) {
     return fail("bad_signature", inner.payer);
   }
+  // 9. the signed transfer must actually move what the requirements demand.
+  //    requirementsHash proves the payload *references* these requirements;
+  //    only decoding the prepared transaction proves it *satisfies* them —
+  //    binding sender/receiver/instrument/amount so a valid signature over a
+  //    divergent transfer (e.g. to another party, or a smaller amount) is rejected.
+  const transfer = decodePreparedTransaction(inner.preparedTransaction);
+  if (!transfer) {
+    return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: "undecodable" } };
+  }
+  const mismatch = findTransferMismatch(transfer, requirements, inner.payer);
+  if (mismatch) {
+    return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: mismatch } };
+  }
   return { isValid: true, payer: inner.payer };
+}
+
+/**
+ * Check a decoded transfer against the requirements. Returns `null` when the
+ * transfer satisfies them, or a short field detail (`"sender" | "receiver" |
+ * "instrument" | "amount"`) naming the first divergence — surfaced in the
+ * `transfer_mismatch` response's `extensions.detail`. Overpayment is allowed
+ * (`amount >= maxAmountRequired`); the amount compare is decimal-safe.
+ */
+export function findTransferMismatch(
+  transfer: DecodedTransfer,
+  requirements: CantonPaymentRequirements,
+  payer: string,
+): "sender" | "receiver" | "instrument" | "amount" | null {
+  if (transfer.sender !== payer) return "sender";
+  if (transfer.receiver !== requirements.payTo) return "receiver";
+  const want = requirements.asset.instrumentId;
+  if (transfer.instrumentId.id !== want.id || transfer.instrumentId.admin !== want.admin) {
+    return "instrument";
+  }
+  if (!amountGte(transfer.amount, requirements.maxAmountRequired)) return "amount";
+  return null;
 }
 
 /**

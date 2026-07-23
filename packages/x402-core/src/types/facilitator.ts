@@ -59,6 +59,7 @@ export type VerifyInvalidReason =
   | "bad_signature"
   | "nonce_replayed"
   | "missing_public_key"
+  | "transfer_mismatch"
   | "internal_error";
 
 export interface VerifyResponseValid {

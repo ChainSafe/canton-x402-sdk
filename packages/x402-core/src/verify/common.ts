@@ -16,6 +16,21 @@ export function isValidAmount(amount: string): boolean {
   return /^\d+(\.\d{1,10})?$/.test(amount);
 }
 
+/**
+ * Decimal-safe `a >= b` for x402 amount strings (non-negative, ≤10dp). Compares
+ * via integer scaling with BigInt — no float rounding. Returns false if either
+ * string is not a valid amount, so a malformed input never reads as "enough".
+ */
+export function amountGte(a: string, b: string): boolean {
+  if (!isValidAmount(a) || !isValidAmount(b)) return false;
+  const [ai, af = ""] = a.split(".");
+  const [bi, bf = ""] = b.split(".");
+  const scale = Math.max(af.length, bf.length);
+  const an = BigInt(ai + af.padEnd(scale, "0"));
+  const bn = BigInt(bi + bf.padEnd(scale, "0"));
+  return an >= bn;
+}
+
 /** True iff `validBefore` (ISO 8601) is unparseable or at/before `now` (expired). */
 export function isExpired(validBefore: string, now: number = Date.now()): boolean {
   const t = Date.parse(validBefore);
