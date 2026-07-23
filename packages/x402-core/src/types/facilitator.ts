@@ -1,18 +1,24 @@
-import type { NetworkId, X402Version } from "./common";
-import type { CantonPaymentPayload } from "./payment";
-import type { CantonPaymentRequirements } from "./requirements";
+import type { AssetSpec, NetworkId, X402Version } from "./common";
+import type { CantonPaymentInner, X402PaymentPayload } from "./payment";
+import type { X402PaymentRequirements } from "./requirements";
 
 /**
- * Shared request body for POST /v2/verify and /v2/settle. The two operations
- * take the identical envelope, so `SettleRequest` is an alias of `VerifyRequest`.
+ * Generic request body for POST /v2/verify and /v2/settle — payload + requirements,
+ * parameterized by the same scheme seams. The two operations take the identical
+ * envelope, so `SettleRequest` aliases `VerifyRequest`.
  */
-export interface VerifyRequest {
+export interface X402Request<
+  TInner = CantonPaymentInner,
+  TAsset = AssetSpec,
+  TExtra = Record<string, unknown>,
+> {
   x402Version: X402Version;
-  // FUTURE: parameterize as `X402Request<TInner, TAsset, TExtra>` (see index header).
-  paymentPayload: CantonPaymentPayload;
-  paymentRequirements: CantonPaymentRequirements;
+  paymentPayload: X402PaymentPayload<TInner>;
+  paymentRequirements: X402PaymentRequirements<TAsset, TExtra>;
 }
 
+/** exact-canton verify/settle request. */
+export type VerifyRequest = X402Request;
 export type SettleRequest = VerifyRequest;
 
 // FUTURE: appending `| (string & {})` to the reason unions below would let a

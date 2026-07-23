@@ -1,20 +1,23 @@
 import type { AssetSpec, NetworkId, X402Version } from "./common";
 
 /**
- * PaymentRequirements — sent by the merchant in the 402 response's accepts[].
+ * Generic PaymentRequirements — the merchant's 402 offer. The scheme-specific seams
+ * are `TAsset` (the asset descriptor) and `TExtra` (the scheme's `extra` bag); every
+ * other field is shared. `scheme` stays a plain string so schemes share the envelope.
  */
-export interface CantonPaymentRequirements {
-  // Widened from the literal `"exact-canton"` so additional schemes can share
-  // the envelope. Each scheme guards on the literal it recognises.
+export interface X402PaymentRequirements<TAsset = AssetSpec, TExtra = Record<string, unknown>> {
   // FUTURE: use the shared `Scheme` open union (common.ts) for autocomplete.
   scheme: string;
   network: NetworkId;
-  /** Decimal-string CC amount, up to 10 decimal places. */
+  /**
+   * Maximum amount to charge, as a decimal string denominated in `asset`.
+   * Precision is scheme-defined.
+   */
   // FUTURE: a branded `DecimalString` type would document the format at the type level.
   maxAmountRequired: string;
-  // FUTURE: the ONLY chain-specific field here — becomes the `TAsset` slot (see index header).
-  asset: AssetSpec;
-  /** Recipient Canton party ID. */
+  /** The scheme-specific asset descriptor (the `TAsset` seam). */
+  asset: TAsset;
+  /** Recipient party ID. */
   payTo: string;
   /** Resource URL the wallet is paying for. */
   resource: string;
@@ -24,21 +27,30 @@ export interface CantonPaymentRequirements {
   /** ISO 8601 timestamp; facilitator rejects /settle after this. */
   validBefore: string;
   maxTimeoutSeconds?: number;
-  // FUTURE: scheme-specific shape → the `TExtra` slot (see index header); e.g. the
-  // bridge's `cantonRecipient` instead of an untyped bag.
-  extra?: Record<string, unknown>;
+  /** Scheme-specific extra (the `TExtra` seam), e.g. the bridge's `cantonRecipient`. */
+  extra?: TExtra;
 }
+
+/** exact-canton requirements: a Splice {@link AssetSpec}, sent in the 402's accepts[]. */
+export type CantonPaymentRequirements = X402PaymentRequirements<AssetSpec>;
 
 /**
  * The `402 Payment Required` response body — returned by the merchant/resource
  * server, listing the payment options the client may satisfy. The client picks
  * one of `accepts[]`, pays it, and retries the request with the `X-PAYMENT`
  * header. Produced by the merchant middleware; parsed by the auto-pay client.
+ *
+ * Generic over the `accepts[]` element (`TRequirements`) so a mixed-scheme offer
+ * (e.g. exact-canton + a bridge scheme) is expressible as a union; every other
+ * field is shared. `CantonPaymentRequiredResponse` binds it to the Canton scheme.
  */
-export interface PaymentRequiredResponse {
+export interface X402PaymentRequiredResponse<TRequirements = CantonPaymentRequirements> {
   x402Version: X402Version;
   /** Payment options; the client satisfies exactly one of them. */
-  accepts: CantonPaymentRequirements[];
+  accepts: TRequirements[];
   /** Optional machine-readable reason, e.g. "payment_required". */
   error?: string;
 }
+
+/** exact-canton 402 response: `accepts[]` of {@link CantonPaymentRequirements}. */
+export type CantonPaymentRequiredResponse = X402PaymentRequiredResponse<CantonPaymentRequirements>;
