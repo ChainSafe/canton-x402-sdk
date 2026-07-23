@@ -1,13 +1,13 @@
-import type { AssetSpec, NetworkId, X402Version } from "./common";
+import type { AssetSpec, NetworkId, Scheme, X402Version } from "./common";
 
 /**
  * Generic PaymentRequirements — the merchant's 402 offer. The scheme-specific seams
  * are `TAsset` (the asset descriptor) and `TExtra` (the scheme's `extra` bag); every
- * other field is shared. `scheme` stays a plain string so schemes share the envelope.
+ * other field is shared. `scheme` is the open {@link Scheme} union so schemes share
+ * the envelope.
  */
 export interface X402PaymentRequirements<TAsset = AssetSpec, TExtra = Record<string, unknown>> {
-  // FUTURE: use the shared `Scheme` open union (common.ts) for autocomplete.
-  scheme: string;
+  scheme: Scheme;
   network: NetworkId;
   /**
    * Maximum amount to charge, as a decimal string denominated in `asset`.

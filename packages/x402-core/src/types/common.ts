@@ -20,10 +20,15 @@ export type X402Version = 2;
  */
 export type NetworkId = string;
 
-// FUTURE: introduce a shared open union so known schemes autocomplete while the
-// envelope stays extensible, e.g.
-//   export type Scheme = "exact-canton" | "batch-settlement-canton" | (string & {});
-// Then use `Scheme` for the `scheme` fields (requirements/payload/supported).
+/**
+ * Payment scheme identifier. Open union: the literal members are the schemes
+ * *this package* defines (today just `exact-canton`), so they autocomplete and a
+ * typo is caught; the `(string & {})` tail keeps the envelope extensible, so a
+ * scheme defined elsewhere (e.g. the facilitator's `batch-settlement-canton` /
+ * `exact-evm-to-canton-cc`) is still assignable. Add a literal here when core
+ * itself ships a verifier for that scheme.
+ */
+export type Scheme = "exact-canton" | (string & {});
 
 /** Splice Token Standard instrument identifier. */
 export interface InstrumentId {

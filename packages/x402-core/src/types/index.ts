@@ -19,7 +19,8 @@
 // — no `as unknown as` casts. Defaults = the Canton types, so call sites using the
 // aliases (and `X402*` without args) are unchanged.
 //
-// Still pending (markers inline): `scheme` open union; reason-union open-vs-closed.
+// Still pending (markers inline): reason-union open-vs-closed; branded DecimalString;
+// per-scheme `CantonNetworkId` narrowing (needs a TNetwork seam).
 
 export * from "./common";
 export * from "./requirements";

@@ -11,7 +11,6 @@ const payload = {
     preparedTransaction: "b",
     preparedTransactionHash: "h",
     partySignature: "s",
-    keyFingerprint: "1220x",
     requirementsHash: "rh",
   },
 } as unknown as CantonPaymentPayload;
@@ -58,6 +57,6 @@ describe("X-PAYMENT codec", () => {
 
   it("throws on a well-formed JSON that is not a payment envelope", () => {
     const wrong = btoa(JSON.stringify({ x402Version: 1, hello: "world" }));
-    expect(() => decodePaymentHeader(wrong)).toThrow(/did not decode to a CantonPaymentPayload/);
+    expect(() => decodePaymentHeader(wrong)).toThrow(/did not decode to an x402 payment payload/);
   });
 });

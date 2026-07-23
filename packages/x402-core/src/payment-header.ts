@@ -23,7 +23,7 @@
 // Isomorphic on purpose (browser + node): base64 via btoa/atob, UTF-8 via
 // TextEncoder/TextDecoder — no Node Buffer.
 
-import { isCantonPaymentPayload } from "./verify";
+import { isX402PaymentPayload } from "./verify";
 import type { CantonPaymentPayload } from "./types/payment";
 import type { CantonPaymentRequirements } from "./types/requirements";
 
@@ -63,8 +63,8 @@ export function decodePaymentHeader(headerValue: string): DecodedPaymentHeader {
   } catch (err) {
     throw new Error(`X-PAYMENT is not valid JSON: ${errMsg(err)}`);
   }
-  if (!isCantonPaymentPayload(parsed)) {
-    throw new Error("X-PAYMENT did not decode to a CantonPaymentPayload (check scheme/x402Version/payload)");
+  if (!isX402PaymentPayload(parsed)) {
+    throw new Error("X-PAYMENT did not decode to an x402 payment payload (check scheme/x402Version/payload)");
   }
   const { paymentRequirements, ...payload } = parsed as CantonPaymentPayload & {
     paymentRequirements?: CantonPaymentRequirements;
