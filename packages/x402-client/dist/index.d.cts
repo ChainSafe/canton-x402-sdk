@@ -2,11 +2,12 @@ import { CantonPaymentPayload, CantonPaymentRequirements, VerifyResponse, Settle
 
 interface FacilitatorClientOptions {
     /**
-     * API key identifying the caller to the facilitator's /v2/verify and /v2/settle
-     * (a hosted facilitator matches its sha256 against a registered merchant). Sent
-     * as `Authorization: Bearer <apiKey>`. A string or an async getter.
+     * Optional API key for the facilitator's authenticated endpoints (`/v2/verify`,
+     * `/v2/settle`). When set, it's sent as `Authorization: Bearer <apiKey>` on those
+     * requests; `/v2/supported` is unauthenticated and never receives it. A string or
+     * an async getter.
      */
-    apiKey: string | (() => string | Promise<string>);
+    apiKey?: string | (() => string | Promise<string>);
     /** Abort a request that exceeds this many ms. Omit for no timeout. */
     timeoutMs?: number;
 }
@@ -44,9 +45,9 @@ declare class FacilitatorClient {
     private readonly base;
     /**
      * @param facilitatorUrl Base URL of the facilitator; a trailing slash is trimmed.
-     * @param opts Required API key, plus an optional request timeout.
+     * @param opts Optional API key + request timeout.
      */
-    constructor(facilitatorUrl: string, opts: FacilitatorClientOptions);
+    constructor(facilitatorUrl: string, opts?: FacilitatorClientOptions);
     /**
      * POST /v2/verify — dry-run validation without settling. Resolves with the
      * verdict (`isValid` true or false); throws {@link FacilitatorError} only on a
@@ -59,7 +60,7 @@ declare class FacilitatorClient {
      * protocol/transport error.
      */
     settle(payload: CantonPaymentPayload, requirements: CantonPaymentRequirements): Promise<SettleResponse>;
-    /** GET /v2/supported — the (scheme, network) kinds this facilitator accepts. */
+    /** GET /v2/supported — the (scheme, network) kinds this facilitator accepts. Unauthenticated. */
     supported(): Promise<SupportedResponse>;
     /**
      * Shared POST path for verify/settle: send the envelope and return the domain
@@ -74,7 +75,7 @@ declare class FacilitatorClient {
     private request;
     /** Build a {@link FacilitatorError} from a non-domain response (parsed body preferred over raw text). */
     private error;
-    /** Resolve the configured API key (static or async) into an `Authorization` header. */
+    /** Resolve the configured API key (static or async) into an `Authorization` header, if any. */
     private authHeaders;
 }
 

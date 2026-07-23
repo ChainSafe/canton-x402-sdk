@@ -38,12 +38,12 @@ function paymentRequired(options) {
       const policyError = validateEchoedRequirements(requirements, fresh);
       if (policyError) throw new PaymentRejection(policyError, fresh);
       const verify = await facilitator.verify(payload, requirements);
-      if (!verify.isValid) throw new PaymentRejection(verify.invalidReason ?? "verify_failed", requirements);
+      if (!verify.isValid) throw new PaymentRejection(verify.invalidReason ?? "verify_failed", fresh);
       let settleResponse;
       if (settle) {
         settleResponse = await facilitator.settle(payload, requirements);
         if (!settleResponse.success) {
-          throw new PaymentRejection(settleResponse.errorReason ?? "settle_failed", requirements, settleResponse.errorDetails);
+          throw new PaymentRejection(settleResponse.errorReason ?? "settle_failed", fresh, settleResponse.errorDetails);
         }
         res.setHeader("X-PAYMENT-RESPONSE", settleResponse.transaction);
       }
@@ -87,8 +87,10 @@ function validateEchoedRequirements(echoed, policy) {
   if (echoed.scheme !== policy.scheme) return "policy_scheme";
   if (echoed.network !== policy.network) return "policy_network";
   if (echoed.payTo !== policy.payTo) return "policy_payTo";
+  if (echoed.resource !== policy.resource) return "policy_resource";
   if (echoed.asset.instrumentId.id !== policy.asset.instrumentId.id) return "policy_asset";
   if (echoed.asset.instrumentId.admin !== policy.asset.instrumentId.admin) return "policy_asset";
+  if (!isValidAmount(echoed.maxAmountRequired)) return "policy_amount_invalid";
   if (Number(echoed.maxAmountRequired) < Number(policy.maxAmountRequired)) return "policy_underpriced";
   if (Date.parse(echoed.validBefore) <= Date.now()) return "requirements_expired";
   return null;

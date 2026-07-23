@@ -44,9 +44,9 @@ var FacilitatorError = class extends Error {
 var FacilitatorClient = class {
   /**
    * @param facilitatorUrl Base URL of the facilitator; a trailing slash is trimmed.
-   * @param opts Required API key, plus an optional request timeout.
+   * @param opts Optional API key + request timeout.
    */
-  constructor(facilitatorUrl, opts) {
+  constructor(facilitatorUrl, opts = {}) {
     this.opts = opts;
     this.base = facilitatorUrl.replace(/\/$/, "");
   }
@@ -68,9 +68,9 @@ var FacilitatorClient = class {
   settle(payload, requirements) {
     return this.postDomain("/v2/settle", envelope(payload, requirements));
   }
-  /** GET /v2/supported — the (scheme, network) kinds this facilitator accepts. */
+  /** GET /v2/supported — the (scheme, network) kinds this facilitator accepts. Unauthenticated. */
   async supported() {
-    const res = await this.request("/v2/supported", "GET");
+    const res = await this.request("/v2/supported", "GET", void 0, false);
     if (res.ok && res.parsed !== void 0) return res.parsed;
     throw this.error("/v2/supported", res);
   }
@@ -88,8 +88,8 @@ var FacilitatorClient = class {
    * Every failure mode — no response, a failed body read — is converted into a
    * {@link FacilitatorError}, so callers never see a raw fetch rejection.
    */
-  async request(path, method, jsonBody) {
-    const headers = await this.authHeaders();
+  async request(path, method, jsonBody, sendAuth = true) {
+    const headers = sendAuth ? await this.authHeaders() : {};
     if (jsonBody !== void 0) headers["Content-Type"] = "application/json";
     let res;
     try {
@@ -126,11 +126,11 @@ var FacilitatorClient = class {
   error(path, res) {
     return new FacilitatorError(path, res.status, res.parsed ?? res.text, res.retryAfter);
   }
-  /** Resolve the configured API key (static or async) into an `Authorization` header. */
+  /** Resolve the configured API key (static or async) into an `Authorization` header, if any. */
   async authHeaders() {
     const { apiKey } = this.opts;
     const resolved = typeof apiKey === "function" ? await apiKey() : apiKey;
-    return { Authorization: `Bearer ${resolved}` };
+    return resolved ? { Authorization: `Bearer ${resolved}` } : {};
   }
 };
 function parseRetryAfter(value) {

@@ -9,11 +9,12 @@ import type {
 
 export interface FacilitatorClientOptions {
   /**
-   * API key identifying the caller to the facilitator's /v2/verify and /v2/settle
-   * (a hosted facilitator matches its sha256 against a registered merchant). Sent
-   * as `Authorization: Bearer <apiKey>`. A string or an async getter.
+   * Optional API key for the facilitator's authenticated endpoints (`/v2/verify`,
+   * `/v2/settle`). When set, it's sent as `Authorization: Bearer <apiKey>` on those
+   * requests; `/v2/supported` is unauthenticated and never receives it. A string or
+   * an async getter.
    */
-  apiKey: string | (() => string | Promise<string>);
+  apiKey?: string | (() => string | Promise<string>);
   /** Abort a request that exceeds this many ms. Omit for no timeout. */
   timeoutMs?: number;
 }
@@ -56,11 +57,11 @@ export class FacilitatorClient {
 
   /**
    * @param facilitatorUrl Base URL of the facilitator; a trailing slash is trimmed.
-   * @param opts Required API key, plus an optional request timeout.
+   * @param opts Optional API key + request timeout.
    */
   constructor(
     facilitatorUrl: string,
-    private readonly opts: FacilitatorClientOptions,
+    private readonly opts: FacilitatorClientOptions = {},
   ) {
     this.base = facilitatorUrl.replace(/\/$/, "");
   }
@@ -89,9 +90,9 @@ export class FacilitatorClient {
     return this.postDomain<SettleResponse>("/v2/settle", envelope(payload, requirements));
   }
 
-  /** GET /v2/supported — the (scheme, network) kinds this facilitator accepts. */
+  /** GET /v2/supported — the (scheme, network) kinds this facilitator accepts. Unauthenticated. */
   async supported(): Promise<SupportedResponse> {
-    const res = await this.request("/v2/supported", "GET");
+    const res = await this.request("/v2/supported", "GET", undefined, false);
     if (res.ok && res.parsed !== undefined) return res.parsed as SupportedResponse;
     throw this.error("/v2/supported", res);
   }
@@ -115,8 +116,13 @@ export class FacilitatorClient {
    * Every failure mode — no response, a failed body read — is converted into a
    * {@link FacilitatorError}, so callers never see a raw fetch rejection.
    */
-  private async request(path: string, method: string, jsonBody?: string): Promise<RawResponse> {
-    const headers: Record<string, string> = await this.authHeaders();
+  private async request(
+    path: string,
+    method: string,
+    jsonBody?: string,
+    sendAuth = true,
+  ): Promise<RawResponse> {
+    const headers: Record<string, string> = sendAuth ? await this.authHeaders() : {};
     if (jsonBody !== undefined) headers["Content-Type"] = "application/json";
     let res: Response;
     try {
@@ -159,11 +165,11 @@ export class FacilitatorClient {
     return new FacilitatorError(path, res.status, res.parsed ?? res.text, res.retryAfter);
   }
 
-  /** Resolve the configured API key (static or async) into an `Authorization` header. */
+  /** Resolve the configured API key (static or async) into an `Authorization` header, if any. */
   private async authHeaders(): Promise<Record<string, string>> {
     const { apiKey } = this.opts;
     const resolved = typeof apiKey === "function" ? await apiKey() : apiKey;
-    return { Authorization: `Bearer ${resolved}` };
+    return resolved ? { Authorization: `Bearer ${resolved}` } : {};
   }
 }
 

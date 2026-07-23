@@ -55,7 +55,10 @@ interface DisclosedContract {
 interface X402PaymentRequirements<TAsset = AssetSpec, TExtra = Record<string, unknown>> {
     scheme: Scheme;
     network: NetworkId;
-    /** Decimal-string CC amount, up to 10 decimal places. */
+    /**
+     * Maximum amount to charge, as a decimal string denominated in `asset`.
+     * Precision is scheme-defined.
+     */
     maxAmountRequired: string;
     /** The scheme-specific asset descriptor (the `TAsset` seam). */
     asset: TAsset;
@@ -79,14 +82,20 @@ type CantonPaymentRequirements = X402PaymentRequirements<AssetSpec>;
  * server, listing the payment options the client may satisfy. The client picks
  * one of `accepts[]`, pays it, and retries the request with the `X-PAYMENT`
  * header. Produced by the merchant middleware; parsed by the auto-pay client.
+ *
+ * Generic over the `accepts[]` element (`TRequirements`) so a mixed-scheme offer
+ * (e.g. exact-canton + a bridge scheme) is expressible as a union; every other
+ * field is shared. `CantonPaymentRequiredResponse` binds it to the Canton scheme.
  */
-interface PaymentRequiredResponse {
+interface X402PaymentRequiredResponse<TRequirements = CantonPaymentRequirements> {
     x402Version: X402Version;
     /** Payment options; the client satisfies exactly one of them. */
-    accepts: CantonPaymentRequirements[];
+    accepts: TRequirements[];
     /** Optional machine-readable reason, e.g. "payment_required". */
     error?: string;
 }
+/** exact-canton 402 response: `accepts[]` of {@link CantonPaymentRequirements}. */
+type CantonPaymentRequiredResponse = X402PaymentRequiredResponse<CantonPaymentRequirements>;
 
 /**
  * Canton interactive-submission hashing-scheme versions. These are the protobuf
@@ -368,4 +377,4 @@ declare function decodePaymentHeader(headerValue: string): DecodedPaymentHeader;
  */
 declare function requirementsHash(requirements: X402PaymentRequirements<unknown>): string;
 
-export { type AssetSpec, type CantonPaymentInner, type CantonPaymentObject, type CantonPaymentObjectRequest, type CantonPaymentObjectResponse, type CantonPaymentPayload, type CantonPaymentRequirements, DEVNET_DSO_PARTY, DEVNET_NETWORK, DEVNET_SYNCHRONIZER_ID, type DecodedPaymentHeader, type DisclosedContract, HashingSchemeVersion, type InstrumentId, MAINNET_DSO_PARTY, MAINNET_NETWORK, MAINNET_SYNCHRONIZER_ID, type NetworkId, type PaymentRequiredResponse, type Scheme, type SchemeVerifier, type SettleErrorReason, type SettleRequest, type SettleResponse, type SettleResponseError, type SettleResponseSuccess, type SupportedKind, type SupportedResponse, type VerifierRegistry, type VerifyInvalidReason, type VerifyRequest, type VerifyResponse, type VerifyResponseInvalid, type VerifyResponseValid, type X402PaymentPayload, type X402PaymentRequirements, type X402Request, type X402Version, amuletAsset, createExactCantonVerifier, createVerifierRegistry, decodePaymentHeader, encodePaymentHeader, fingerprintForPublicKey, isCantonNetworkId, isCantonPaymentInner, isCantonPaymentRequirements, isExpired, isValidAmount, isVerifyRequest, isX402PaymentPayload, matchesFingerprint, parseCantonNetworkId, requirementsHash, requirementsHashMatches, schemeNetworkMatches, signHash, verifySignature };
+export { type AssetSpec, type CantonPaymentInner, type CantonPaymentObject, type CantonPaymentObjectRequest, type CantonPaymentObjectResponse, type CantonPaymentPayload, type CantonPaymentRequiredResponse, type CantonPaymentRequirements, DEVNET_DSO_PARTY, DEVNET_NETWORK, DEVNET_SYNCHRONIZER_ID, type DecodedPaymentHeader, type DisclosedContract, HashingSchemeVersion, type InstrumentId, MAINNET_DSO_PARTY, MAINNET_NETWORK, MAINNET_SYNCHRONIZER_ID, type NetworkId, type Scheme, type SchemeVerifier, type SettleErrorReason, type SettleRequest, type SettleResponse, type SettleResponseError, type SettleResponseSuccess, type SupportedKind, type SupportedResponse, type VerifierRegistry, type VerifyInvalidReason, type VerifyRequest, type VerifyResponse, type VerifyResponseInvalid, type VerifyResponseValid, type X402PaymentPayload, type X402PaymentRequiredResponse, type X402PaymentRequirements, type X402Request, type X402Version, amuletAsset, createExactCantonVerifier, createVerifierRegistry, decodePaymentHeader, encodePaymentHeader, fingerprintForPublicKey, isCantonNetworkId, isCantonPaymentInner, isCantonPaymentRequirements, isExpired, isValidAmount, isVerifyRequest, isX402PaymentPayload, matchesFingerprint, parseCantonNetworkId, requirementsHash, requirementsHashMatches, schemeNetworkMatches, signHash, verifySignature };
