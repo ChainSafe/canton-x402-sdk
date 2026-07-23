@@ -35,6 +35,17 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # dist is committed (shipped to git-dependency consumers). Fail if a fresh
+      # build doesn't match what's committed, so stale artifacts can't ship.
+      - name: Verify committed dist is up to date
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::packages/*/dist is stale — run 'pnpm -r build' and commit the result."
+            git status --porcelain
+            git --no-pager diff --stat
+            exit 1
+          fi
+
       - name: Typecheck
         run: pnpm typecheck
 

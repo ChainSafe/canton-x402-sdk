@@ -29,7 +29,9 @@
   },
   "devDependencies": {
     "@noble/ed25519": "^3.0.0",
-    "@noble/hashes": "^2.2.0"
+    "@noble/hashes": "^2.2.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0"
   },
   "scripts": {
     "build": "tsup",
