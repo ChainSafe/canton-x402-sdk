@@ -39,11 +39,18 @@ export type CantonPaymentRequirements = X402PaymentRequirements<AssetSpec>;
  * server, listing the payment options the client may satisfy. The client picks
  * one of `accepts[]`, pays it, and retries the request with the `X-PAYMENT`
  * header. Produced by the merchant middleware; parsed by the auto-pay client.
+ *
+ * Generic over the `accepts[]` element (`TRequirements`) so a mixed-scheme offer
+ * (e.g. exact-canton + a bridge scheme) is expressible as a union; every other
+ * field is shared. `CantonPaymentRequiredResponse` binds it to the Canton scheme.
  */
-export interface PaymentRequiredResponse {
+export interface X402PaymentRequiredResponse<TRequirements = CantonPaymentRequirements> {
   x402Version: X402Version;
   /** Payment options; the client satisfies exactly one of them. */
-  accepts: CantonPaymentRequirements[];
+  accepts: TRequirements[];
   /** Optional machine-readable reason, e.g. "payment_required". */
   error?: string;
 }
+
+/** exact-canton 402 response: `accepts[]` of {@link CantonPaymentRequirements}. */
+export type CantonPaymentRequiredResponse = X402PaymentRequiredResponse<CantonPaymentRequirements>;
