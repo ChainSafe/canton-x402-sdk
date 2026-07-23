@@ -3,7 +3,7 @@ import { HashingSchemeVersion } from "./index";
 import type {
   CantonPaymentRequirements,
   CantonPaymentPayload,
-  PaymentRequiredResponse,
+  CantonPaymentRequiredResponse,
   CantonPaymentObjectRequest,
   CantonPaymentObjectResponse,
   VerifyRequest,
@@ -13,6 +13,7 @@ import type {
   VerifyResponse,
   X402PaymentPayload,
   X402PaymentRequirements,
+  X402PaymentRequiredResponse,
   X402Request,
 } from "./index";
 
@@ -59,7 +60,7 @@ describe("x402-core wire types", () => {
       kinds: [{ x402Version: 2, scheme: "exact-canton", network: requirements.network }],
     };
 
-    const paymentRequired: PaymentRequiredResponse = {
+    const paymentRequired: CantonPaymentRequiredResponse = {
       x402Version: 2,
       accepts: [requirements],
       error: "payment_required",
@@ -121,6 +122,49 @@ describe("x402-core wire types", () => {
     expect(request.paymentPayload.payload.ethereumTxHash).toBe("0xfeed");
     expect(request.paymentRequirements.asset.chainId).toBe(1);
     expect(request.paymentRequirements.extra?.cantonRecipient).toBe("merchant::1220dead");
+  });
+
+  it("carries a mixed-scheme accepts[] in one 402 (union type argument)", () => {
+    // A 402 may advertise several schemes at once. X402PaymentRequiredResponse is
+    // generic over the accepts element, so a union of two schemes' requirements —
+    // with different asset/extra seams — assigns to one accepts[] with no casts.
+    // That the value type-checks IS the acceptance criterion.
+    type BridgeRequirements = X402PaymentRequirements<{ chainId: number }, { cantonRecipient: string }>;
+
+    const canton: CantonPaymentRequirements = {
+      scheme: "exact-canton",
+      network: "canton:1220be58c29e",
+      maxAmountRequired: "0.01",
+      asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+      payTo: "merchant::1220dead",
+      resource: "/api/resource",
+      nonce: "n-canton",
+      validBefore: "2999-01-01T00:00:00.000Z",
+    };
+    const bridge: BridgeRequirements = {
+      scheme: "batch-settlement-canton",
+      network: "eip155:1",
+      maxAmountRequired: "1000000",
+      asset: { chainId: 1 },
+      payTo: "0xC0ffee",
+      resource: "/api/resource",
+      nonce: "n-bridge",
+      validBefore: "2999-01-01T00:00:00.000Z",
+      extra: { cantonRecipient: "merchant::1220dead" },
+    };
+
+    const offer: X402PaymentRequiredResponse<CantonPaymentRequirements | BridgeRequirements> = {
+      x402Version: 2,
+      accepts: [canton, bridge], // heterogeneous — both schemes in one accepts[]
+      error: "payment_required",
+    };
+
+    expect(offer.accepts).toHaveLength(2);
+    // Fields shared by every scheme are reachable on the union without a cast.
+    expect(offer.accepts.map((a) => a.scheme)).toEqual(["exact-canton", "batch-settlement-canton"]);
+    expect(offer.accepts.every((a) => a.payTo.length > 0)).toBe(true);
+    // (Reaching a scheme-specific `asset`/`extra` needs a proper discriminant on
+    // `scheme` — a literal union — which is the separate `Scheme`-open-union item.)
   });
 
   it("narrows the discriminated response unions", () => {
