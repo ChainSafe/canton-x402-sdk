@@ -4,11 +4,12 @@ Monorepo for the `@chainsafe/x402-*` packages — x402 payments on the Canton Ne
 
 ## Packages
 
-| Package | Purpose |
-| --- | --- |
-| `@chainsafe/x402-core` | Shared wire types, canonical requirements hashing (RFC-8785), verify primitives, network presets. No framework deps. |
-| `@chainsafe/x402-server-sdk` | Payer SDK — prepare + sign a transfer with a party key + ledger access; auto-pay `fetch`; facilitator client. |
-| `@chainsafe/x402-express` | Merchant middleware — `paymentRequired()` gating for Express. |
+| Package                         | Purpose                                                                                                                           |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `@chainsafe/x402-core`          | Shared wire types, canonical requirements hashing (RFC-8785), verify primitives, network presets. No framework deps.              |
+| `@chainsafe/x402-server-sdk`    | Payer SDK — prepare + sign a transfer with a party key + ledger access; auto-pay `fetch`; facilitator client.                     |
+| `@chainsafe/x402-express`       | Merchant middleware — `paymentRequired()` gating for Express.                                                                     |
+| `@chainsafe/x402-scheme-casper` | Casper Network scheme (`exact` on `casper:*`) — wire types, pure `SchemeVerifier`, facilitator client. wCSPR (CEP-18) settlement. |
 
 ## Development
 
