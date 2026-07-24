@@ -23,7 +23,7 @@
 // Isomorphic on purpose (browser + node): base64 via btoa/atob, UTF-8 via
 // TextEncoder/TextDecoder — no Node Buffer.
 
-import { isX402PaymentPayload } from "./verify";
+import { isX402PaymentPayload } from "./types";
 import type { CantonPaymentPayload } from "./types/payment";
 import type { CantonPaymentRequirements } from "./types/requirements";
 

@@ -1,11 +1,14 @@
-import type { AssetSpec, NetworkId, Scheme, X402Version } from "./common";
+import * as v from "valibot";
+import { CantonPaymentPayloadSchema, X402PaymentEnvelopeSchema } from "./payment";
+import { CantonPaymentRequirementsSchema } from "./requirements";
+import type { AssetSpec, NetworkId, X402Version } from "./common";
 import type { CantonPaymentInner, X402PaymentPayload } from "./payment";
 import type { X402PaymentRequirements } from "./requirements";
 
 /**
  * Generic request body for POST /v2/verify and /v2/settle — payload + requirements,
- * parameterized by the same scheme seams. The two operations take the identical
- * envelope, so `SettleRequest` aliases `VerifyRequest`.
+ * parameterized by the same scheme seams. Generic → type-only; the concrete
+ * exact-canton request below is schema-first.
  */
 export interface X402Request<
   TInner = CantonPaymentInner,
@@ -17,24 +20,57 @@ export interface X402Request<
   paymentRequirements: X402PaymentRequirements<TAsset, TExtra>;
 }
 
-/** exact-canton verify/settle request. */
-export type VerifyRequest = X402Request;
+/** exact-canton verify/settle request. Settle takes the identical envelope. */
+export const VerifyRequestSchema = v.object({
+  x402Version: v.literal(2),
+  paymentPayload: CantonPaymentPayloadSchema,
+  paymentRequirements: CantonPaymentRequirementsSchema,
+});
+export type VerifyRequest = v.InferOutput<typeof VerifyRequestSchema>;
 export type SettleRequest = VerifyRequest;
+
+/** exact-canton verify/settle request guard + parser (schema-derived, concrete). */
+export function isCantonVerifyRequest(x: unknown): x is VerifyRequest {
+  return v.is(VerifyRequestSchema, x);
+}
+export function parseCantonVerifyRequest(input: unknown): VerifyRequest {
+  return v.parse(VerifyRequestSchema, input);
+}
+
+/**
+ * Loose validator for the verify/settle request envelope: the universal fields
+ * only — x402 v2, a payment envelope, and the requirements fields shared by every
+ * scheme. Scheme-agnostic: a multi-scheme dispatcher validates/parses the envelope
+ * with this, then the per-scheme verifier checks the concrete inner (use
+ * {@link isCantonVerifyRequest} for exact-canton).
+ */
+const X402RequestEnvelopeSchema = v.looseObject({
+  x402Version: v.literal(2),
+  paymentPayload: X402PaymentEnvelopeSchema,
+  paymentRequirements: v.looseObject({
+    scheme: v.pipe(v.string(), v.minLength(1)),
+    network: v.string(),
+    maxAmountRequired: v.pipe(v.string(), v.minLength(1)),
+    payTo: v.pipe(v.string(), v.minLength(1)),
+    nonce: v.pipe(v.string(), v.minLength(1)),
+    validBefore: v.pipe(v.string(), v.minLength(1)),
+    asset: v.looseObject({}),
+  }),
+});
+export function isX402Request(x: unknown): x is X402Request<unknown> {
+  return v.is(X402RequestEnvelopeSchema, x);
+}
+export function parseX402Request(input: unknown): X402Request<unknown> {
+  return v.parse(X402RequestEnvelopeSchema, input) as unknown as X402Request<unknown>;
+}
 
 /**
  * The pure verification contract every scheme implements. Core owns it as the
- * single source of truth; the facilitator and any client conform to it. `verify`
- * is a stateless payload-against-requirements check — the shared shape is
- * identical across schemes, only the proof mechanics differ (exact-canton:
- * Ed25519 over the prepared-tx hash + fingerprint + requirementsHash binding).
- *
- * Stateful concerns — nonce replay, on-chain execution, public-key *resolution*
- * from a party id — are deliberately NOT here; they stay in the facilitator and
- * compose on top of this.
+ * single source of truth; the facilitator and any client conform to it. Method
+ * interface → type-only.
  *
  * The params are the widest envelope (`unknown` inner/asset), so a heterogeneous
- * registry of verifiers type-checks and each verifier narrows via its own guard —
- * adding a scheme is "register a new verifier", with no dispatcher change.
+ * registry of verifiers type-checks and each verifier narrows via its own guard.
  */
 export interface SchemeVerifier {
   readonly schemeId: string;
@@ -46,79 +82,96 @@ export interface SchemeVerifier {
   ): VerifyResponse;
 }
 
-// FUTURE: appending `| (string & {})` to the reason unions below would let a
-// newer facilitator return a reason an older client doesn't know without
-// breaking deserialization — at the cost of losing exhaustive-switch checking.
-// Decide deliberately before doing it.
-export type VerifyInvalidReason =
-  | "scheme_mismatch"
-  | "network_mismatch"
-  | "requirements_expired"
-  | "requirements_hash_mismatch"
-  | "bad_fingerprint"
-  | "bad_signature"
-  | "nonce_replayed"
-  | "missing_public_key"
-  | "transfer_mismatch"
-  | "internal_error";
+export const VerifyInvalidReasonSchema = v.picklist([
+  "scheme_mismatch",
+  "network_mismatch",
+  "requirements_expired",
+  "requirements_hash_mismatch",
+  "bad_fingerprint",
+  "bad_signature",
+  "nonce_replayed",
+  "missing_public_key",
+  /** The signed prepared transaction does not transfer what the requirements demand. */
+  "transfer_mismatch",
+  "internal_error",
+]);
+export type VerifyInvalidReason = v.InferOutput<typeof VerifyInvalidReasonSchema>;
 
-export interface VerifyResponseValid {
-  isValid: true;
-  payer?: string;
-  /** Scheme-specific extra fields (mirrors upstream x402 v2 `extensions`). */
-  extensions?: Record<string, unknown>;
-}
+/** Scheme-specific extra fields (mirrors upstream x402 v2 `extensions`). */
+const ExtensionsSchema = v.record(v.string(), v.unknown());
 
-export interface VerifyResponseInvalid {
-  isValid: false;
-  invalidReason: VerifyInvalidReason;
-  payer?: string;
-  extensions?: Record<string, unknown>;
-}
+export const VerifyResponseValidSchema = v.object({
+  isValid: v.literal(true),
+  payer: v.optional(v.string()),
+  extensions: v.optional(ExtensionsSchema),
+});
+export type VerifyResponseValid = v.InferOutput<typeof VerifyResponseValidSchema>;
+
+export const VerifyResponseInvalidSchema = v.object({
+  isValid: v.literal(false),
+  invalidReason: VerifyInvalidReasonSchema,
+  payer: v.optional(v.string()),
+  extensions: v.optional(ExtensionsSchema),
+});
+export type VerifyResponseInvalid = v.InferOutput<typeof VerifyResponseInvalidSchema>;
 
 /** Discriminated on `isValid`. */
-export type VerifyResponse = VerifyResponseValid | VerifyResponseInvalid;
+export const VerifyResponseSchema = v.variant("isValid", [
+  VerifyResponseValidSchema,
+  VerifyResponseInvalidSchema,
+]);
+export type VerifyResponse = v.InferOutput<typeof VerifyResponseSchema>;
 
-export type SettleErrorReason =
-  | "bad_request"
-  | "unauthorized"
-  | "scheme_mismatch"
-  | "network_mismatch"
-  | "requirements_expired"
-  | "requirements_hash_mismatch"
-  | "bad_fingerprint"
-  | "bad_signature"
-  | "nonce_replayed"
-  | "execution_failed"
-  | "timeout"
-  | "facilitator_error";
+export const SettleErrorReasonSchema = v.picklist([
+  "bad_request",
+  "unauthorized",
+  "scheme_mismatch",
+  "network_mismatch",
+  "requirements_expired",
+  "requirements_hash_mismatch",
+  "bad_fingerprint",
+  "bad_signature",
+  "nonce_replayed",
+  "execution_failed",
+  "timeout",
+  "facilitator_error",
+]);
+export type SettleErrorReason = v.InferOutput<typeof SettleErrorReasonSchema>;
 
-export interface SettleResponseSuccess {
-  success: true;
-  network: NetworkId;
+export const SettleResponseSuccessSchema = v.object({
+  success: v.literal(true),
+  network: v.string(),
   /** Canton updateId of the executed transaction. */
-  transaction: string;
-  completionOffset?: string;
-  payer: string;
-  extensions?: Record<string, unknown>;
-}
+  transaction: v.string(),
+  completionOffset: v.optional(v.string()),
+  payer: v.string(),
+  extensions: v.optional(ExtensionsSchema),
+});
+export type SettleResponseSuccess = v.InferOutput<typeof SettleResponseSuccessSchema>;
 
-export interface SettleResponseError {
-  success: false;
-  errorReason: SettleErrorReason;
-  errorDetails?: string;
-}
+export const SettleResponseErrorSchema = v.object({
+  success: v.literal(false),
+  errorReason: SettleErrorReasonSchema,
+  errorDetails: v.optional(v.string()),
+});
+export type SettleResponseError = v.InferOutput<typeof SettleResponseErrorSchema>;
 
 /** Discriminated on `success`. */
-export type SettleResponse = SettleResponseSuccess | SettleResponseError;
+export const SettleResponseSchema = v.variant("success", [
+  SettleResponseSuccessSchema,
+  SettleResponseErrorSchema,
+]);
+export type SettleResponse = v.InferOutput<typeof SettleResponseSchema>;
 
-export interface SupportedKind {
-  x402Version: X402Version;
-  scheme: Scheme;
-  network: NetworkId;
-  extra?: Record<string, unknown>;
-}
+export const SupportedKindSchema = v.object({
+  x402Version: v.literal(2),
+  scheme: v.string(),
+  network: v.string(),
+  extra: v.optional(ExtensionsSchema),
+});
+export type SupportedKind = v.InferOutput<typeof SupportedKindSchema>;
 
-export interface SupportedResponse {
-  kinds: SupportedKind[];
-}
+export const SupportedResponseSchema = v.object({
+  kinds: v.array(SupportedKindSchema),
+});
+export type SupportedResponse = v.InferOutput<typeof SupportedResponseSchema>;
