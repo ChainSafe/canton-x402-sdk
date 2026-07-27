@@ -4746,7 +4746,10 @@ function decodePaymentHeader(headerValue) {
   if (!isX402PaymentRequirements(requirements)) {
     throw new Error("X-PAYMENT `requirements` slot is missing or not valid payment requirements");
   }
-  return { payload: payment, requirements };
+  return {
+    payload: payment,
+    requirements
+  };
 }
 function bytesToBase64(bytes) {
   let bin = "";
