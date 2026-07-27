@@ -8,12 +8,11 @@ import { sign as ed25519Sign, verify as ed25519Verify, hashes as ed25519Hashes }
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import type { NetworkId } from "../types/common";
-import type { CantonPaymentInner } from "../types/payment";
-import type { CantonPaymentRequirements } from "../types/requirements";
+import { isCantonPaymentInner } from "../types/payment";
+import { CantonPaymentRequirements, isCantonPaymentRequirements } from "../types/requirements";
 import type {
   SchemeVerifier,
   VerifyInvalidReason,
-  VerifyRequest,
   VerifyResponse,
   VerifyResponseInvalid,
 } from "../types/facilitator";
@@ -108,48 +107,6 @@ export function parseCantonNetworkId(s: string): NetworkId {
   if (!isCantonNetworkId(s)) throw new Error(`not a canton network id: ${s}`);
   return s;
 }
-
-// ─── canton shape guards (type predicates) ─────────────────────────────────
-
-export function isCantonPaymentRequirements(v: unknown): v is CantonPaymentRequirements {
-  if (!isObj(v)) return false;
-  return (
-    typeof v.scheme === "string" &&
-    typeof v.network === "string" &&
-    typeof v.maxAmountRequired === "string" &&
-    typeof v.payTo === "string" &&
-    typeof v.resource === "string" &&
-    typeof v.nonce === "string" &&
-    typeof v.validBefore === "string" &&
-    isObj(v.asset)
-  );
-}
-
-export function isCantonPaymentInner(v: unknown): v is CantonPaymentInner {
-  if (!isObj(v)) return false;
-  return (
-    typeof v.payer === "string" &&
-    typeof v.preparedTransaction === "string" &&
-    typeof v.preparedTransactionHash === "string" &&
-    typeof v.partySignature === "string" &&
-    typeof v.requirementsHash === "string" &&
-    typeof v.publicKey === "string" &&
-    typeof v.hashingSchemeVersion === "string"
-  );
-}
-
-export function isVerifyRequest(v: unknown): v is VerifyRequest {
-  if (!isObj(v)) return false;
-  const payload = v.paymentPayload;
-  return (
-    v.x402Version === 2 &&
-    isObj(payload) &&
-    isCantonPaymentInner(payload.payload) &&
-    isCantonPaymentRequirements(v.paymentRequirements)
-  );
-}
-
-// ─── the verifier ───────────────────────────────────────────────────────────
 
 function fail(reason: VerifyInvalidReason, payer?: string): VerifyResponseInvalid {
   return { isValid: false, invalidReason: reason, ...(payer ? { payer } : {}) };

@@ -15,8 +15,8 @@ import {
   isCantonPaymentRequirements,
   isCantonPaymentInner,
   isX402PaymentPayload,
-  isVerifyRequest,
-} from "./index";
+  isCantonVerifyRequest,
+} from "../index";
 import type { CantonPaymentPayload, CantonPaymentRequirements } from "../index";
 
 hashes.sha512 = sha512; // wire ed25519 for key/sig generation in this test
@@ -157,8 +157,8 @@ describe("shape guards + scheme/network match", () => {
     expect(isX402PaymentPayload({ x402Version: 2, scheme: "", network: "canton:1220x", payload: {} })).toBe(false);
     expect(isX402PaymentPayload({ x402Version: 1, scheme: "exact-canton", network: "n", payload: {} })).toBe(false);
     expect(isX402PaymentPayload({})).toBe(false);
-    expect(isVerifyRequest({ x402Version: 2, paymentPayload: payload, paymentRequirements: requirements })).toBe(true);
-    expect(isVerifyRequest({ x402Version: 2 })).toBe(false);
+    expect(isCantonVerifyRequest({ x402Version: 2, paymentPayload: payload, paymentRequirements: requirements })).toBe(true);
+    expect(isCantonVerifyRequest({ x402Version: 2 })).toBe(false);
   });
 
   it("matches scheme + network", () => {

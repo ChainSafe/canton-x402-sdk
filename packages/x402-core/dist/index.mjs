@@ -65,14 +65,14 @@ var require_base64 = __commonJS({
   "../../node_modules/.pnpm/@protobufjs+base64@1.1.2/node_modules/@protobufjs/base64/index.js"(exports) {
     "use strict";
     var base64 = exports;
-    base64.length = function length(string) {
-      var p = string.length;
+    base64.length = function length(string2) {
+      var p = string2.length;
       if (!p)
         return 0;
       var n = 0;
-      while (--p % 4 > 1 && string.charAt(p) === "=")
+      while (--p % 4 > 1 && string2.charAt(p) === "=")
         ++n;
-      return Math.ceil(string.length * 3) / 4 - n;
+      return Math.ceil(string2.length * 3) / 4 - n;
     };
     var b64 = new Array(64);
     var s64 = new Array(123);
@@ -120,11 +120,11 @@ var require_base64 = __commonJS({
       return String.fromCharCode.apply(String, chunk.slice(0, i2));
     };
     var invalidEncoding = "invalid encoding";
-    base64.decode = function decode(string, buffer, offset) {
+    base64.decode = function decode(string2, buffer, offset) {
       var start = offset;
       var j = 0, t;
-      for (var i2 = 0; i2 < string.length; ) {
-        var c = string.charCodeAt(i2++);
+      for (var i2 = 0; i2 < string2.length; ) {
+        var c = string2.charCodeAt(i2++);
         if (c === 61 && j > 1)
           break;
         if ((c = s64[c]) === void 0)
@@ -154,8 +154,8 @@ var require_base64 = __commonJS({
         throw Error(invalidEncoding);
       return offset - start;
     };
-    base64.test = function test(string) {
-      return /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(string);
+    base64.test = function test(string2) {
+      return /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(string2);
     };
   }
 });
@@ -408,15 +408,15 @@ var require_utf8 = __commonJS({
     "use strict";
     var utf8 = exports;
     var replacementCharCode = 65533;
-    utf8.length = function utf8_length(string) {
+    utf8.length = function utf8_length(string2) {
       var len = 0, c = 0;
-      for (var i = 0; i < string.length; ++i) {
-        c = string.charCodeAt(i);
+      for (var i = 0; i < string2.length; ++i) {
+        c = string2.charCodeAt(i);
         if (c < 128)
           len += 1;
         else if (c < 2048)
           len += 2;
-        else if ((c & 64512) === 55296 && (string.charCodeAt(i + 1) & 64512) === 56320) {
+        else if ((c & 64512) === 55296 && (string2.charCodeAt(i + 1) & 64512) === 56320) {
           ++i;
           len += 4;
         } else
@@ -460,16 +460,16 @@ var require_utf8 = __commonJS({
       }
       return String.fromCharCode.apply(String, chunk.slice(0, i));
     };
-    utf8.write = function utf8_write(string, buffer, offset) {
+    utf8.write = function utf8_write(string2, buffer, offset) {
       var start = offset, c1, c2;
-      for (var i = 0; i < string.length; ++i) {
-        c1 = string.charCodeAt(i);
+      for (var i = 0; i < string2.length; ++i) {
+        c1 = string2.charCodeAt(i);
         if (c1 < 128) {
           buffer[offset++] = c1;
         } else if (c1 < 2048) {
           buffer[offset++] = c1 >> 6 | 192;
           buffer[offset++] = c1 & 63 | 128;
-        } else if ((c1 & 64512) === 55296 && ((c2 = string.charCodeAt(i + 1)) & 64512) === 56320) {
+        } else if ((c1 & 64512) === 55296 && ((c2 = string2.charCodeAt(i + 1)) & 64512) === 56320) {
           c1 = 65536 + ((c1 & 1023) << 10) + (c2 & 1023);
           ++i;
           buffer[offset++] = c1 >> 18 | 240;
@@ -2411,11 +2411,844 @@ var require_minimal2 = __commonJS({
   }
 });
 
+// ../../node_modules/.pnpm/valibot@1.4.2_typescript@5.9.3/node_modules/valibot/dist/index.mjs
+var store$4;
+var DEFAULT_CONFIG = {
+  lang: void 0,
+  message: void 0,
+  abortEarly: void 0,
+  abortPipeEarly: void 0
+};
+// @__NO_SIDE_EFFECTS__
+function getGlobalConfig(config$1) {
+  if (!config$1 && !store$4) return DEFAULT_CONFIG;
+  return {
+    lang: config$1?.lang ?? store$4?.lang,
+    message: config$1?.message,
+    abortEarly: config$1?.abortEarly ?? store$4?.abortEarly,
+    abortPipeEarly: config$1?.abortPipeEarly ?? store$4?.abortPipeEarly
+  };
+}
+var store$3;
+// @__NO_SIDE_EFFECTS__
+function getGlobalMessage(lang) {
+  return store$3?.get(lang);
+}
+var store$2;
+// @__NO_SIDE_EFFECTS__
+function getSchemaMessage(lang) {
+  return store$2?.get(lang);
+}
+var store$1;
+// @__NO_SIDE_EFFECTS__
+function getSpecificMessage(reference, lang) {
+  return store$1?.get(reference)?.get(lang);
+}
+// @__NO_SIDE_EFFECTS__
+function _stringify(input) {
+  const type = typeof input;
+  if (type === "string") return `"${input}"`;
+  if (type === "number" || type === "bigint" || type === "boolean") return `${input}`;
+  if (type === "object" || type === "function") return (input && Object.getPrototypeOf(input)?.constructor?.name) ?? "null";
+  return type;
+}
+function _addIssue(context, label, dataset, config$1, other) {
+  const input = other && "input" in other ? other.input : dataset.value;
+  const expected = other?.expected ?? context.expects ?? null;
+  const received = other?.received ?? /* @__PURE__ */ _stringify(input);
+  const issue = {
+    kind: context.kind,
+    type: context.type,
+    input,
+    expected,
+    received,
+    message: `Invalid ${label}: ${expected ? `Expected ${expected} but r` : "R"}eceived ${received}`,
+    requirement: context.requirement,
+    path: other?.path,
+    issues: other?.issues,
+    lang: config$1.lang,
+    abortEarly: config$1.abortEarly,
+    abortPipeEarly: config$1.abortPipeEarly
+  };
+  const isSchema = context.kind === "schema";
+  const message$1 = other?.message ?? context.message ?? /* @__PURE__ */ getSpecificMessage(context.reference, issue.lang) ?? (isSchema ? /* @__PURE__ */ getSchemaMessage(issue.lang) : null) ?? config$1.message ?? /* @__PURE__ */ getGlobalMessage(issue.lang);
+  if (message$1 !== void 0) issue.message = typeof message$1 === "function" ? message$1(issue) : message$1;
+  if (isSchema) dataset.typed = false;
+  if (dataset.issues) dataset.issues.push(issue);
+  else dataset.issues = [issue];
+}
+var _standardCache = /* @__PURE__ */ new WeakMap();
+// @__NO_SIDE_EFFECTS__
+function _getStandardProps(context) {
+  let cached = _standardCache.get(context);
+  if (!cached) {
+    cached = {
+      version: 1,
+      vendor: "valibot",
+      validate(value$1) {
+        return context["~run"]({ value: value$1 }, /* @__PURE__ */ getGlobalConfig());
+      }
+    };
+    _standardCache.set(context, cached);
+  }
+  return cached;
+}
+// @__NO_SIDE_EFFECTS__
+function _isValidObjectKey(object$1, key) {
+  return Object.prototype.hasOwnProperty.call(object$1, key) && key !== "__proto__" && key !== "prototype" && key !== "constructor";
+}
+// @__NO_SIDE_EFFECTS__
+function _joinExpects(values$1, separator) {
+  const list = [...new Set(values$1)];
+  if (list.length > 1) return `(${list.join(` ${separator} `)})`;
+  return list[0] ?? "never";
+}
+var ValiError = class extends Error {
+  /**
+  * Creates a Valibot error with useful information.
+  *
+  * @param issues The error issues.
+  */
+  constructor(issues) {
+    super(issues[0].message);
+    this.name = "ValiError";
+    this.issues = issues;
+  }
+};
+var EMOJI_REGEX = new RegExp("^(?:[\\u{1F1E6}-\\u{1F1FF}]{2}|\\u{1F3F4}[\\u{E0061}-\\u{E007A}]{2}[\\u{E0030}-\\u{E0039}\\u{E0061}-\\u{E007A}]{1,3}\\u{E007F}|(?:\\p{Emoji}\\uFE0F\\u20E3?|\\p{Emoji_Modifier_Base}\\p{Emoji_Modifier}?|(?![\\p{Emoji_Modifier_Base}\\u{1F1E6}-\\u{1F1FF}])\\p{Emoji_Presentation})(?:\\u200D(?:\\p{Emoji}\\uFE0F\\u20E3?|\\p{Emoji_Modifier_Base}\\p{Emoji_Modifier}?|(?![\\p{Emoji_Modifier_Base}\\u{1F1E6}-\\u{1F1FF}])\\p{Emoji_Presentation}))*)+$", "u");
+// @__NO_SIDE_EFFECTS__
+function minLength(requirement, message$1) {
+  return {
+    kind: "validation",
+    type: "min_length",
+    reference: minLength,
+    async: false,
+    expects: `>=${requirement}`,
+    requirement,
+    message: message$1,
+    "~run"(dataset, config$1) {
+      if (dataset.typed && dataset.value.length < this.requirement) _addIssue(this, "length", dataset, config$1, { received: `${dataset.value.length}` });
+      return dataset;
+    }
+  };
+}
+var ABORT_EARLY_CONFIG = { abortEarly: true };
+// @__NO_SIDE_EFFECTS__
+function getFallback(schema, dataset, config$1) {
+  return typeof schema.fallback === "function" ? schema.fallback(dataset, config$1) : schema.fallback;
+}
+// @__NO_SIDE_EFFECTS__
+function getDefault(schema, dataset, config$1) {
+  return typeof schema.default === "function" ? schema.default(dataset, config$1) : schema.default;
+}
+// @__NO_SIDE_EFFECTS__
+function is(schema, input) {
+  return !schema["~run"]({ value: input }, ABORT_EARLY_CONFIG).issues;
+}
+// @__NO_SIDE_EFFECTS__
+function array(item, message$1) {
+  return {
+    kind: "schema",
+    type: "array",
+    reference: array,
+    expects: "Array",
+    async: false,
+    item,
+    message: message$1,
+    get "~standard"() {
+      return /* @__PURE__ */ _getStandardProps(this);
+    },
+    "~run"(dataset, config$1) {
+      const input = dataset.value;
+      if (Array.isArray(input)) {
+        dataset.typed = true;
+        dataset.value = [];
+        for (let key = 0; key < input.length; key++) {
+          const value$1 = input[key];
+          const itemDataset = this.item["~run"]({ value: value$1 }, config$1);
+          if (itemDataset.issues) {
+            const pathItem = {
+              type: "array",
+              origin: "value",
+              input,
+              key,
+              value: value$1
+            };
+            for (const issue of itemDataset.issues) {
+              if (issue.path) issue.path.unshift(pathItem);
+              else issue.path = [pathItem];
+              dataset.issues?.push(issue);
+            }
+            if (!dataset.issues) dataset.issues = itemDataset.issues;
+            if (config$1.abortEarly) {
+              dataset.typed = false;
+              break;
+            }
+          }
+          if (!itemDataset.typed) dataset.typed = false;
+          dataset.value.push(itemDataset.value);
+        }
+      } else _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  };
+}
+// @__NO_SIDE_EFFECTS__
+function literal(literal_, message$1) {
+  return {
+    kind: "schema",
+    type: "literal",
+    reference: literal,
+    expects: /* @__PURE__ */ _stringify(literal_),
+    async: false,
+    literal: literal_,
+    message: message$1,
+    get "~standard"() {
+      return /* @__PURE__ */ _getStandardProps(this);
+    },
+    "~run"(dataset, config$1) {
+      if (dataset.value === this.literal) dataset.typed = true;
+      else _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  };
+}
+// @__NO_SIDE_EFFECTS__
+function looseObject(entries$1, message$1) {
+  return {
+    kind: "schema",
+    type: "loose_object",
+    reference: looseObject,
+    expects: "Object",
+    async: false,
+    entries: entries$1,
+    message: message$1,
+    get "~standard"() {
+      return /* @__PURE__ */ _getStandardProps(this);
+    },
+    "~run"(dataset, config$1) {
+      const input = dataset.value;
+      if (input && typeof input === "object") {
+        dataset.typed = true;
+        dataset.value = {};
+        for (const key in this.entries) {
+          const valueSchema = this.entries[key];
+          if (key in input || (valueSchema.type === "exact_optional" || valueSchema.type === "optional" || valueSchema.type === "nullish") && valueSchema.default !== void 0) {
+            const value$1 = key in input ? input[key] : /* @__PURE__ */ getDefault(valueSchema);
+            const valueDataset = valueSchema["~run"]({ value: value$1 }, config$1);
+            if (valueDataset.issues) {
+              const pathItem = {
+                type: "object",
+                origin: "value",
+                input,
+                key,
+                value: value$1
+              };
+              for (const issue of valueDataset.issues) {
+                if (issue.path) issue.path.unshift(pathItem);
+                else issue.path = [pathItem];
+                dataset.issues?.push(issue);
+              }
+              if (!dataset.issues) dataset.issues = valueDataset.issues;
+              if (config$1.abortEarly) {
+                dataset.typed = false;
+                break;
+              }
+            }
+            if (!valueDataset.typed) dataset.typed = false;
+            dataset.value[key] = valueDataset.value;
+          } else if (valueSchema.fallback !== void 0) dataset.value[key] = /* @__PURE__ */ getFallback(valueSchema);
+          else if (valueSchema.type !== "exact_optional" && valueSchema.type !== "optional" && valueSchema.type !== "nullish") {
+            _addIssue(this, "key", dataset, config$1, {
+              input: void 0,
+              expected: `"${key}"`,
+              path: [{
+                type: "object",
+                origin: "key",
+                input,
+                key,
+                value: input[key]
+              }]
+            });
+            if (config$1.abortEarly) break;
+          }
+        }
+        if (!dataset.issues || !config$1.abortEarly) {
+          for (const key in input) if (/* @__PURE__ */ _isValidObjectKey(input, key) && !(key in this.entries)) dataset.value[key] = input[key];
+        }
+      } else _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  };
+}
+// @__NO_SIDE_EFFECTS__
+function number(message$1) {
+  return {
+    kind: "schema",
+    type: "number",
+    reference: number,
+    expects: "number",
+    async: false,
+    message: message$1,
+    get "~standard"() {
+      return /* @__PURE__ */ _getStandardProps(this);
+    },
+    "~run"(dataset, config$1) {
+      if (typeof dataset.value === "number" && !isNaN(dataset.value)) dataset.typed = true;
+      else _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  };
+}
+// @__NO_SIDE_EFFECTS__
+function object(entries$1, message$1) {
+  return {
+    kind: "schema",
+    type: "object",
+    reference: object,
+    expects: "Object",
+    async: false,
+    entries: entries$1,
+    message: message$1,
+    get "~standard"() {
+      return /* @__PURE__ */ _getStandardProps(this);
+    },
+    "~run"(dataset, config$1) {
+      const input = dataset.value;
+      if (input && typeof input === "object") {
+        dataset.typed = true;
+        dataset.value = {};
+        for (const key in this.entries) {
+          const valueSchema = this.entries[key];
+          if (key in input || (valueSchema.type === "exact_optional" || valueSchema.type === "optional" || valueSchema.type === "nullish") && valueSchema.default !== void 0) {
+            const value$1 = key in input ? input[key] : /* @__PURE__ */ getDefault(valueSchema);
+            const valueDataset = valueSchema["~run"]({ value: value$1 }, config$1);
+            if (valueDataset.issues) {
+              const pathItem = {
+                type: "object",
+                origin: "value",
+                input,
+                key,
+                value: value$1
+              };
+              for (const issue of valueDataset.issues) {
+                if (issue.path) issue.path.unshift(pathItem);
+                else issue.path = [pathItem];
+                dataset.issues?.push(issue);
+              }
+              if (!dataset.issues) dataset.issues = valueDataset.issues;
+              if (config$1.abortEarly) {
+                dataset.typed = false;
+                break;
+              }
+            }
+            if (!valueDataset.typed) dataset.typed = false;
+            dataset.value[key] = valueDataset.value;
+          } else if (valueSchema.fallback !== void 0) dataset.value[key] = /* @__PURE__ */ getFallback(valueSchema);
+          else if (valueSchema.type !== "exact_optional" && valueSchema.type !== "optional" && valueSchema.type !== "nullish") {
+            _addIssue(this, "key", dataset, config$1, {
+              input: void 0,
+              expected: `"${key}"`,
+              path: [{
+                type: "object",
+                origin: "key",
+                input,
+                key,
+                value: input[key]
+              }]
+            });
+            if (config$1.abortEarly) break;
+          }
+        }
+      } else _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  };
+}
+// @__NO_SIDE_EFFECTS__
+function optional(wrapped, default_) {
+  return {
+    kind: "schema",
+    type: "optional",
+    reference: optional,
+    expects: `(${wrapped.expects} | undefined)`,
+    async: false,
+    wrapped,
+    default: default_,
+    get "~standard"() {
+      return /* @__PURE__ */ _getStandardProps(this);
+    },
+    "~run"(dataset, config$1) {
+      if (dataset.value === void 0) {
+        if (this.default !== void 0) dataset.value = /* @__PURE__ */ getDefault(this, dataset, config$1);
+        if (dataset.value === void 0) {
+          dataset.typed = true;
+          return dataset;
+        }
+      }
+      return this.wrapped["~run"](dataset, config$1);
+    }
+  };
+}
+// @__NO_SIDE_EFFECTS__
+function picklist(options, message$1) {
+  return {
+    kind: "schema",
+    type: "picklist",
+    reference: picklist,
+    expects: /* @__PURE__ */ _joinExpects(options.map(_stringify), "|"),
+    async: false,
+    options,
+    message: message$1,
+    get "~standard"() {
+      return /* @__PURE__ */ _getStandardProps(this);
+    },
+    "~run"(dataset, config$1) {
+      if (this.options.includes(dataset.value)) dataset.typed = true;
+      else _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  };
+}
+// @__NO_SIDE_EFFECTS__
+function record(key, value$1, message$1) {
+  return {
+    kind: "schema",
+    type: "record",
+    reference: record,
+    expects: "Object",
+    async: false,
+    key,
+    value: value$1,
+    message: message$1,
+    get "~standard"() {
+      return /* @__PURE__ */ _getStandardProps(this);
+    },
+    "~run"(dataset, config$1) {
+      const input = dataset.value;
+      if (input && typeof input === "object") {
+        dataset.typed = true;
+        dataset.value = {};
+        for (const entryKey in input) if (/* @__PURE__ */ _isValidObjectKey(input, entryKey)) {
+          const entryValue = input[entryKey];
+          const keyDataset = this.key["~run"]({ value: entryKey }, config$1);
+          if (keyDataset.issues) {
+            const pathItem = {
+              type: "object",
+              origin: "key",
+              input,
+              key: entryKey,
+              value: entryValue
+            };
+            for (const issue of keyDataset.issues) {
+              issue.path = [pathItem];
+              dataset.issues?.push(issue);
+            }
+            if (!dataset.issues) dataset.issues = keyDataset.issues;
+            if (config$1.abortEarly) {
+              dataset.typed = false;
+              break;
+            }
+          }
+          const valueDataset = this.value["~run"]({ value: entryValue }, config$1);
+          if (valueDataset.issues) {
+            const pathItem = {
+              type: "object",
+              origin: "value",
+              input,
+              key: entryKey,
+              value: entryValue
+            };
+            for (const issue of valueDataset.issues) {
+              if (issue.path) issue.path.unshift(pathItem);
+              else issue.path = [pathItem];
+              dataset.issues?.push(issue);
+            }
+            if (!dataset.issues) dataset.issues = valueDataset.issues;
+            if (config$1.abortEarly) {
+              dataset.typed = false;
+              break;
+            }
+          }
+          if (!keyDataset.typed || !valueDataset.typed) dataset.typed = false;
+          if (keyDataset.typed) dataset.value[keyDataset.value] = valueDataset.value;
+        }
+      } else _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  };
+}
+// @__NO_SIDE_EFFECTS__
+function string(message$1) {
+  return {
+    kind: "schema",
+    type: "string",
+    reference: string,
+    expects: "string",
+    async: false,
+    message: message$1,
+    get "~standard"() {
+      return /* @__PURE__ */ _getStandardProps(this);
+    },
+    "~run"(dataset, config$1) {
+      if (typeof dataset.value === "string") dataset.typed = true;
+      else _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  };
+}
+// @__NO_SIDE_EFFECTS__
+function unknown() {
+  return {
+    kind: "schema",
+    type: "unknown",
+    reference: unknown,
+    expects: "unknown",
+    async: false,
+    get "~standard"() {
+      return /* @__PURE__ */ _getStandardProps(this);
+    },
+    "~run"(dataset) {
+      dataset.typed = true;
+      return dataset;
+    }
+  };
+}
+// @__NO_SIDE_EFFECTS__
+function variant(key, options, message$1) {
+  return {
+    kind: "schema",
+    type: "variant",
+    reference: variant,
+    expects: "Object",
+    async: false,
+    key,
+    options,
+    message: message$1,
+    get "~standard"() {
+      return /* @__PURE__ */ _getStandardProps(this);
+    },
+    "~run"(dataset, config$1) {
+      const input = dataset.value;
+      if (input && typeof input === "object") {
+        let outputDataset;
+        let maxDiscriminatorPriority = 0;
+        let invalidDiscriminatorKey = this.key;
+        let expectedDiscriminators = [];
+        const parseOptions = (variant$1, allKeys) => {
+          for (const schema of variant$1.options) {
+            if (schema.type === "variant") parseOptions(schema, new Set(allKeys).add(schema.key));
+            else {
+              let keysAreValid = true;
+              let currentPriority = 0;
+              for (const currentKey of allKeys) {
+                const discriminatorSchema = schema.entries[currentKey];
+                if (currentKey in input ? discriminatorSchema["~run"]({
+                  typed: false,
+                  value: input[currentKey]
+                }, ABORT_EARLY_CONFIG).issues : discriminatorSchema.type !== "exact_optional" && discriminatorSchema.type !== "optional" && discriminatorSchema.type !== "nullish") {
+                  keysAreValid = false;
+                  if (invalidDiscriminatorKey !== currentKey && (maxDiscriminatorPriority < currentPriority || maxDiscriminatorPriority === currentPriority && currentKey in input && !(invalidDiscriminatorKey in input))) {
+                    maxDiscriminatorPriority = currentPriority;
+                    invalidDiscriminatorKey = currentKey;
+                    expectedDiscriminators = [];
+                  }
+                  if (invalidDiscriminatorKey === currentKey) expectedDiscriminators.push(schema.entries[currentKey].expects);
+                  break;
+                }
+                currentPriority++;
+              }
+              if (keysAreValid) {
+                const optionDataset = schema["~run"]({ value: input }, config$1);
+                if (!outputDataset || !outputDataset.typed && optionDataset.typed) outputDataset = optionDataset;
+              }
+            }
+            if (outputDataset && !outputDataset.issues) break;
+          }
+        };
+        parseOptions(this, /* @__PURE__ */ new Set([this.key]));
+        if (outputDataset) return outputDataset;
+        _addIssue(this, "type", dataset, config$1, {
+          input: input[invalidDiscriminatorKey],
+          expected: /* @__PURE__ */ _joinExpects(expectedDiscriminators, "|"),
+          path: [{
+            type: "object",
+            origin: "value",
+            input,
+            key: invalidDiscriminatorKey,
+            value: input[invalidDiscriminatorKey]
+          }]
+        });
+      } else _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  };
+}
+function parse(schema, input, config$1) {
+  const dataset = schema["~run"]({ value: input }, /* @__PURE__ */ getGlobalConfig(config$1));
+  if (dataset.issues) throw new ValiError(dataset.issues);
+  return dataset.value;
+}
+// @__NO_SIDE_EFFECTS__
+function pipe(...pipe$1) {
+  return {
+    ...pipe$1[0],
+    pipe: pipe$1,
+    get "~standard"() {
+      return /* @__PURE__ */ _getStandardProps(this);
+    },
+    "~run"(dataset, config$1) {
+      for (const item of pipe$1) if (item.kind !== "metadata") {
+        if (dataset.issues && (item.kind === "schema" || item.kind === "transformation")) {
+          dataset.typed = false;
+          break;
+        }
+        if (!dataset.issues || !config$1.abortEarly && !config$1.abortPipeEarly) dataset = item["~run"](dataset, config$1);
+      }
+      return dataset;
+    }
+  };
+}
+
+// src/types/common.ts
+var InstrumentIdSchema = object({
+  /** Instrument name. For Canton Coin: "Amulet". */
+  id: string(),
+  /** Admin party ID for the instrument (e.g. DSO::1220...). */
+  admin: string()
+});
+var AssetSpecSchema = object({
+  instrumentId: InstrumentIdSchema
+});
+var DisclosedContractSchema = object({
+  templateId: string(),
+  contractId: string(),
+  /** Base64 `createdEventBlob` from the ledger. */
+  createdEventBlob: string(),
+  synchronizerId: string()
+});
+
+// src/types/requirements.ts
+var CantonPaymentRequirementsSchema = object({
+  scheme: string(),
+  network: string(),
+  maxAmountRequired: string(),
+  asset: AssetSpecSchema,
+  payTo: string(),
+  resource: string(),
+  description: optional(string()),
+  nonce: string(),
+  validBefore: string(),
+  maxTimeoutSeconds: optional(number()),
+  extra: optional(record(string(), unknown()))
+});
+function isCantonPaymentRequirements(x) {
+  return is(CantonPaymentRequirementsSchema, x);
+}
+function parseCantonPaymentRequirements(input) {
+  return parse(CantonPaymentRequirementsSchema, input);
+}
+var CantonPaymentRequiredResponseSchema = object({
+  x402Version: literal(2),
+  accepts: array(CantonPaymentRequirementsSchema),
+  error: optional(string())
+});
+
 // src/types/payment.ts
 var HashingSchemeVersion = {
   V2: "HASHING_SCHEME_VERSION_V2",
   V3: "HASHING_SCHEME_VERSION_V3"
 };
+var CantonPaymentInnerSchema = object({
+  /** Paying Canton party ID. */
+  payer: string(),
+  /** Base64-encoded opaque blob from /v2/interactive-submission/prepare. */
+  preparedTransaction: string(),
+  /** Hex of the hash that was signed. */
+  preparedTransactionHash: string(),
+  /** Hex Ed25519 signature over preparedTransactionHash. */
+  partySignature: string(),
+  /** SHA-256 of the canonical (RFC-8785) PaymentRequirements. */
+  requirementsHash: string(),
+  /**
+   * Base64 32-byte Ed25519 public key. Required — the facilitator verifies the
+   * signature against it and derives the party fingerprint from it (the party id's
+   * `::<fingerprint>` suffix is a hash of this key).
+   */
+  publicKey: string(),
+  /**
+   * Canton interactive-submission hashing scheme the payload was prepared with.
+   * Required — the signature is bound to a hash computed with this version, so the
+   * facilitator's execute must use the same one. Validated as a string (the
+   * {@link HashingSchemeVersion} open union is a type-level nicety).
+   */
+  hashingSchemeVersion: string()
+});
+var CantonPaymentPayloadSchema = object({
+  x402Version: literal(2),
+  scheme: string(),
+  network: string(),
+  payload: CantonPaymentInnerSchema
+});
+var X402PaymentEnvelopeSchema = looseObject({
+  x402Version: literal(2),
+  scheme: pipe(string(), minLength(1)),
+  network: string(),
+  payload: looseObject({})
+});
+function isX402PaymentPayload(x) {
+  return is(X402PaymentEnvelopeSchema, x);
+}
+function isCantonPaymentInner(x) {
+  return is(CantonPaymentInnerSchema, x);
+}
+function parseCantonPaymentInner(input) {
+  return parse(CantonPaymentInnerSchema, input);
+}
+
+// src/types/facilitator.ts
+var VerifyRequestSchema = object({
+  x402Version: literal(2),
+  paymentPayload: CantonPaymentPayloadSchema,
+  paymentRequirements: CantonPaymentRequirementsSchema
+});
+function isCantonVerifyRequest(x) {
+  return is(VerifyRequestSchema, x);
+}
+function parseCantonVerifyRequest(input) {
+  return parse(VerifyRequestSchema, input);
+}
+var X402RequestEnvelopeSchema = looseObject({
+  x402Version: literal(2),
+  paymentPayload: X402PaymentEnvelopeSchema,
+  paymentRequirements: looseObject({
+    scheme: pipe(string(), minLength(1)),
+    network: string(),
+    maxAmountRequired: pipe(string(), minLength(1)),
+    payTo: pipe(string(), minLength(1)),
+    nonce: pipe(string(), minLength(1)),
+    validBefore: pipe(string(), minLength(1)),
+    asset: looseObject({})
+  })
+});
+function isX402Request(x) {
+  return is(X402RequestEnvelopeSchema, x);
+}
+function parseX402Request(input) {
+  return parse(X402RequestEnvelopeSchema, input);
+}
+var VerifyInvalidReasonSchema = picklist([
+  "scheme_mismatch",
+  "network_mismatch",
+  "requirements_expired",
+  "requirements_hash_mismatch",
+  "bad_fingerprint",
+  "bad_signature",
+  "nonce_replayed",
+  "missing_public_key",
+  "transfer_mismatch",
+  "internal_error"
+]);
+var ExtensionsSchema = record(string(), unknown());
+var VerifyResponseValidSchema = object({
+  isValid: literal(true),
+  payer: optional(string()),
+  extensions: optional(ExtensionsSchema)
+});
+var VerifyResponseInvalidSchema = object({
+  isValid: literal(false),
+  invalidReason: VerifyInvalidReasonSchema,
+  payer: optional(string()),
+  extensions: optional(ExtensionsSchema)
+});
+var VerifyResponseSchema = variant("isValid", [
+  VerifyResponseValidSchema,
+  VerifyResponseInvalidSchema
+]);
+var SettleErrorReasonSchema = picklist([
+  "bad_request",
+  "unauthorized",
+  "scheme_mismatch",
+  "network_mismatch",
+  "requirements_expired",
+  "requirements_hash_mismatch",
+  "bad_fingerprint",
+  "bad_signature",
+  "nonce_replayed",
+  "execution_failed",
+  "timeout",
+  "facilitator_error"
+]);
+var SettleResponseSuccessSchema = object({
+  success: literal(true),
+  network: string(),
+  /** Canton updateId of the executed transaction. */
+  transaction: string(),
+  completionOffset: optional(string()),
+  payer: string(),
+  extensions: optional(ExtensionsSchema)
+});
+var SettleResponseErrorSchema = object({
+  success: literal(false),
+  errorReason: SettleErrorReasonSchema,
+  errorDetails: optional(string())
+});
+var SettleResponseSchema = variant("success", [
+  SettleResponseSuccessSchema,
+  SettleResponseErrorSchema
+]);
+var SupportedKindSchema = object({
+  x402Version: literal(2),
+  scheme: string(),
+  network: string(),
+  extra: optional(ExtensionsSchema)
+});
+var SupportedResponseSchema = object({
+  kinds: array(SupportedKindSchema)
+});
+
+// src/types/payment-object.ts
+var CantonPaymentObjectRequestSchema = object({
+  amount: string(),
+  merchantParty: string(),
+  payerParty: string(),
+  resource: string(),
+  description: optional(string()),
+  /** ISO 8601; when the resulting payment object expires. */
+  expiresAt: optional(string()),
+  /** Optional x402 payment signature for validation. */
+  x402Signature: optional(string()),
+  /** Optional webhook URL for async settlement notification. */
+  notificationUrl: optional(string()),
+  /** Payer's holding contract IDs; the facilitator queries them if omitted. */
+  holdingCids: optional(array(string())),
+  /** Asset to settle in; defaults to Amulet (admin = DSO) when omitted. */
+  asset: optional(AssetSpecSchema)
+});
+var CantonPaymentObjectSchema = object({
+  amount: string(),
+  merchantParty: string(),
+  payerParty: string(),
+  expiresAt: string(),
+  resource: string(),
+  description: optional(string()),
+  /** Facilitator fee (decimal string); "0.00" today. */
+  facilitatorFee: string(),
+  /** amount + facilitatorFee. */
+  totalAmount: string(),
+  transferFactory: object({
+    contractId: string(),
+    disclosedContracts: array(DisclosedContractSchema)
+  }),
+  /** Opaque Splice Token Standard choice context (registry-specific). */
+  choiceContext: record(string(), unknown())
+});
+var CantonPaymentObjectResponseSchema = object({
+  paymentObject: CantonPaymentObjectSchema,
+  paymentId: string(),
+  status: picklist(["ready", "pending", "completed"]),
+  notificationUrl: optional(string())
+});
 
 // ../../node_modules/.pnpm/@noble+hashes@2.2.0/node_modules/@noble/hashes/utils.js
 function isBytes(a) {
@@ -2501,7 +3334,7 @@ function hexToBytes(hex) {
   const al = hl / 2;
   if (hl % 2)
     throw new RangeError("hex string expected, got unpadded hex of length " + hl);
-  const array = new Uint8Array(al);
+  const array2 = new Uint8Array(al);
   for (let ai = 0, hi = 0; ai < al; ai++, hi += 2) {
     const n1 = asciiToBase16(hex.charCodeAt(hi));
     const n2 = asciiToBase16(hex.charCodeAt(hi + 1));
@@ -2509,9 +3342,9 @@ function hexToBytes(hex) {
       const char = hex[hi] + hex[hi + 1];
       throw new RangeError('hex string expected, got non-hex character "' + char + '" at index ' + hi);
     }
-    array[ai] = n1 * 16 + n2;
+    array2[ai] = n1 * 16 + n2;
   }
-  return array;
+  return array2;
 }
 function utf8ToBytes(str) {
   if (typeof str !== "string")
@@ -3105,9 +3938,6 @@ function serializeNumber(n) {
 }
 
 // src/verify/common.ts
-function isObj(v) {
-  return typeof v === "object" && v !== null;
-}
 function isValidAmount(amount) {
   return /^\d+(\.\d{1,10})?$/.test(amount);
 }
@@ -3129,10 +3959,6 @@ function schemeNetworkMatches(payload, requirements) {
 }
 function requirementsHashMatches(requirements, claimedHashHex) {
   return requirementsHash(requirements) === claimedHashHex;
-}
-function isX402PaymentPayload(v) {
-  if (!isObj(v)) return false;
-  return v.x402Version === 2 && typeof v.scheme === "string" && v.scheme.length > 0 && typeof v.network === "string" && isObj(v.payload);
 }
 
 // ../../node_modules/.pnpm/@noble+ed25519@3.1.0/node_modules/@noble/ed25519/index.js
@@ -3195,15 +4021,15 @@ var hexToBytes2 = (hex) => {
   const al = hl / 2;
   if (hl % 2)
     return err(e);
-  const array = u8n(al);
+  const array2 = u8n(al);
   for (let ai = 0, hi = 0; ai < al; ai++, hi += 2) {
     const n1 = _ch(hex.charCodeAt(hi));
     const n2 = _ch(hex.charCodeAt(hi + 1));
     if (n1 === void 0 || n2 === void 0)
       return err(e);
-    array[ai] = n1 * 16 + n2;
+    array2[ai] = n1 * 16 + n2;
   }
-  return array;
+  return array2;
 };
 var cr = () => globalThis?.crypto;
 var subtle = () => cr()?.subtle ?? err("crypto.subtle must be defined, consider polyfill");
@@ -3746,7 +4572,7 @@ function decodePreparedTransaction(preparedTransactionBase64) {
 hashes.sha512 = sha512;
 var EXACT_CANTON_SCHEME_ID = "exact-canton";
 var HASH_PURPOSE_FINGERPRINT = Uint8Array.of(0, 0, 0, 12);
-function isObj2(v) {
+function isObj(v) {
   return typeof v === "object" && v !== null;
 }
 function base64ToBytes2(b64) {
@@ -3786,19 +4612,6 @@ function parseCantonNetworkId(s) {
   if (!isCantonNetworkId(s)) throw new Error(`not a canton network id: ${s}`);
   return s;
 }
-function isCantonPaymentRequirements(v) {
-  if (!isObj2(v)) return false;
-  return typeof v.scheme === "string" && typeof v.network === "string" && typeof v.maxAmountRequired === "string" && typeof v.payTo === "string" && typeof v.resource === "string" && typeof v.nonce === "string" && typeof v.validBefore === "string" && isObj2(v.asset);
-}
-function isCantonPaymentInner(v) {
-  if (!isObj2(v)) return false;
-  return typeof v.payer === "string" && typeof v.preparedTransaction === "string" && typeof v.preparedTransactionHash === "string" && typeof v.partySignature === "string" && typeof v.requirementsHash === "string" && typeof v.publicKey === "string" && typeof v.hashingSchemeVersion === "string";
-}
-function isVerifyRequest(v) {
-  if (!isObj2(v)) return false;
-  const payload = v.paymentPayload;
-  return v.x402Version === 2 && isObj2(payload) && isCantonPaymentInner(payload.payload) && isCantonPaymentRequirements(v.paymentRequirements);
-}
 function fail(reason, payer) {
   return { isValid: false, invalidReason: reason, ...payer ? { payer } : {} };
 }
@@ -3809,7 +4622,7 @@ function verifyExactCanton(networkId, payload, requirements) {
   if (payload.network !== requirements.network || payload.network !== networkId) {
     return fail("network_mismatch");
   }
-  if (!isCantonPaymentRequirements(requirements) || !isObj2(payload.payload)) {
+  if (!isCantonPaymentRequirements(requirements) || !isObj(payload.payload)) {
     return fail("internal_error");
   }
   const raw = payload.payload;
@@ -3936,13 +4749,35 @@ function errMsg(err2) {
   return err2 instanceof Error ? err2.message : String(err2);
 }
 export {
+  AssetSpecSchema,
+  CantonPaymentInnerSchema,
+  CantonPaymentObjectRequestSchema,
+  CantonPaymentObjectResponseSchema,
+  CantonPaymentObjectSchema,
+  CantonPaymentPayloadSchema,
+  CantonPaymentRequiredResponseSchema,
+  CantonPaymentRequirementsSchema,
   DEVNET_DSO_PARTY,
   DEVNET_NETWORK,
   DEVNET_SYNCHRONIZER_ID,
+  DisclosedContractSchema,
   HashingSchemeVersion,
+  InstrumentIdSchema,
   MAINNET_DSO_PARTY,
   MAINNET_NETWORK,
   MAINNET_SYNCHRONIZER_ID,
+  SettleErrorReasonSchema,
+  SettleResponseErrorSchema,
+  SettleResponseSchema,
+  SettleResponseSuccessSchema,
+  SupportedKindSchema,
+  SupportedResponseSchema,
+  VerifyInvalidReasonSchema,
+  VerifyRequestSchema,
+  VerifyResponseInvalidSchema,
+  VerifyResponseSchema,
+  VerifyResponseValidSchema,
+  X402PaymentEnvelopeSchema,
   amountGte,
   amuletAsset,
   createExactCantonVerifier,
@@ -3955,12 +4790,17 @@ export {
   isCantonNetworkId,
   isCantonPaymentInner,
   isCantonPaymentRequirements,
+  isCantonVerifyRequest,
   isExpired,
   isValidAmount,
-  isVerifyRequest,
   isX402PaymentPayload,
+  isX402Request,
   matchesFingerprint,
   parseCantonNetworkId,
+  parseCantonPaymentInner,
+  parseCantonPaymentRequirements,
+  parseCantonVerifyRequest,
+  parseX402Request,
   requirementsHash,
   requirementsHashMatches,
   schemeNetworkMatches,

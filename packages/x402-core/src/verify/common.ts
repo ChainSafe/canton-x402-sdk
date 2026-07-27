@@ -7,10 +7,6 @@ import { requirementsHash } from "../hashing";
 import type { X402PaymentPayload } from "../types/payment";
 import type { X402PaymentRequirements } from "../types/requirements";
 
-function isObj(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null;
-}
-
 /** Decimal string with up to 10 fractional places (matches `maxAmountRequired`). */
 export function isValidAmount(amount: string): boolean {
   return /^\d+(\.\d{1,10})?$/.test(amount);
@@ -56,21 +52,4 @@ export function requirementsHashMatches(
   claimedHashHex: string,
 ): boolean {
   return requirementsHash(requirements) === claimedHashHex;
-}
-
-/**
- * Loose guard for the outer payment envelope: x402 v2, any non-empty scheme (the
- * per-scheme verifier validates the inner `payload` shape), a network, and a
- * `payload` object. Scheme-agnostic — intentionally does NOT assert any scheme's
- * inner fields; use a scheme guard (e.g. `isCantonPaymentInner`) for that.
- */
-export function isX402PaymentPayload(v: unknown): v is X402PaymentPayload<unknown> {
-  if (!isObj(v)) return false;
-  return (
-    v.x402Version === 2 &&
-    typeof v.scheme === "string" &&
-    v.scheme.length > 0 &&
-    typeof v.network === "string" &&
-    isObj(v.payload)
-  );
 }

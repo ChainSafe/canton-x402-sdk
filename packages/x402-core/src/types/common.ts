@@ -1,5 +1,13 @@
 // Shared kernel — primitives used across the x402 wire contract.
 // Spec: canton-x402 spec §5–§6.
+//
+// Object shapes are defined schema-first with valibot: the schema is the single
+// source of truth, and the exported type is inferred from it (`v.InferOutput`),
+// so a field added to a schema flows straight to the type — no drift between the
+// type and its validator. Scalar/union aliases below stay type-only where valibot
+// can't express them (open unions, literal-2 version).
+
+import * as v from "valibot";
 
 /**
  * x402 protocol version — the envelope discriminant. Pinned to `2` today; widen
@@ -14,9 +22,6 @@ export type X402Version = 2;
  * other schemes (e.g. an EVM bridge) use their own CAIP-2 id (`eip155:<chainId>`)
  * — so the shared type stays a plain string. The `canton:` shape is validated at
  * runtime by the exact-canton verify path (#5), not enforced here.
- *
- * FUTURE: once the envelope is parameterized per scheme, an exact-canton-specific
- * `CantonNetworkId = `canton:${string}`` can narrow this for that scheme only.
  */
 export type NetworkId = string;
 
@@ -31,25 +36,28 @@ export type NetworkId = string;
 export type Scheme = "exact-canton" | (string & {});
 
 /** Splice Token Standard instrument identifier. */
-export interface InstrumentId {
+export const InstrumentIdSchema = v.object({
   /** Instrument name. For Canton Coin: "Amulet". */
-  id: string;
+  id: v.string(),
   /** Admin party ID for the instrument (e.g. DSO::1220...). */
-  admin: string;
-}
+  admin: v.string(),
+});
+export type InstrumentId = v.InferOutput<typeof InstrumentIdSchema>;
 
-export interface AssetSpec {
-  instrumentId: InstrumentId;
-}
+export const AssetSpecSchema = v.object({
+  instrumentId: InstrumentIdSchema,
+});
+export type AssetSpec = v.InferOutput<typeof AssetSpecSchema>;
 
 /**
  * A contract disclosed alongside a prepared transaction (Canton Ledger API
  * `DisclosedContract`).
  */
-export interface DisclosedContract {
-  templateId: string;
-  contractId: string;
+export const DisclosedContractSchema = v.object({
+  templateId: v.string(),
+  contractId: v.string(),
   /** Base64 `createdEventBlob` from the ledger. */
-  createdEventBlob: string;
-  synchronizerId: string;
-}
+  createdEventBlob: v.string(),
+  synchronizerId: v.string(),
+});
+export type DisclosedContract = v.InferOutput<typeof DisclosedContractSchema>;
