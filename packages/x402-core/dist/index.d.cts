@@ -185,7 +185,7 @@ interface SchemeVerifier {
     readonly networkId: NetworkId;
     verify(payload: X402PaymentPayload<unknown>, requirements: X402PaymentRequirements<unknown>): VerifyResponse;
 }
-type VerifyInvalidReason = "scheme_mismatch" | "network_mismatch" | "requirements_expired" | "requirements_hash_mismatch" | "bad_fingerprint" | "bad_signature" | "nonce_replayed" | "missing_public_key" | "internal_error";
+type VerifyInvalidReason = "scheme_mismatch" | "network_mismatch" | "requirements_expired" | "requirements_hash_mismatch" | "bad_fingerprint" | "bad_signature" | "nonce_replayed" | "missing_public_key" | "transfer_mismatch" | "internal_error";
 interface VerifyResponseValid {
     isValid: true;
     payer?: string;
@@ -280,6 +280,12 @@ interface CantonPaymentObjectResponse {
 
 /** Decimal string with up to 10 fractional places (matches `maxAmountRequired`). */
 declare function isValidAmount(amount: string): boolean;
+/**
+ * Decimal-safe `a >= b` for x402 amount strings (non-negative, ≤10dp). Compares
+ * via integer scaling with BigInt — no float rounding. Returns false if either
+ * string is not a valid amount, so a malformed input never reads as "enough".
+ */
+declare function amountGte(a: string, b: string): boolean;
 /** True iff `validBefore` (ISO 8601) is unparseable or at/before `now` (expired). */
 declare function isExpired(validBefore: string, now?: number): boolean;
 /** The payload's scheme + network must match the requirements. */
@@ -298,6 +304,31 @@ declare function requirementsHashMatches(requirements: X402PaymentRequirements<u
  * inner fields; use a scheme guard (e.g. `isCantonPaymentInner`) for that.
  */
 declare function isX402PaymentPayload(v: unknown): v is X402PaymentPayload<unknown>;
+
+/**
+ * The transfer a prepared transaction authorizes, decoded out of the opaque
+ * `preparedTransaction` blob. Checked against the requirements by the verifier.
+ */
+interface DecodedTransfer {
+    /** Paying party — must equal the payment payload's `payer`. */
+    sender: string;
+    /** Receiving party — must equal `requirements.payTo`. */
+    receiver: string;
+    /** Transfer amount as a decimal string — must be ≥ `requirements.maxAmountRequired`. */
+    amount: string;
+    /** Instrument moved — must equal `requirements.asset.instrumentId`. */
+    instrumentId: {
+        id: string;
+        admin: string;
+    };
+}
+/**
+ * Decode the `preparedTransaction` blob (base64) into the transfer it authorizes,
+ * or `null` if it can't be decoded or contains no `TransferFactory_Transfer`
+ * exercise. Never throws — an undecodable blob is treated as "no proof of a
+ * matching transfer" and rejected upstream.
+ */
+declare function decodePreparedTransaction(preparedTransactionBase64: string): DecodedTransfer | null;
 
 /**
  * Canton key fingerprint for a base64 Ed25519 public key:
@@ -324,6 +355,14 @@ declare function parseCantonNetworkId(s: string): NetworkId;
 declare function isCantonPaymentRequirements(v: unknown): v is CantonPaymentRequirements;
 declare function isCantonPaymentInner(v: unknown): v is CantonPaymentInner;
 declare function isVerifyRequest(v: unknown): v is VerifyRequest;
+/**
+ * Check a decoded transfer against the requirements. Returns `null` when the
+ * transfer satisfies them, or a short field detail (`"sender" | "receiver" |
+ * "instrument" | "amount"`) naming the first divergence — surfaced in the
+ * `transfer_mismatch` response's `extensions.detail`. Overpayment is allowed
+ * (`amount >= maxAmountRequired`); the amount compare is decimal-safe.
+ */
+declare function findTransferMismatch(transfer: DecodedTransfer, requirements: CantonPaymentRequirements, payer: string): "sender" | "receiver" | "instrument" | "amount" | null;
 /**
  * Build an exact-canton {@link SchemeVerifier} bound to a specific Canton network
  * (`canton:<synchronizer-id>`) — mirroring how the facilitator reads its network
@@ -377,4 +416,4 @@ declare function decodePaymentHeader(headerValue: string): DecodedPaymentHeader;
  */
 declare function requirementsHash(requirements: X402PaymentRequirements<unknown>): string;
 
-export { type AssetSpec, type CantonPaymentInner, type CantonPaymentObject, type CantonPaymentObjectRequest, type CantonPaymentObjectResponse, type CantonPaymentPayload, type CantonPaymentRequiredResponse, type CantonPaymentRequirements, DEVNET_DSO_PARTY, DEVNET_NETWORK, DEVNET_SYNCHRONIZER_ID, type DecodedPaymentHeader, type DisclosedContract, HashingSchemeVersion, type InstrumentId, MAINNET_DSO_PARTY, MAINNET_NETWORK, MAINNET_SYNCHRONIZER_ID, type NetworkId, type Scheme, type SchemeVerifier, type SettleErrorReason, type SettleRequest, type SettleResponse, type SettleResponseError, type SettleResponseSuccess, type SupportedKind, type SupportedResponse, type VerifierRegistry, type VerifyInvalidReason, type VerifyRequest, type VerifyResponse, type VerifyResponseInvalid, type VerifyResponseValid, type X402PaymentPayload, type X402PaymentRequiredResponse, type X402PaymentRequirements, type X402Request, type X402Version, amuletAsset, createExactCantonVerifier, createVerifierRegistry, decodePaymentHeader, encodePaymentHeader, fingerprintForPublicKey, isCantonNetworkId, isCantonPaymentInner, isCantonPaymentRequirements, isExpired, isValidAmount, isVerifyRequest, isX402PaymentPayload, matchesFingerprint, parseCantonNetworkId, requirementsHash, requirementsHashMatches, schemeNetworkMatches, signHash, verifySignature };
+export { type AssetSpec, type CantonPaymentInner, type CantonPaymentObject, type CantonPaymentObjectRequest, type CantonPaymentObjectResponse, type CantonPaymentPayload, type CantonPaymentRequiredResponse, type CantonPaymentRequirements, DEVNET_DSO_PARTY, DEVNET_NETWORK, DEVNET_SYNCHRONIZER_ID, type DecodedPaymentHeader, type DecodedTransfer, type DisclosedContract, HashingSchemeVersion, type InstrumentId, MAINNET_DSO_PARTY, MAINNET_NETWORK, MAINNET_SYNCHRONIZER_ID, type NetworkId, type Scheme, type SchemeVerifier, type SettleErrorReason, type SettleRequest, type SettleResponse, type SettleResponseError, type SettleResponseSuccess, type SupportedKind, type SupportedResponse, type VerifierRegistry, type VerifyInvalidReason, type VerifyRequest, type VerifyResponse, type VerifyResponseInvalid, type VerifyResponseValid, type X402PaymentPayload, type X402PaymentRequiredResponse, type X402PaymentRequirements, type X402Request, type X402Version, amountGte, amuletAsset, createExactCantonVerifier, createVerifierRegistry, decodePaymentHeader, decodePreparedTransaction, encodePaymentHeader, findTransferMismatch, fingerprintForPublicKey, isCantonNetworkId, isCantonPaymentInner, isCantonPaymentRequirements, isExpired, isValidAmount, isVerifyRequest, isX402PaymentPayload, matchesFingerprint, parseCantonNetworkId, requirementsHash, requirementsHashMatches, schemeNetworkMatches, signHash, verifySignature };

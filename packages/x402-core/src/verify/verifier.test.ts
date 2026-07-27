@@ -8,6 +8,7 @@ import {
   signHash,
 } from "./index";
 import { requirementsHash } from "../hashing";
+import { encodePreparedTransaction } from "./prepared-tx.fixtures";
 import type {
   CantonPaymentPayload,
   CantonPaymentRequirements,
@@ -41,13 +42,22 @@ function buildSignedFixture() {
   const preparedTransactionHash = "aa".repeat(32); // 32-byte hex message
   const partySignature = signHash(preparedTransactionHash, toB64(seed));
 
+  // A prepared-transaction blob whose TransferFactory_Transfer matches the
+  // requirements (payer → payTo, the required Amulet, the required amount).
+  const preparedTransaction = encodePreparedTransaction({
+    sender: payer,
+    receiver: requirements.payTo,
+    amount: requirements.maxAmountRequired,
+    instrumentId: requirements.asset.instrumentId,
+  });
+
   const payload: CantonPaymentPayload = {
     x402Version: 2,
     scheme: "exact-canton",
     network: NETWORK,
     payload: {
       payer,
-      preparedTransaction: "cHJlcGFyZWQ=",
+      preparedTransaction,
       preparedTransactionHash,
       partySignature,
       requirementsHash: requirementsHash(requirements),
