@@ -91,7 +91,6 @@ export const VerifyInvalidReasonSchema = v.picklist([
   "bad_signature",
   "nonce_replayed",
   "missing_public_key",
-  /** The signed prepared transaction does not transfer what the requirements demand. */
   "transfer_mismatch",
   "internal_error",
 ]);
