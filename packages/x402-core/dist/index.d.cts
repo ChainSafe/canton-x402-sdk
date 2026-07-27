@@ -109,6 +109,25 @@ type CantonPaymentRequirements = v.InferOutput<typeof CantonPaymentRequirementsS
 declare function isCantonPaymentRequirements(x: unknown): x is CantonPaymentRequirements;
 declare function parseCantonPaymentRequirements(input: unknown): CantonPaymentRequirements;
 /**
+ * Loose validator for the requirements envelope: the universal fields every scheme
+ * shares, with a scheme-agnostic `asset` object (the concrete asset shape is the
+ * per-scheme seam). `looseObject` so a scheme's extra keys pass through. Mirrors
+ * {@link isX402PaymentPayload} — envelope-level validation only; the per-scheme
+ * verifier checks the concrete asset (use {@link isCantonPaymentRequirements} for
+ * exact-canton). This is the requirements shape carried in the X402 request +
+ * X-PAYMENT envelopes.
+ */
+declare const X402PaymentRequirementsEnvelopeSchema: v.LooseObjectSchema<{
+    readonly scheme: v.SchemaWithPipe<readonly [v.StringSchema<undefined>, v.MinLengthAction<string, 1, undefined>]>;
+    readonly network: v.StringSchema<undefined>;
+    readonly maxAmountRequired: v.SchemaWithPipe<readonly [v.StringSchema<undefined>, v.MinLengthAction<string, 1, undefined>]>;
+    readonly payTo: v.SchemaWithPipe<readonly [v.StringSchema<undefined>, v.MinLengthAction<string, 1, undefined>]>;
+    readonly nonce: v.SchemaWithPipe<readonly [v.StringSchema<undefined>, v.MinLengthAction<string, 1, undefined>]>;
+    readonly validBefore: v.SchemaWithPipe<readonly [v.StringSchema<undefined>, v.MinLengthAction<string, 1, undefined>]>;
+    readonly asset: v.LooseObjectSchema<{}, undefined>;
+}, undefined>;
+declare function isX402PaymentRequirements(x: unknown): x is X402PaymentRequirements<unknown>;
+/**
  * The `402 Payment Required` response body — returned by the merchant/resource
  * server, listing the payment options the client may satisfy. The client picks
  * one of `accepts[]`, pays it, and retries the request with the `X-PAYMENT`
@@ -254,6 +273,9 @@ declare function isX402PaymentPayload(x: unknown): x is X402PaymentPayload<unkno
 /** exact-canton inner-payload guard + parser (schema-derived). */
 declare function isCantonPaymentInner(x: unknown): x is CantonPaymentInner;
 declare function parseCantonPaymentInner(input: unknown): CantonPaymentInner;
+/** exact-canton payload guard + parser — the full envelope incl. the inner (schema-derived). */
+declare function isCantonPaymentPayload(x: unknown): x is CantonPaymentPayload;
+declare function parseCantonPaymentPayload(input: unknown): CantonPaymentPayload;
 
 /**
  * Generic request body for POST /v2/verify and /v2/settle — payload + requirements,
@@ -588,20 +610,40 @@ declare const MAINNET_DSO_PARTY = "DSO::1220b1431ef217342db44d516bb9befde802be7d
 /** Amulet (Canton Coin) instrument for a given DSO admin party. */
 declare function amuletAsset(dsoParty: string): AssetSpec;
 
-interface DecodedPaymentHeader {
-    payload: CantonPaymentPayload;
+/**
+ * The decoded X-PAYMENT slots. Generic over the payment + requirements types so a
+ * future scheme can parameterize it; both default to the exact-canton concrete
+ * types, so existing use (and `decodePaymentHeader`'s return) is unchanged. Widening
+ * to another scheme later needs no breaking change here.
+ */
+interface DecodedPaymentHeader<TPayload = CantonPaymentPayload, TRequirements = CantonPaymentRequirements> {
+    payload: TPayload;
     /** The requirements the payload was signed against, echoed from the 402. */
-    requirements: CantonPaymentRequirements;
+    requirements: TRequirements;
 }
 /**
  * Serialise a payment together with the requirements it was signed against into
- * an `X-PAYMENT` header value. Inverse of {@link decodePaymentHeader}.
+ * an `X-PAYMENT` header value ({@link decodePaymentHeader} is the inverse).
+ * Scheme-agnostic at runtime (it just serialises); generic over the two slot types
+ * so any scheme's payload/requirements can be encoded.
  */
-declare function encodePaymentHeader(payload: CantonPaymentPayload, requirements: CantonPaymentRequirements): string;
+declare function encodePaymentHeader<TPayload = CantonPaymentPayload, TRequirements = CantonPaymentRequirements>(payload: TPayload, requirements: TRequirements): string;
 /**
- * Parse an `X-PAYMENT` header value into the payment payload and the requirements
- * it was signed against. Throws on bad base64 / JSON / envelope shape, or when the
- * requirements are missing.
+ * Parse an `X-PAYMENT` header value into its `payment` + `requirements` slots.
+ * Throws on bad base64 / JSON / envelope shape, or when either slot is missing or
+ * not a well-formed x402 envelope.
+ *
+ * Validation here is **envelope-level and scheme-agnostic** (x402 v2 shape, a scheme,
+ * a network, a payload object, the universal requirements fields) — deliberately *not*
+ * the concrete per-scheme inner. Concrete validation is the verifier's job: the
+ * facilitator (or a local {@link createExactCantonVerifier}) checks the scheme-specific
+ * inner + asset and the signature before the payment is trusted. This keeps the codec
+ * one scheme-agnostic seam and avoids duplicating per-scheme knowledge here.
+ *
+ * The slots are typed as the exact-canton concrete types by default (see
+ * {@link DecodedPaymentHeader}) for caller convenience; that's optimistic — a caller
+ * MUST verify before relying on scheme-specific fields. A future scheme narrows via
+ * the generic parameters.
  */
 declare function decodePaymentHeader(headerValue: string): DecodedPaymentHeader;
 
@@ -613,4 +655,4 @@ declare function decodePaymentHeader(headerValue: string): DecodedPaymentHeader;
  */
 declare function requirementsHash(requirements: X402PaymentRequirements<unknown>): string;
 
-export { type AssetSpec, AssetSpecSchema, type CantonPaymentInner, CantonPaymentInnerSchema, type CantonPaymentObject, type CantonPaymentObjectRequest, CantonPaymentObjectRequestSchema, type CantonPaymentObjectResponse, CantonPaymentObjectResponseSchema, CantonPaymentObjectSchema, type CantonPaymentPayload, CantonPaymentPayloadSchema, type CantonPaymentRequiredResponse, CantonPaymentRequiredResponseSchema, type CantonPaymentRequirements, CantonPaymentRequirementsSchema, DEVNET_DSO_PARTY, DEVNET_NETWORK, DEVNET_SYNCHRONIZER_ID, type DecodedPaymentHeader, type DecodedTransfer, type DisclosedContract, DisclosedContractSchema, HashingSchemeVersion, type InstrumentId, InstrumentIdSchema, MAINNET_DSO_PARTY, MAINNET_NETWORK, MAINNET_SYNCHRONIZER_ID, type NetworkId, type Scheme, type SchemeVerifier, type SettleErrorReason, SettleErrorReasonSchema, type SettleRequest, type SettleResponse, type SettleResponseError, SettleResponseErrorSchema, SettleResponseSchema, type SettleResponseSuccess, SettleResponseSuccessSchema, type SupportedKind, SupportedKindSchema, type SupportedResponse, SupportedResponseSchema, type VerifierRegistry, type VerifyInvalidReason, VerifyInvalidReasonSchema, type VerifyRequest, VerifyRequestSchema, type VerifyResponse, type VerifyResponseInvalid, VerifyResponseInvalidSchema, VerifyResponseSchema, type VerifyResponseValid, VerifyResponseValidSchema, X402PaymentEnvelopeSchema, type X402PaymentPayload, type X402PaymentRequiredResponse, type X402PaymentRequirements, type X402Request, type X402Version, amountGte, amuletAsset, createExactCantonVerifier, createVerifierRegistry, decodePaymentHeader, decodePreparedTransaction, encodePaymentHeader, findTransferMismatch, fingerprintForPublicKey, isCantonNetworkId, isCantonPaymentInner, isCantonPaymentRequirements, isCantonVerifyRequest, isExpired, isValidAmount, isX402PaymentPayload, isX402Request, matchesFingerprint, parseCantonNetworkId, parseCantonPaymentInner, parseCantonPaymentRequirements, parseCantonVerifyRequest, parseX402Request, requirementsHash, requirementsHashMatches, schemeNetworkMatches, signHash, verifySignature };
+export { type AssetSpec, AssetSpecSchema, type CantonPaymentInner, CantonPaymentInnerSchema, type CantonPaymentObject, type CantonPaymentObjectRequest, CantonPaymentObjectRequestSchema, type CantonPaymentObjectResponse, CantonPaymentObjectResponseSchema, CantonPaymentObjectSchema, type CantonPaymentPayload, CantonPaymentPayloadSchema, type CantonPaymentRequiredResponse, CantonPaymentRequiredResponseSchema, type CantonPaymentRequirements, CantonPaymentRequirementsSchema, DEVNET_DSO_PARTY, DEVNET_NETWORK, DEVNET_SYNCHRONIZER_ID, type DecodedPaymentHeader, type DecodedTransfer, type DisclosedContract, DisclosedContractSchema, HashingSchemeVersion, type InstrumentId, InstrumentIdSchema, MAINNET_DSO_PARTY, MAINNET_NETWORK, MAINNET_SYNCHRONIZER_ID, type NetworkId, type Scheme, type SchemeVerifier, type SettleErrorReason, SettleErrorReasonSchema, type SettleRequest, type SettleResponse, type SettleResponseError, SettleResponseErrorSchema, SettleResponseSchema, type SettleResponseSuccess, SettleResponseSuccessSchema, type SupportedKind, SupportedKindSchema, type SupportedResponse, SupportedResponseSchema, type VerifierRegistry, type VerifyInvalidReason, VerifyInvalidReasonSchema, type VerifyRequest, VerifyRequestSchema, type VerifyResponse, type VerifyResponseInvalid, VerifyResponseInvalidSchema, VerifyResponseSchema, type VerifyResponseValid, VerifyResponseValidSchema, X402PaymentEnvelopeSchema, type X402PaymentPayload, type X402PaymentRequiredResponse, type X402PaymentRequirements, X402PaymentRequirementsEnvelopeSchema, type X402Request, type X402Version, amountGte, amuletAsset, createExactCantonVerifier, createVerifierRegistry, decodePaymentHeader, decodePreparedTransaction, encodePaymentHeader, findTransferMismatch, fingerprintForPublicKey, isCantonNetworkId, isCantonPaymentInner, isCantonPaymentPayload, isCantonPaymentRequirements, isCantonVerifyRequest, isExpired, isValidAmount, isX402PaymentPayload, isX402PaymentRequirements, isX402Request, matchesFingerprint, parseCantonNetworkId, parseCantonPaymentInner, parseCantonPaymentPayload, parseCantonPaymentRequirements, parseCantonVerifyRequest, parseX402Request, requirementsHash, requirementsHashMatches, schemeNetworkMatches, signHash, verifySignature };

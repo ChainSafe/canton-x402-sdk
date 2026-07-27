@@ -2449,6 +2449,7 @@ __export(index_exports, {
   VerifyResponseSchema: () => VerifyResponseSchema,
   VerifyResponseValidSchema: () => VerifyResponseValidSchema,
   X402PaymentEnvelopeSchema: () => X402PaymentEnvelopeSchema,
+  X402PaymentRequirementsEnvelopeSchema: () => X402PaymentRequirementsEnvelopeSchema,
   amountGte: () => amountGte,
   amuletAsset: () => amuletAsset,
   createExactCantonVerifier: () => createExactCantonVerifier,
@@ -2460,15 +2461,18 @@ __export(index_exports, {
   fingerprintForPublicKey: () => fingerprintForPublicKey,
   isCantonNetworkId: () => isCantonNetworkId,
   isCantonPaymentInner: () => isCantonPaymentInner,
+  isCantonPaymentPayload: () => isCantonPaymentPayload,
   isCantonPaymentRequirements: () => isCantonPaymentRequirements,
   isCantonVerifyRequest: () => isCantonVerifyRequest,
   isExpired: () => isExpired,
   isValidAmount: () => isValidAmount,
   isX402PaymentPayload: () => isX402PaymentPayload,
+  isX402PaymentRequirements: () => isX402PaymentRequirements,
   isX402Request: () => isX402Request,
   matchesFingerprint: () => matchesFingerprint,
   parseCantonNetworkId: () => parseCantonNetworkId,
   parseCantonPaymentInner: () => parseCantonPaymentInner,
+  parseCantonPaymentPayload: () => parseCantonPaymentPayload,
   parseCantonPaymentRequirements: () => parseCantonPaymentRequirements,
   parseCantonVerifyRequest: () => parseCantonVerifyRequest,
   parseX402Request: () => parseX402Request,
@@ -3117,6 +3121,18 @@ function isCantonPaymentRequirements(x) {
 function parseCantonPaymentRequirements(input) {
   return parse(CantonPaymentRequirementsSchema, input);
 }
+var X402PaymentRequirementsEnvelopeSchema = looseObject({
+  scheme: pipe(string(), minLength(1)),
+  network: string(),
+  maxAmountRequired: pipe(string(), minLength(1)),
+  payTo: pipe(string(), minLength(1)),
+  nonce: pipe(string(), minLength(1)),
+  validBefore: pipe(string(), minLength(1)),
+  asset: looseObject({})
+});
+function isX402PaymentRequirements(x) {
+  return is(X402PaymentRequirementsEnvelopeSchema, x);
+}
 var CantonPaymentRequiredResponseSchema = object({
   x402Version: literal(2),
   accepts: array(CantonPaymentRequirementsSchema),
@@ -3174,6 +3190,12 @@ function isCantonPaymentInner(x) {
 function parseCantonPaymentInner(input) {
   return parse(CantonPaymentInnerSchema, input);
 }
+function isCantonPaymentPayload(x) {
+  return is(CantonPaymentPayloadSchema, x);
+}
+function parseCantonPaymentPayload(input) {
+  return parse(CantonPaymentPayloadSchema, input);
+}
 
 // src/types/facilitator.ts
 var VerifyRequestSchema = object({
@@ -3190,15 +3212,7 @@ function parseCantonVerifyRequest(input) {
 var X402RequestEnvelopeSchema = looseObject({
   x402Version: literal(2),
   paymentPayload: X402PaymentEnvelopeSchema,
-  paymentRequirements: looseObject({
-    scheme: pipe(string(), minLength(1)),
-    network: string(),
-    maxAmountRequired: pipe(string(), minLength(1)),
-    payTo: pipe(string(), minLength(1)),
-    nonce: pipe(string(), minLength(1)),
-    validBefore: pipe(string(), minLength(1)),
-    asset: looseObject({})
-  })
+  paymentRequirements: X402PaymentRequirementsEnvelopeSchema
 });
 function isX402Request(x) {
   return is(X402RequestEnvelopeSchema, x);
@@ -4779,7 +4793,7 @@ function amuletAsset(dsoParty) {
 
 // src/payment-header.ts
 function encodePaymentHeader(payload, requirements) {
-  const envelope = { ...payload, paymentRequirements: requirements };
+  const envelope = { payment: payload, requirements };
   return bytesToBase64(new TextEncoder().encode(JSON.stringify(envelope)));
 }
 function decodePaymentHeader(headerValue) {
@@ -4795,14 +4809,17 @@ function decodePaymentHeader(headerValue) {
   } catch (err2) {
     throw new Error(`X-PAYMENT is not valid JSON: ${errMsg(err2)}`);
   }
-  if (!isX402PaymentPayload(parsed)) {
-    throw new Error("X-PAYMENT did not decode to an x402 payment payload (check scheme/x402Version/payload)");
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error("X-PAYMENT did not decode to a { payment, requirements } envelope");
   }
-  const { paymentRequirements, ...payload } = parsed;
-  if (!paymentRequirements) {
-    throw new Error("X-PAYMENT is missing paymentRequirements (the requirements the payload was signed against)");
+  const { payment, requirements } = parsed;
+  if (!isX402PaymentPayload(payment)) {
+    throw new Error("X-PAYMENT `payment` slot is missing or not a valid payment envelope");
   }
-  return { payload, requirements: paymentRequirements };
+  if (!isX402PaymentRequirements(requirements)) {
+    throw new Error("X-PAYMENT `requirements` slot is missing or not valid payment requirements");
+  }
+  return { payload: payment, requirements };
 }
 function bytesToBase64(bytes) {
   let bin = "";
@@ -4849,6 +4866,7 @@ function errMsg(err2) {
   VerifyResponseSchema,
   VerifyResponseValidSchema,
   X402PaymentEnvelopeSchema,
+  X402PaymentRequirementsEnvelopeSchema,
   amountGte,
   amuletAsset,
   createExactCantonVerifier,
@@ -4860,15 +4878,18 @@ function errMsg(err2) {
   fingerprintForPublicKey,
   isCantonNetworkId,
   isCantonPaymentInner,
+  isCantonPaymentPayload,
   isCantonPaymentRequirements,
   isCantonVerifyRequest,
   isExpired,
   isValidAmount,
   isX402PaymentPayload,
+  isX402PaymentRequirements,
   isX402Request,
   matchesFingerprint,
   parseCantonNetworkId,
   parseCantonPaymentInner,
+  parseCantonPaymentPayload,
   parseCantonPaymentRequirements,
   parseCantonVerifyRequest,
   parseX402Request,

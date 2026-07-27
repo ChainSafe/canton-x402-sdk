@@ -83,6 +83,7 @@ export const X402PaymentEnvelopeSchema = v.looseObject({
   network: v.string(),
   payload: v.looseObject({}),
 });
+
 export function isX402PaymentPayload(x: unknown): x is X402PaymentPayload<unknown> {
   return v.is(X402PaymentEnvelopeSchema, x);
 }
@@ -93,4 +94,12 @@ export function isCantonPaymentInner(x: unknown): x is CantonPaymentInner {
 }
 export function parseCantonPaymentInner(input: unknown): CantonPaymentInner {
   return v.parse(CantonPaymentInnerSchema, input);
+}
+
+/** exact-canton payload guard + parser — the full envelope incl. the inner (schema-derived). */
+export function isCantonPaymentPayload(x: unknown): x is CantonPaymentPayload {
+  return v.is(CantonPaymentPayloadSchema, x);
+}
+export function parseCantonPaymentPayload(input: unknown): CantonPaymentPayload {
+  return v.parse(CantonPaymentPayloadSchema, input);
 }

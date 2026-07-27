@@ -60,6 +60,29 @@ export function parseCantonPaymentRequirements(input: unknown): CantonPaymentReq
 }
 
 /**
+ * Loose validator for the requirements envelope: the universal fields every scheme
+ * shares, with a scheme-agnostic `asset` object (the concrete asset shape is the
+ * per-scheme seam). `looseObject` so a scheme's extra keys pass through. Mirrors
+ * {@link isX402PaymentPayload} — envelope-level validation only; the per-scheme
+ * verifier checks the concrete asset (use {@link isCantonPaymentRequirements} for
+ * exact-canton). This is the requirements shape carried in the X402 request +
+ * X-PAYMENT envelopes.
+ */
+export const X402PaymentRequirementsEnvelopeSchema = v.looseObject({
+  scheme: v.pipe(v.string(), v.minLength(1)),
+  network: v.string(),
+  maxAmountRequired: v.pipe(v.string(), v.minLength(1)),
+  payTo: v.pipe(v.string(), v.minLength(1)),
+  nonce: v.pipe(v.string(), v.minLength(1)),
+  validBefore: v.pipe(v.string(), v.minLength(1)),
+  asset: v.looseObject({}),
+});
+
+export function isX402PaymentRequirements(x: unknown): x is X402PaymentRequirements<unknown> {
+  return v.is(X402PaymentRequirementsEnvelopeSchema, x);
+}
+
+/**
  * The `402 Payment Required` response body — returned by the merchant/resource
  * server, listing the payment options the client may satisfy. The client picks
  * one of `accepts[]`, pays it, and retries the request with the `X-PAYMENT`
@@ -83,4 +106,7 @@ export const CantonPaymentRequiredResponseSchema = v.object({
   accepts: v.array(CantonPaymentRequirementsSchema),
   error: v.optional(v.string()),
 });
-export type CantonPaymentRequiredResponse = v.InferOutput<typeof CantonPaymentRequiredResponseSchema>;
+
+export type CantonPaymentRequiredResponse = v.InferOutput<
+  typeof CantonPaymentRequiredResponseSchema
+>;

@@ -1,6 +1,9 @@
 import * as v from "valibot";
 import { CantonPaymentPayloadSchema, X402PaymentEnvelopeSchema } from "./payment";
-import { CantonPaymentRequirementsSchema } from "./requirements";
+import {
+  CantonPaymentRequirementsSchema,
+  X402PaymentRequirementsEnvelopeSchema,
+} from "./requirements";
 import type { AssetSpec, NetworkId, X402Version } from "./common";
 import type { CantonPaymentInner, X402PaymentPayload } from "./payment";
 import type { X402PaymentRequirements } from "./requirements";
@@ -47,15 +50,7 @@ export function parseCantonVerifyRequest(input: unknown): VerifyRequest {
 const X402RequestEnvelopeSchema = v.looseObject({
   x402Version: v.literal(2),
   paymentPayload: X402PaymentEnvelopeSchema,
-  paymentRequirements: v.looseObject({
-    scheme: v.pipe(v.string(), v.minLength(1)),
-    network: v.string(),
-    maxAmountRequired: v.pipe(v.string(), v.minLength(1)),
-    payTo: v.pipe(v.string(), v.minLength(1)),
-    nonce: v.pipe(v.string(), v.minLength(1)),
-    validBefore: v.pipe(v.string(), v.minLength(1)),
-    asset: v.looseObject({}),
-  }),
+  paymentRequirements: X402PaymentRequirementsEnvelopeSchema,
 });
 export function isX402Request(x: unknown): x is X402Request<unknown> {
   return v.is(X402RequestEnvelopeSchema, x);
