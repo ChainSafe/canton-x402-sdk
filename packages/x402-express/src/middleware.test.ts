@@ -63,8 +63,16 @@ function paymentHeader(overrides: Record<string, unknown> = {}): string {
     x402Version: 2,
     scheme: "exact-canton",
     network: "canton:x",
-    payload: { payer: "alice::x" },
-  } as unknown as CantonPaymentPayload;
+    payload: {
+      payer: "alice::x",
+      preparedTransaction: "b",
+      preparedTransactionHash: "h",
+      partySignature: "s",
+      requirementsHash: "rh",
+      publicKey: "pk",
+      hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
+    },
+  } as CantonPaymentPayload;
   return encodePaymentHeader(payload, requirements);
 }
 
