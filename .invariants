@@ -1,0 +1,59 @@
+# Scoped stubs — cascade targets for apex /.invariants
+# Code owners: replace claims/verify with this repo's real enforcement. Do not drop ids that apex cascades_to.
+
+version: "1.0"
+scope: "canton-x402-sdk — exact-canton wire packages (@chainsafe/x402-*)"
+inherits: "../.invariants"
+since: "2026-08-02"
+authority: "SDK maintainers — not agent-writable"
+
+asserts:
+
+  - id: exact_canton_scheme_id
+    claim: "TODO(owners): scheme id exact-canton is defined and exported here."
+    source: codebase
+    severity: FROZEN
+    cascades_to:
+      - "../.invariants#exact_canton_scheme_only"
+
+  - id: core_exports_wire_contract
+    claim: "TODO(owners): @chainsafe/x402-core publishes the wire types and verify primitives consumers share."
+    source: codebase
+    severity: FROZEN
+    cascades_to:
+      - "../.invariants#sdk_published_packages_are_wire_authority"
+
+  - id: express_package_is_merchant_entry
+    claim: "TODO(owners): @chainsafe/x402-express is the merchant resource-server entry package."
+    source: codebase
+    severity: FROZEN
+    cascades_to:
+      - "../.invariants#merchant_integrates_via_chainsafe_x402_express"
+
+  - id: payment_header_and_version
+    claim: "TODO(owners): x402Version 2 and X-PAYMENT encoding live in this SDK."
+    source: codebase
+    severity: FROZEN
+    cascades_to:
+      - "../.invariants#x402_v2_payment_wire_contract"
+
+  - id: requirements_hash_canonical
+    claim: "TODO(owners): requirementsHash (RFC-8785) is computed here and is the stack canonical."
+    source: codebase
+    severity: FROZEN
+    cascades_to:
+      - "../.invariants#requirements_hash_binds_payload_to_requirements"
+
+  - id: canton_network_id_form
+    claim: "TODO(owners): canton:<synchronizer-id> and Amulet asset presets are defined here."
+    source: codebase
+    severity: FROZEN
+    cascades_to:
+      - "../.invariants#network_and_amulet_identity_consistent"
+
+  - id: breaking_wire_changes_are_major
+    claim: "TODO(owners): breaking wire/verify changes ship as semver majors on published packages."
+    source: architectural
+    severity: VERSIONED
+    cascades_to:
+      - "../.invariants#published_sdk_semver_migration"
