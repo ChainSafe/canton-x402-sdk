@@ -1,7 +1,8 @@
 name: PR Title
 
 # Squash-merge uses the PR title as the commit message, so that's what must be
-# a valid Conventional Commit (Release Please reads it). Re-checks on edit.
+# a valid Conventional Commit — keeps main's history readable (versioning itself
+# is driven by changesets, not the commit message). Re-checks on edit.
 on:
   pull_request:
     types: [opened, edited, reopened]
