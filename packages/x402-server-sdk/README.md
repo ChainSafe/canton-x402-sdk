@@ -31,10 +31,13 @@ const amuletRegistry = "https://<your-validator>/api/validator/v0/scan-proxy";
 // Auth — see below. DevNet/TestNet/MainNet use OAuth2 client_credentials:
 const auth: TokenProviderConfig = {
   method: "client_credentials",
-  audience: net.auth.audience,
-  scope: net.auth.scope,
-  clientId: process.env.CANTON_OAUTH_CLIENT_ID!,
-  clientSecret: process.env.CANTON_OAUTH_CLIENT_SECRET!,
+  configUrl: process.env.CANTON_OAUTH_CONFIG_URL!, // OIDC discovery URL
+  credentials: {
+    clientId: process.env.CANTON_OAUTH_CLIENT_ID!,
+    clientSecret: process.env.CANTON_OAUTH_CLIENT_SECRET!,
+    scope: net.auth.scope,
+    audience: net.auth.audience,
+  },
 };
 
 // 1. Build a wallet-sdk instance with the token namespace.
@@ -62,26 +65,33 @@ const payload = await payer.authorize(requirements); // CantonPaymentRequirement
 
 ### Auth by environment
 
-`SDK.create` takes a wallet-sdk `TokenProviderConfig`. Which `method` depends on the network:
+`SDK.create` takes a wallet-sdk `TokenProviderConfig`. The credentials are nested under
+`credentials`; the discriminator carries `issuer` (self-signed) or `configUrl` (client
+credentials). Which `method` depends on the network:
 
 ```ts
 // LocalNet — unsafe self-signed JWT (no real IdP)
 const auth: TokenProviderConfig = {
   method: "self_signed",
   issuer: "unsafe-auth",
-  audience: net.auth.audience,
-  scope: "",
-  clientId: "ledger-api-user",
-  clientSecret: "unsafe",
+  credentials: {
+    clientId: "ledger-api-user",
+    clientSecret: "unsafe",
+    scope: net.auth.scope,
+    audience: net.auth.audience,
+  },
 };
 
 // DevNet / TestNet / MainNet — OAuth2 client credentials from your validator operator
 const auth: TokenProviderConfig = {
   method: "client_credentials",
-  audience: net.auth.audience,
-  scope: net.auth.scope,
-  clientId: process.env.CANTON_OAUTH_CLIENT_ID!,
-  clientSecret: process.env.CANTON_OAUTH_CLIENT_SECRET!,
+  configUrl: process.env.CANTON_OAUTH_CONFIG_URL!, // OIDC discovery URL
+  credentials: {
+    clientId: process.env.CANTON_OAUTH_CLIENT_ID!,
+    clientSecret: process.env.CANTON_OAUTH_CLIENT_SECRET!,
+    scope: net.auth.scope,
+    audience: net.auth.audience,
+  },
 };
 ```
 
