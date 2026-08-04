@@ -3,6 +3,21 @@
   "version": "0.0.1",
   "description": "Chain-agnostic client for a Canton x402 facilitator — verify / settle / supported.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChainSafe/canton-x402-sdk.git",
+    "directory": "packages/x402-client"
+  },
+  "homepage": "https://github.com/ChainSafe/canton-x402-sdk/tree/main/packages/x402-client#readme",
+  "bugs": "https://github.com/ChainSafe/canton-x402-sdk/issues",
+  "keywords": ["x402", "canton", "payments", "facilitator", "client"],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
@@ -20,16 +35,18 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.map"
   ],
   "dependencies": {
-    "@chainsafe/x402-core": "workspace:*"
+    "@chainsafe/x402-core": "workspace:^"
   },
   "devDependencies": {
     "tsup": "^8.3.0",
     "typescript": "^5.6.0"
   },
   "scripts": {
+    "prepack": "tsup",
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"

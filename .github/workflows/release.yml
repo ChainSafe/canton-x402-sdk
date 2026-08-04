@@ -1,0 +1,54 @@
+name: Release
+
+# Changesets flow: a push to main with pending changesets opens (or updates) a
+# "Version Packages" PR that bumps versions and writes changelogs. Merging that
+# PR runs `changeset publish`, which publishes every package whose version isn't
+# already on npm — independently, in topological order.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the Version PR / push tags
+  pull-requests: write # open and update the Version PR
+  id-token: write # npm provenance (OIDC)
+
+jobs:
+  release:
+    name: version or publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4 # reads packageManager from package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Build here too: `changeset publish` runs each package's `prepack` (tsup),
+      # but building up front fails fast if the tree is broken before we touch npm.
+      - name: Build
+        run: pnpm build
+
+      - name: Create Version PR or publish
+        uses: changesets/action@v1
+        with:
+          # Rebuild from source, then publish. dist is a build artifact (not in
+          # git), so `prepack` regenerates it for the tarball on every publish.
+          publish: pnpm changeset publish
+          version: pnpm changeset version
+          commit: "chore: version packages"
+          title: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

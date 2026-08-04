@@ -3,6 +3,21 @@
   "version": "0.0.1",
   "description": "Canton x402 payer SDK — with a party key + wallet-sdk ledger access, prepare + sign a Canton Coin transfer and produce the X-PAYMENT payload for a facilitator to settle.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChainSafe/canton-x402-sdk.git",
+    "directory": "packages/x402-server-sdk"
+  },
+  "homepage": "https://github.com/ChainSafe/canton-x402-sdk/tree/main/packages/x402-server-sdk#readme",
+  "bugs": "https://github.com/ChainSafe/canton-x402-sdk/issues",
+  "keywords": ["x402", "canton", "payments", "sdk", "payer", "wallet"],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
@@ -20,11 +35,12 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.map"
   ],
   "dependencies": {
-    "@chainsafe/x402-core": "workspace:*",
-    "@chainsafe/x402-client": "workspace:*",
+    "@chainsafe/x402-core": "workspace:^",
+    "@chainsafe/x402-client": "workspace:^",
     "@canton-network/wallet-sdk": "^1.4.0"
   },
   "devDependencies": {
@@ -34,6 +50,7 @@
     "typescript": "^5.6.0"
   },
   "scripts": {
+    "prepack": "tsup",
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
