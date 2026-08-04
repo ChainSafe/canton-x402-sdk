@@ -1,0 +1,8 @@
+# Keep monorepo-root Docker build contexts (examples/*) small + host-artifact-free.
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+**/*.log
+examples/**/.env
