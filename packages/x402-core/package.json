@@ -1,6 +1,6 @@
 {
   "name": "@chainsafe/x402-core",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Shared x402 Canton wire types, canonical requirements hashing, verify primitives, and network presets.",
   "license": "Apache-2.0",
   "repository": {
@@ -10,7 +10,13 @@
   },
   "homepage": "https://github.com/ChainSafe/canton-x402-sdk/tree/main/packages/x402-core#readme",
   "bugs": "https://github.com/ChainSafe/canton-x402-sdk/issues",
-  "keywords": ["x402", "canton", "payments", "web3", "micropayments"],
+  "keywords": [
+    "x402",
+    "canton",
+    "payments",
+    "web3",
+    "micropayments"
+  ],
   "sideEffects": false,
   "engines": {
     "node": ">=20"
