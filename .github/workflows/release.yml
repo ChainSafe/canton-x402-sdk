@@ -36,16 +36,20 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # Build here too: `changeset publish` runs each package's `prepack` (tsup),
-      # but building up front fails fast if the tree is broken before we touch npm.
+      # The ONE authoritative build. It's topological (deps before dependents),
+      # so cross-package type declarations resolve. Packages intentionally have NO
+      # `prepack` — `changeset publish` runs per-package publishes in parallel, and
+      # a per-package tsup rebuild there races (a dependent's dts build reads a
+      # sibling's dist while the sibling is mid-rebuild → TS2307). Build once here;
+      # publish ships these prebuilt artifacts (`files: ["dist"]`).
       - name: Build
         run: pnpm build
 
       - name: Create Version PR or publish
         uses: changesets/action@v1
         with:
-          # Rebuild from source, then publish. dist is a build artifact (not in
-          # git), so `prepack` regenerates it for the tarball on every publish.
+          # Publishes the artifacts built by the Build step above (no rebuild on
+          # publish — see the Build step for why).
           publish: pnpm changeset publish
           version: pnpm changeset version
           commit: "chore: version packages"

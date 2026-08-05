@@ -60,7 +60,6 @@
     "typescript": "^5.6.0"
   },
   "scripts": {
-    "prepack": "tsup",
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
