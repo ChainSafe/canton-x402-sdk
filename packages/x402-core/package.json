@@ -1,6 +1,6 @@
 {
   "name": "@chainsafe/x402-core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared x402 Canton wire types, canonical requirements hashing, verify primitives, and network presets.",
   "license": "Apache-2.0",
   "repository": {
