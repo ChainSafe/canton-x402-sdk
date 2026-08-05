@@ -49,8 +49,10 @@ jobs:
     name: changeset present
     # Every PR that touches packages/** must carry a changeset (use
     # `pnpm changeset --empty` for changes that need no release). Skipped on the
-    # push-to-main event, where there's no base branch to diff against.
-    if: github.event_name == 'pull_request'
+    # push-to-main event, where there's no base branch to diff against, and on the
+    # changesets "version packages" PR (changeset-release/main), whose job is to
+    # CONSUME changesets — it always has package bumps with no changeset by design.
+    if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
