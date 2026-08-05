@@ -1,6 +1,6 @@
 {
   "name": "@chainsafe/x402-server-sdk",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Canton x402 payer SDK — with a party key + wallet-sdk ledger access, prepare + sign a Canton Coin transfer and produce the X-PAYMENT payload for a facilitator to settle.",
   "license": "Apache-2.0",
   "repository": {
@@ -10,7 +10,14 @@
   },
   "homepage": "https://github.com/ChainSafe/canton-x402-sdk/tree/main/packages/x402-server-sdk#readme",
   "bugs": "https://github.com/ChainSafe/canton-x402-sdk/issues",
-  "keywords": ["x402", "canton", "payments", "sdk", "payer", "wallet"],
+  "keywords": [
+    "x402",
+    "canton",
+    "payments",
+    "sdk",
+    "payer",
+    "wallet"
+  ],
   "sideEffects": false,
   "engines": {
     "node": ">=20"

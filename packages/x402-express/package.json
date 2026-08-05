@@ -1,6 +1,6 @@
 {
   "name": "@chainsafe/x402-express",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Express middleware for x402 payments on Canton — gate a route behind a Canton Coin payment, verified (and optionally settled) via a facilitator.",
   "license": "Apache-2.0",
   "repository": {
@@ -10,7 +10,13 @@
   },
   "homepage": "https://github.com/ChainSafe/canton-x402-sdk/tree/main/packages/x402-express#readme",
   "bugs": "https://github.com/ChainSafe/canton-x402-sdk/issues",
-  "keywords": ["x402", "canton", "payments", "express", "middleware"],
+  "keywords": [
+    "x402",
+    "canton",
+    "payments",
+    "express",
+    "middleware"
+  ],
   "sideEffects": false,
   "engines": {
     "node": ">=20"
