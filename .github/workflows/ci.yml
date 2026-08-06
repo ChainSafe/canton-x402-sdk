@@ -31,20 +31,10 @@ jobs:
 
       # Build first: packages resolve their workspace deps from `dist/` (the
       # `exports`/`types` targets), so typecheck and test need it present. `pnpm -r`
-      # builds in topological order (x402-core before x402-client).
+      # builds in topological order (x402-core before x402-client). dist is a build
+      # artifact now (not committed) — the release job rebuilds it via `prepack`.
       - name: Build
         run: pnpm build
-
-      # dist is committed (shipped to git-dependency consumers). Fail if a fresh
-      # build doesn't match what's committed, so stale artifacts can't ship.
-      - name: Verify committed dist is up to date
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "::error::packages/*/dist is stale — run 'pnpm -r build' and commit the result."
-            git status --porcelain
-            git --no-pager diff --stat
-            exit 1
-          fi
 
       - name: Typecheck
         run: pnpm typecheck
@@ -54,3 +44,33 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  changeset:
+    name: changeset present
+    # Every PR that touches packages/** must carry a changeset (use
+    # `pnpm changeset --empty` for changes that need no release). Skipped on the
+    # push-to-main event, where there's no base branch to diff against, and on the
+    # changesets "version packages" PR (changeset-release/main), whose job is to
+    # CONSUME changesets — it always has package bumps with no changeset by design.
+    if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # changeset status diffs against the base branch
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Exits non-zero when a package changed without a changeset — fails the check.
+      - name: Require a changeset
+        run: pnpm changeset status --since=origin/${{ github.base_ref }}
