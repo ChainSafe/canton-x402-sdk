@@ -1,5 +1,11 @@
 # @chainsafe/x402-server-sdk
 
+## 0.1.2
+
+### Patch Changes
+
+- 716b9e0: docs: refresh the x402-server-sdk README
+
 ## 0.1.1
 
 ### Patch Changes
