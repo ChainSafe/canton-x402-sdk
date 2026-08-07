@@ -10,6 +10,12 @@ Monorepo for the `@chainsafe/x402-*` packages — x402 payments on the Canton Ne
 | `@chainsafe/x402-server-sdk` | Payer SDK — prepare + sign a transfer with a party key + ledger access; auto-pay `fetch`; facilitator client. |
 | `@chainsafe/x402-express` | Merchant middleware — `paymentRequired()` gating for Express. |
 
+## Examples
+
+| Example | What it shows |
+| --- | --- |
+| [`examples/mortgage`](examples/mortgage) | End-to-end server-to-server demo: a mortgage-app backend (payer, `x402-server-sdk`) pays a credit bureau (merchant, `x402-express`) per credit-score pull over Canton Coin, with a small UI. Configurable for LocalNet / DevNet / MainNet. |
+
 ## Development
 
 Requires Node ≥ 20 and pnpm (see `.nvmrc` / `packageManager`).

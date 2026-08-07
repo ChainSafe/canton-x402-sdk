@@ -1,3 +1,5 @@
 packages:
   - "packages/*"
-  - "examples/*"
+  # Examples are grouped by scenario (e.g. examples/mortgage/*), so each app inside
+  # a scenario folder is its own workspace package.
+  - "examples/*/*"

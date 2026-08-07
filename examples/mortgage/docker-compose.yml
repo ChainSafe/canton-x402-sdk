@@ -1,0 +1,40 @@
+# Runs the mortgage demo: credit bureau (merchant) + mortgage backend (payer) + UI.
+# Points at an EXTERNAL facilitator via FACILITATOR_URL. Aimed at DevNet; for LocalNet,
+# prefer the `pnpm --filter … dev` scripts (a container's localhost is not the host's).
+#
+#   cp .env.example .env   # then fill it in
+#   docker compose up --build
+#   open http://localhost:${UI_PORT:-5173}
+#
+# Images build from the monorepo ROOT (context: ../..) so the workspace @chainsafe/x402-*
+# packages are available to the apps.
+name: canton-x402-mortgage-demo
+
+services:
+  credit-bureau:
+    build:
+      context: ../..
+      dockerfile: examples/mortgage/credit-bureau/Dockerfile
+    env_file: [.env]
+    ports:
+      - "${BUREAU_PORT:-4001}:${BUREAU_PORT:-4001}"
+
+  mortgage-backend:
+    build:
+      context: ../..
+      dockerfile: examples/mortgage/mortgage-backend/Dockerfile
+    env_file: [.env]
+    environment:
+      # Reach the bureau by its compose service name (overrides the .env localhost value).
+      BUREAU_URL: "http://credit-bureau:${BUREAU_PORT:-4001}"
+    depends_on: [credit-bureau]
+    ports:
+      - "${MORTGAGE_BACKEND_PORT:-4002}:${MORTGAGE_BACKEND_PORT:-4002}"
+
+  mortgage-ui:
+    build:
+      context: ../..
+      dockerfile: examples/mortgage/mortgage-ui/Dockerfile
+    depends_on: [mortgage-backend]
+    ports:
+      - "${UI_PORT:-5173}:80"

@@ -1,0 +1,22 @@
+# LocalNet overlay. Joins the running Splice LocalNet's external `localnet` network so the
+# demo containers reach canton / splice / the facilitator by service name, and repoints the
+# in-network URLs there (a container's localhost is not the host's). Use alongside the base:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.localnet.yml up --build
+#
+# Requires the facilitator LocalNet stack to be running (it provides the `localnet` network).
+services:
+  credit-bureau:
+    networks: [default, localnet]
+    environment:
+      FACILITATOR_URL: "http://x402-facilitator:3000"
+
+  mortgage-backend:
+    networks: [default, localnet]
+    environment:
+      LEDGER_CLIENT_URL: "http://canton:3975"
+      AMULET_REGISTRY_URL: "http://splice:3903/api/validator/v0/scan-proxy"
+
+networks:
+  localnet:
+    external: true
