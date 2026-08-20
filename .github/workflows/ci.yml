@@ -14,6 +14,10 @@ jobs:
   verify:
     name: build · typecheck · lint · test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # read the base branch's coverage artifact
+      pull-requests: write # post/update the coverage comment
     steps:
       - uses: actions/checkout@v4
 
@@ -42,8 +46,79 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Test
-        run: pnpm test
+      # Coverage instead of a bare `pnpm test`: the same suites (one vitest run
+      # over every package — see vitest.config.ts), plus lcov and the per-package
+      # table. Exactly the command contributors run locally.
+      - name: Test (with coverage)
+        run: pnpm test:coverage
+
+      # Delta vs base: every `verify` run uploads its workspace summary, so a PR
+      # diffs against the newest successful run on its base branch (preferring the
+      # run for the exact base commit). Best effort — a first run, an expired
+      # artifact, or a base with no coverage yet just means the report shows the
+      # absolute numbers with no delta.
+      - name: Fetch base coverage
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          runs=$(gh run list --workflow ci.yml --branch "$BASE_REF" --event push \
+            --status success --limit 20 --json databaseId,headSha)
+          # Exact base commit first, newest successful run as the fallback.
+          pick=$(printf '%s' "$runs" | jq -c --arg sha "$BASE_SHA" \
+            'map(select(.headSha == $sha)) + . | .[0] // empty')
+          [ -n "$pick" ] || { echo "no base run with coverage yet"; exit 0; }
+          gh run download "$(printf '%s' "$pick" | jq -r .databaseId)" \
+            --name coverage --dir base-coverage
+          # Label the delta with the commit it actually came from, not the one we asked for.
+          echo "BASE_COVERAGE_REF=$BASE_REF@$(printf '%s' "$pick" | jq -r '.headSha[0:7]')" >> "$GITHUB_ENV"
+
+      # Re-render the table, this time with the delta column filled in. Cheap —
+      # it only re-reads the JSON the run above already wrote. `--base` is a
+      # no-op when the fetch found nothing.
+      - name: Coverage report vs base
+        run: |
+          node scripts/coverage-report.mjs \
+            --base base-coverage/summary.json \
+            --base-label "\`${BASE_COVERAGE_REF:-base}\`"
+
+      # Visible on the run's summary page for every event, forks included.
+      - name: Publish to job summary
+        run: cat coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage/lcov.info
+            coverage/summary.json
+            coverage/summary.md
+          if-no-files-found: error
+
+      # One sticky comment, rewritten in place on every push — found by the marker
+      # `scripts/coverage-report.mjs` embeds, so it can't collide with another bot's
+      # comment. Skipped for fork PRs, whose token is read-only (the job summary and
+      # the artifact still carry the numbers there).
+      - name: Comment coverage on the PR
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq 'map(select((.body // "") | startswith("<!-- coverage-report -->"))) | .[0].id // empty')
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$existing" -F body=@coverage/summary.md >/dev/null
+          else
+            gh api --method POST "repos/$REPO/issues/$PR/comments" -F body=@coverage/summary.md >/dev/null
+          fi
 
   changeset:
     name: changeset present

@@ -22,11 +22,36 @@ Requires Node ≥ 20 and pnpm (see `.nvmrc` / `packageManager`).
 
 ```bash
 pnpm install
-pnpm build       # build all packages (dual ESM + CJS + d.ts)
-pnpm test        # vitest across packages
-pnpm typecheck   # tsc --noEmit per package
-pnpm lint        # eslint
+pnpm build          # build all packages (dual ESM + CJS + d.ts)
+pnpm test           # vitest across packages
+pnpm test:coverage  # …the same suites, with coverage (see below)
+pnpm typecheck      # tsc --noEmit per package
+pnpm lint           # eslint
 ```
+
+### Coverage
+
+`pnpm test:coverage` runs every package's suite in one vitest pass with the v8
+provider, then rolls the result up per package (run `pnpm build` first — the suites
+resolve workspace deps from `dist/`):
+
+| Output | What it is |
+| --- | --- |
+| `coverage/lcov-report/index.html` | HTML report, line by line. |
+| `coverage/lcov.info` | lcov with repo-relative paths. |
+| `coverage/summary.json` | Per-package + workspace totals; CI's baseline for the delta. |
+| `coverage/summary.md` | The table CI posts on the PR. |
+
+What's measured: each package's own `src/**`, with tests, fixtures, `dist/` and the
+examples excluded — the rules live in one place, [`vitest.config.ts`](vitest.config.ts),
+which also discovers the packages (`projects: ["packages/*"]`, no per-package config).
+A source file no test ever imports is reported at 0% rather than skipped, so a package
+with no tests at all shows up as a flagged 0% row instead of a silent pass.
+
+CI runs this on every PR: the table lands on the run's job summary and in a sticky PR
+comment — with each package's delta against the base branch's last successful run —
+and `coverage/` is uploaded as the `coverage` artifact. (Fork PRs get the job summary
+and the artifact; their read-only token can't post the comment.)
 
 ## Conventions
 
