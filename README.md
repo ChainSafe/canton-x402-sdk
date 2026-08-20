@@ -48,9 +48,18 @@ which also discovers the packages (`projects: ["packages/*"]`, no per-package co
 A source file no test ever imports is reported at 0% rather than skipped, so a package
 with no tests at all shows up as a flagged 0% row instead of a silent pass.
 
-CI runs this on every PR: the table lands on the run's job summary and in a sticky PR
-comment — with each package's delta against the base branch's last successful run —
-and `coverage/` is uploaded as the `coverage` artifact. (Fork PRs get the job summary
+CI runs this on every PR and reports it Codecov-style, in a sticky comment and on the
+run's job summary:
+
+- **Patch coverage** — of the executable lines the PR *adds*, how many a test runs, with
+  the uncovered ones listed by file and line number. This is the number that answers
+  "is this change tested"; the project total can't, since a PR can add untested lines
+  and still move the total up.
+- **Project coverage** and its delta against the base branch's last successful run, as a
+  `Coverage Diff` block plus a per-package table.
+
+lcov is uploaded as the `coverage` artifact. Patch coverage needs the PR's diff, so a
+local `pnpm test:coverage` reports the project number only. (Fork PRs get the job summary
 and the artifact; their read-only token can't post the comment.)
 
 ## Conventions

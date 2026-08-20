@@ -76,14 +76,26 @@ jobs:
           # Label the delta with the commit it actually came from, not the one we asked for.
           echo "BASE_COVERAGE_REF=$BASE_REF@$(printf '%s' "$pick" | jq -r '.headSha[0:7]')" >> "$GITHUB_ENV"
 
-      # Re-render the table, this time with the delta column filled in. Cheap —
-      # it only re-reads the JSON the run above already wrote. `--base` is a
-      # no-op when the fetch found nothing.
-      - name: Coverage report vs base
+      # The PR's diff, for patch coverage: which of the lines this PR ADDS does a
+      # test execute. Asked of the API rather than git — the checkout is shallow,
+      # so `git diff base...HEAD` has no base commit to diff against.
+      - name: Fetch PR diff
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr diff "${{ github.event.pull_request.number }}" > pr.diff
+
+      # Re-render the report, now with patch coverage and the delta column filled
+      # in. Cheap — it only re-reads what the run above already wrote. Both inputs
+      # are optional: a missing file simply drops its section.
+      - name: Coverage report
         run: |
           node scripts/coverage-report.mjs \
             --base base-coverage/summary.json \
-            --base-label "\`${BASE_COVERAGE_REF:-base}\`"
+            --base-label "${BASE_COVERAGE_REF:-base}" \
+            --diff pr.diff \
+            --pr "${{ github.event.pull_request.number }}"
 
       # Visible on the run's summary page for every event, forks included.
       - name: Publish to job summary
