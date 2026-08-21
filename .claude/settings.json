@@ -1,0 +1,62 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+      "Bash(pnpm install)",
+      "Bash(pnpm install --frozen-lockfile)",
+      "Bash(pnpm build)",
+      "Bash(pnpm lint)",
+      "Bash(pnpm test)",
+      "Bash(pnpm typecheck)",
+      "Bash(pnpm -r build)",
+      "Bash(pnpm -r test)",
+      "Bash(pnpm -r typecheck)",
+      "Bash(pnpm exec tsc*)",
+      "Bash(pnpm exec eslint*)",
+      "Bash(pnpm exec vitest*)",
+      "Bash(pnpm exec prettier*)",
+      "Bash(pnpm changeset status*)",
+      "Bash(pnpm changeset --empty)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git fetch*)",
+      "Bash(git branch --show-current)",
+      "Bash(git branch --list*)",
+      "Bash(git remote -v)",
+      "Bash(git stash list)",
+      "Bash(gh pr view*)",
+      "Bash(gh pr list*)",
+      "Bash(gh pr diff*)",
+      "Bash(gh pr checks*)",
+      "Bash(gh issue view*)",
+      "Bash(gh issue list*)",
+      "Bash(gh run view*)",
+      "Bash(gh run list*)"
+    ],
+    "deny": [
+      "Bash(sudo*)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~/*)",
+      "Bash(npm publish*)",
+      "Bash(pnpm publish*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -fsS --max-time 5 https://handbook.chainsafe.io/llms.txt | jq -Rs '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:.}}' 2>/dev/null || true",
+            "timeout": 10,
+            "statusMessage": "Loading ChainSafe handbook index"
+          }
+        ]
+      }
+    ]
+  }
+}
