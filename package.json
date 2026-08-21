@@ -12,6 +12,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
+    "test:coverage": "vitest run --coverage && node scripts/coverage-report.mjs",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "format": "prettier --write ."
@@ -28,6 +29,7 @@
     "@changesets/cli": "^2.31.1",
     "@eslint/js": "^9.13.0",
     "@types/node": "^20.16.0",
+    "@vitest/coverage-v8": "3.2.6",
     "eslint": "^9.13.0",
     "prettier": "^3.3.0",
     "tsup": "^8.3.0",
