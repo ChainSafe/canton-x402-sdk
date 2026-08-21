@@ -1,0 +1,10 @@
+# Code owners for this repository.
+#
+# Every PR automatically requests a review from these maintainers. Pair this
+# with branch protection ("Require review from Code Owners") to make it a
+# required gate rather than just a suggestion.
+#
+# Note: a handle only takes effect if it has write access to the repo —
+# GitHub silently ignores owners that don't.
+
+* @dhyaniarun1993 @sqhell @rob1997 @dimartiro
