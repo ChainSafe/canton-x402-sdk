@@ -6,3 +6,4 @@ export * from "./common";
 export * from "./exact-canton";
 export * from "./prepared-tx";
 export * from "./registry";
+export * from "./prepared-tx-hash";

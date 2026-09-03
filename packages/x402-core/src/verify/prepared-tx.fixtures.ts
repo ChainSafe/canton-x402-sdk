@@ -90,7 +90,14 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
   );
 
   // Exercise{9: choice_id, 10: chosen_value}
+  // Exercise containing the transfer choice.
   const exercise = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string("2.1")
+    .uint32(tag(4, WIRE_LEN))
+    .bytes(new Uint8Array())
+    .uint32(tag(7, WIRE_LEN))
+    .string(transfer.sender)
     .uint32(tag(9, WIRE_LEN))
     .string(opts.choiceId ?? "TransferFactory_Transfer")
     .uint32(tag(10, WIRE_LEN))
@@ -98,8 +105,47 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
     .finish();
 
   const v1Node = wrap(3, exercise); // Node{3: exercise}
-  const damlNode = wrap(1000, v1Node); // DamlTransaction.Node{1000: v1}
-  const damlTxn = wrap(3, damlNode); // DamlTransaction{3: nodes[]}
-  const prepared = wrap(1, damlTxn); // PreparedTransaction{1: transaction}
+  const damlNode = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string("0")
+    .uint32(tag(1000, WIRE_LEN))
+    .bytes(v1Node)
+    .finish();
+  const nodeSeed = Writer.create()
+    .uint32(tag(1, 0))
+    .int32(0)
+    .uint32(tag(2, WIRE_LEN))
+    .bytes(new Uint8Array(32).fill(1))
+    .finish();
+  const damlTxn = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string("2.1")
+    .uint32(tag(2, WIRE_LEN))
+    .string("0")
+    .uint32(tag(3, WIRE_LEN))
+    .bytes(damlNode)
+    .uint32(tag(4, WIRE_LEN))
+    .bytes(nodeSeed)
+    .finish();
+  const submitterInfo = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string(transfer.sender)
+    .uint32(tag(2, WIRE_LEN))
+    .string("test-command")
+    .finish();
+  const metadata = Writer.create()
+    .uint32(tag(2, WIRE_LEN))
+    .bytes(submitterInfo)
+    .uint32(tag(3, WIRE_LEN))
+    .string("test-synchronizer")
+    .uint32(tag(5, WIRE_LEN))
+    .string("test-transaction")
+    .finish();
+  const prepared = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .bytes(damlTxn)
+    .uint32(tag(2, WIRE_LEN))
+    .bytes(metadata)
+    .finish();
   return bytesToBase64(prepared);
 }
