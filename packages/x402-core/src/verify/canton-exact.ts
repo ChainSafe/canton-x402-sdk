@@ -5,11 +5,15 @@
 // stateless — the stateful guards (nonce replay) and on-chain execution stay in
 // the facilitator, which composes this verifier's result.
 
-import { sign as ed25519Sign, verify as ed25519Verify, hashes as ed25519Hashes } from "@noble/ed25519";
+import {
+  sign as ed25519Sign,
+  verify as ed25519Verify,
+  hashes as ed25519Hashes,
+} from "@noble/ed25519";
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import type { NetworkId } from "../types/common";
-import { isCantonPaymentInner } from "../types/payment";
+import { HashingSchemeVersion, isCantonPaymentInner } from "../types/payment";
 import { CantonPaymentRequirements, isCantonPaymentRequirements } from "../types/requirements";
 import type {
   SchemeVerifier,
@@ -27,6 +31,7 @@ import {
 } from "./common";
 import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 import { gunzipPreparedTransaction } from "./prepared-tx-codec";
+import { computePreparedTransactionHash } from "./prepared-tx-hash";
 
 // @noble/ed25519 v3 needs sha512 wired (same as the facilitator's wallet.ts).
 ed25519Hashes.sha512 = sha512;
@@ -175,11 +180,11 @@ function fail(reason: VerifyInvalidReason, payer?: string): VerifyResponseInvali
  * stateful checks (nonce replay, min-amount FX policy) and the on-chain execute
  * compose on top of a successful result here.
  */
-function verifyCantonExact(
+async function verifyCantonExact(
   networkId: NetworkId,
   payload: X402PaymentPayload<unknown>,
   requirements: X402PaymentRequirements<unknown>,
-): VerifyResponse {
+): Promise<VerifyResponse> {
   // 1. scheme — both sides must name the one id the spec defines.
   if (payload.scheme !== EXACT_SCHEME_ID || requirements.scheme !== EXACT_SCHEME_ID) {
     return fail("scheme_mismatch");
@@ -222,22 +227,65 @@ function verifyCantonExact(
   //    hash has one spelling: an upper-case copy decodes to the same bytes and
   //    would verify, and is still refused.
   const signatureHex = signatureFromBase64(inner.signature);
-  if (
-    !PREPARED_TX_HASH.test(inner.preparedTxHash) ||
-    signatureHex === null ||
-    !verifySignature(inner.preparedTxHash, signatureHex, inner.publicKey)
-  ) {
+  if (!PREPARED_TX_HASH.test(inner.preparedTxHash) || signatureHex === null) {
     return fail("bad_signature", inner.payer);
   }
-  // 8. the signed transfer must actually move what the requirements demand.
-  //    This is the payload's one binding to the requirements: the signature
-  //    covers the prepared transaction, so decoding it and checking sender/
-  //    receiver/instrument/amount rejects a valid signature over a divergent
-  //    transfer (e.g. to another party, or a smaller amount).
+
+  // An absent hashingSchemeVersion means V2.
+  const hashingSchemeVersion =
+    inner.hashingSchemeVersion ?? HashingSchemeVersion.V2;
+
+  if (hashingSchemeVersion !== HashingSchemeVersion.V2) {
+    return fail("internal_error", inner.payer);
+  }
+
+  // Gunzip exactly once. Hashing and decoding both use these bytes.
+  const prepared = gunzipPreparedTransaction(inner.preparedTransaction);
+  if (prepared === null) {
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: "undecodable" },
+    };
+  }
+
+  const preparedBase64 = bytesToBase64(prepared);
+
+  // 9. Derive the trusted hash from the submitted prepared transaction.
+  let computedHash: string;
+  try {
+    computedHash = await computePreparedTransactionHash(
+      preparedBase64,
+      hashingSchemeVersion,
+    );
+  } catch {
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: "undecodable" },
+    };
+  }
+
+  // 10. The supplied hash must describe this exact transaction.
+  if (computedHash.toLowerCase() !== inner.preparedTxHash.toLowerCase()) {
+    return fail("prepared_transaction_hash_mismatch", inner.payer);
+  }
+
+  // 11. Verify the payload's base64 signature against the trusted hash.
+  if (!verifySignature(computedHash, signatureHex, inner.publicKey)) {
+    return fail("bad_signature", inner.payer);
+  }
+
+  // 12. the signed transfer must actually move what the requirements demand.
+  //    requirementsHash proves the payload *references* these requirements;
+  //    only decoding the prepared transaction proves it *satisfies* them —
+  //    binding sender/receiver/instrument/amount so a valid signature over a
+  //    divergent transfer (e.g. to another party, or a smaller amount) is rejected.
   //    The payload carries it gzipped; a member that is malformed or over
   //    either bound is as undecodable as a bad protobuf.
-  const prepared = gunzipPreparedTransaction(inner.preparedTransaction);
-  const transfer = prepared && decodePreparedTransaction(bytesToBase64(prepared));
+  const transfer = decodePreparedTransaction(preparedBase64);
   if (!transfer) {
     return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: "undecodable" } };
   }
