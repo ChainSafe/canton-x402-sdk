@@ -56,5 +56,8 @@
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@canton-network/core-tx-visualizer": "~1.7.0"
   }
 }

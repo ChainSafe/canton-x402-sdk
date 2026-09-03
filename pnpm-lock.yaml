@@ -146,6 +146,10 @@ importers:
         version: 5.9.3
 
   packages/x402-core:
+    dependencies:
+      '@canton-network/core-tx-visualizer':
+        specifier: ~1.7.0
+        version: 1.7.0
     devDependencies:
       '@noble/ed25519':
         specifier: ^3.0.0
