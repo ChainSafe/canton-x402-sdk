@@ -10,6 +10,7 @@ export const VERSION = "0.0.1";
 export {
   paymentRequired,
   type PaymentRequiredOptions,
+  type PaymentRejectionInfo,
   type RequirementsSpec,
   type RequirementsBuilder,
   type Resolvable,
