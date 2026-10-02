@@ -22,7 +22,10 @@ export interface CantonPartyKey {
   partyId: string;
   /** Base64 32-byte Ed25519 public key. */
   publicKey: string;
-  /** Base64 32-byte Ed25519 seed (private). */
+  /**
+   * Base64 Ed25519 private key: the 32-byte seed, or the 64-byte nacl/libsodium
+   * secret key (`seed || publicKey`) that wallet-sdk key generation returns.
+   */
   privateKey: string;
 }
 
@@ -49,7 +52,12 @@ export interface CantonX402PayerOptions {
  * and assembles the payment payload — without executing (the facilitator settles).
  */
 export class CantonX402Payer implements X402Payer {
-  constructor(private readonly opts: CantonX402PayerOptions) {}
+  /** The key's base64 32-byte seed, validated up front so a bad key fails here, not mid-payment. */
+  private readonly seed: string;
+
+  constructor(private readonly opts: CantonX402PayerOptions) {
+    this.seed = toSeed(opts.key);
+  }
 
   supports(requirements: CantonPaymentRequirements): boolean {
     return (
@@ -125,7 +133,7 @@ export class CantonX402Payer implements X402Payer {
     // 3. Sign the hash. wallet-sdk hands the hash as base64; the payload carries it
     //    as hex and the signature as base64, which are the spec's encodings.
     const preparedTxHash = base64ToHex(response.preparedTransactionHash);
-    const signature = signatureToBase64(signHash(preparedTxHash, key.privateKey));
+    const signature = signatureToBase64(signHash(preparedTxHash, this.seed));
 
     // 4. Assemble the payload the facilitator settles.
     return {
@@ -155,6 +163,25 @@ export class CantonX402Payer implements X402Payer {
       },
     };
   }
+}
+
+/**
+ * The base64 32-byte seed `signHash` takes. A 64-byte nacl secret key is
+ * `seed || publicKey`, so keep the seed half — after checking the public half is
+ * this key's, so a mismatched pair fails here rather than as a bad signature.
+ */
+function toSeed(key: CantonPartyKey): string {
+  const bytes = Buffer.from(key.privateKey, "base64");
+  if (bytes.length === 32) return bytes.toString("base64");
+  if (bytes.length === 64) {
+    if (!bytes.subarray(32).equals(Buffer.from(key.publicKey, "base64"))) {
+      throw new Error("x402: 64-byte private key does not embed the configured public key");
+    }
+    return bytes.subarray(0, 32).toString("base64");
+  }
+  throw new Error(
+    `x402: private key must be a 32-byte seed or 64-byte secret key (got ${bytes.length} bytes)`,
+  );
 }
 
 function base64ToHex(b64: string): string {
