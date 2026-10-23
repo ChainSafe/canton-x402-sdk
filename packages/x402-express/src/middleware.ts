@@ -64,6 +64,28 @@ export interface PaymentRequiredOptions {
   requirements: RequirementsSpec | RequirementsBuilder;
   /** Extra `accepts[]` entries for the 402 body (e.g. an alternate scheme). */
   additionalAccepts?: (req: Request) => CantonPaymentRequirements[] | Promise<CantonPaymentRequirements[]>;
+  /**
+   * Called after the middleware rejects a payment it was handed (402), or fails
+   * on the facilitator (502) or its own config (500) — e.g. to log it. Not called
+   * for the plain 402 challenge to a request without `X-PAYMENT`. The middleware
+   * logs nothing itself. A throw (or a rejected promise from an async hook) is
+   * swallowed so it can't break the response or crash the process.
+   */
+  onReject?: (rejection: PaymentRejectionInfo, req: Request) => void | Promise<void>;
+}
+
+/** What {@link PaymentRequiredOptions.onReject} receives. */
+export interface PaymentRejectionInfo {
+  /** HTTP status sent: 402 (payment rejected), 502 (facilitator error), 500 (middleware error). */
+  status: 402 | 502 | 500;
+  /** The `error` code in the response body (e.g. `bad_signature`, `facilitator_error`). */
+  reason: string;
+  /** The `details` string in the response body, when there is one. */
+  details?: string;
+  /** The facilitator's full `extensions` for a verify rejection (may hold more than `details`). */
+  extensions?: Record<string, unknown>;
+  /** The underlying error, for a 502 or 500. */
+  error?: unknown;
 }
 
 declare global {
@@ -90,6 +112,7 @@ class PaymentRejection extends Error {
     readonly reason: string,
     readonly requirements: CantonPaymentRequirements,
     readonly details?: string,
+    readonly extensions?: Record<string, unknown>,
   ) {
     super(reason);
   }
@@ -149,7 +172,15 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       // nonce + validBefore, so returning it would hand a retrying agent back a
       // dead challenge (a replayed/expired nonce) and trap it in a loop.
       const verify = await facilitator.verify(payload, requirements);
-      if (!verify.isValid) throw new PaymentRejection(verify.invalidReason ?? "verify_failed", fresh);
+      if (!verify.isValid) {
+        const detail = verify.extensions?.detail;
+        throw new PaymentRejection(
+          verify.invalidReason ?? "verify_failed",
+          fresh,
+          typeof detail === "string" ? detail : undefined,
+          verify.extensions,
+        );
+      }
 
       let settleResponse: SettleResponse | undefined;
       if (settle) {
@@ -163,13 +194,27 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       req.x402 = { payer: verify.payer ?? payload.payload.payer, requirements, payload, verify, settle: settleResponse };
       next();
     } catch (err) {
+      let rejection: PaymentRejectionInfo | undefined;
       if (err instanceof PaymentRejection) {
         respond402(res, err.requirements, err.reason, err.details, extraAccepts);
+        // A bare challenge (no X-PAYMENT yet) is the normal flow, not a rejection.
+        if (err.reason !== "payment_required") {
+          rejection = { status: 402, reason: err.reason, details: err.details, extensions: err.extensions };
+        }
       } else if (err instanceof FacilitatorError) {
         res.status(502).json({ error: "facilitator_error", status: err.status, details: err.message });
+        rejection = { status: 502, reason: "facilitator_error", details: err.message, error: err };
       } else {
         // Misconfiguration (e.g. invalid amount) or an unexpected throw.
         res.status(500).json({ error: "x402_middleware_error", details: errMsg(err) });
+        rejection = { status: 500, reason: "x402_middleware_error", details: errMsg(err), error: err };
+      }
+      if (rejection && options.onReject) {
+        // A failing hook must not affect the response, which is already sent.
+        const onReject = options.onReject;
+        void Promise.resolve()
+          .then(() => onReject(rejection, req))
+          .catch(() => {});
       }
     }
   };
