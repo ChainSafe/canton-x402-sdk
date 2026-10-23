@@ -30,11 +30,38 @@ function req(value: string | undefined, name: string): string {
   return value.trim();
 }
 
+/**
+ * Optional OAuth audience/scope override. devnetConfig/mainnetConfig default the audience
+ * to the generic Canton one (`https://canton.network.global`); an IdP whose tenant registers
+ * a DIFFERENT API identifier — the value the participant/scan-proxy validate `aud` against —
+ * needs it overridden here, or the token request 403s with "Service not enabled within
+ * domain". Unset ⇒ keep the SDK default.
+ */
+function authOverride(): { auth: { audience: string; scope: string } } | undefined {
+  const audience = process.env.CANTON_OAUTH_AUDIENCE?.trim();
+  if (!audience) return undefined;
+  return { auth: { audience, scope: process.env.CANTON_OAUTH_SCOPE?.trim() ?? "" } };
+}
+
+/**
+ * Optional network-id override. devnet/mainnet default to the SDK's baked-in synchronizer
+ * fingerprint; a DevNet reset rotates that fingerprint, so set NETWORK_ID (+ DSO_PARTY,
+ * already honored below) to the live value to override without editing/republishing the
+ * SDK. Unset ⇒ SDK default. Must match the bureau's advertised `network`, or `supports()`
+ * rejects the 402 and the payment silently doesn't happen.
+ */
+function networkOverride(): { network: NetworkId } | undefined {
+  const network = process.env.NETWORK_ID?.trim();
+  return network ? { network: network as NetworkId } : undefined;
+}
+
 /** The Canton connection preset for the chosen network. */
 function netConfig(): CantonNetworkConfig {
   const ledgerClientUrl = process.env.LEDGER_CLIENT_URL;
-  if (NETWORK === "devnet") return devnetConfig({ ledgerClientUrl: req(ledgerClientUrl, "LEDGER_CLIENT_URL") });
-  if (NETWORK === "mainnet") return mainnetConfig({ ledgerClientUrl: req(ledgerClientUrl, "LEDGER_CLIENT_URL") });
+  if (NETWORK === "devnet")
+    return devnetConfig({ ledgerClientUrl: req(ledgerClientUrl, "LEDGER_CLIENT_URL"), ...networkOverride(), ...authOverride() });
+  if (NETWORK === "mainnet")
+    return mainnetConfig({ ledgerClientUrl: req(ledgerClientUrl, "LEDGER_CLIENT_URL"), ...networkOverride(), ...authOverride() });
   return localnetConfig({
     network: req(process.env.NETWORK_ID, "NETWORK_ID") as NetworkId,
     ...(ledgerClientUrl ? { ledgerClientUrl } : {}),
