@@ -182,6 +182,27 @@ describe("paymentRequired", () => {
     expect(res.body.error).toBe("bad_signature");
   });
 
+  it("forwards the facilitator's extensions.detail on a verify rejection", async () => {
+    stubFacilitator({
+      verify: {
+        isValid: false,
+        invalidReason: "internal_error",
+        extensions: { detail: "authorization_amount_too_low", minAmountMicroUsdc: 2_000_000 },
+      },
+    });
+    const res = await request(makeApp()).get("/paid").set("X-PAYMENT", paymentHeader());
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("internal_error");
+    expect(res.body.details).toBe("authorization_amount_too_low");
+  });
+
+  it("omits details when the verify extensions.detail is not a string", async () => {
+    stubFacilitator({ verify: { isValid: false, invalidReason: "internal_error", extensions: { detail: { code: 1 } } } });
+    const res = await request(makeApp()).get("/paid").set("X-PAYMENT", paymentHeader());
+    expect(res.status).toBe(402);
+    expect(res.body).not.toHaveProperty("details");
+  });
+
   it("hands back a FRESH challenge (not the dead echoed one) on nonce_replayed", async () => {
     stubFacilitator({ verify: { isValid: false, invalidReason: "nonce_replayed" } });
     const res = await request(makeApp())
@@ -241,5 +262,81 @@ describe("paymentRequired", () => {
       .set("X-PAYMENT", paymentHeader({ resource: "https://f.example/other" }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_resource");
+  });
+
+  describe("onReject", () => {
+    it("reports a verify rejection with its details and full extensions", async () => {
+      const extensions = { detail: "authorization_amount_too_low", minAmountMicroUsdc: 2_000_000, amountMicroUsdc: 5_000 };
+      stubFacilitator({ verify: { isValid: false, invalidReason: "internal_error", extensions } });
+      const onReject = vi.fn();
+      await request(makeApp({ onReject })).get("/paid").set("X-PAYMENT", paymentHeader());
+      expect(onReject).toHaveBeenCalledOnce();
+      expect(onReject.mock.calls[0][0]).toEqual({
+        status: 402,
+        reason: "internal_error",
+        details: "authorization_amount_too_low",
+        extensions,
+      });
+    });
+
+    it("reports a settle rejection", async () => {
+      stubFacilitator({ settle: { success: false, errorReason: "execution_failed", errorDetails: "boom" } });
+      const onReject = vi.fn();
+      const res = await request(makeApp({ settle: true, onReject })).get("/paid").set("X-PAYMENT", paymentHeader());
+      expect(res.status).toBe(402);
+      expect(onReject.mock.calls[0][0]).toMatchObject({ status: 402, reason: "execution_failed", details: "boom" });
+    });
+
+    it("reports a policy rejection", async () => {
+      stubFacilitator();
+      const onReject = vi.fn();
+      await request(makeApp({ onReject }))
+        .get("/paid")
+        .set("X-PAYMENT", paymentHeader({ maxAmountRequired: "0.01" }));
+      expect(onReject.mock.calls[0][0]).toMatchObject({ status: 402, reason: "policy_underpriced" });
+    });
+
+    it("reports a facilitator error with the underlying error", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("down", { status: 503 })),
+      );
+      const onReject = vi.fn();
+      const res = await request(makeApp({ onReject })).get("/paid").set("X-PAYMENT", paymentHeader());
+      expect(res.status).toBe(502);
+      expect(onReject.mock.calls[0][0]).toMatchObject({ status: 502, reason: "facilitator_error" });
+      expect(onReject.mock.calls[0][0].error).toBeInstanceOf(Error);
+    });
+
+    it("is not called for the plain challenge or a paid request", async () => {
+      stubFacilitator();
+      const onReject = vi.fn();
+      const app = makeApp({ onReject });
+      expect((await request(app).get("/paid")).status).toBe(402);
+      expect((await request(app).get("/paid").set("X-PAYMENT", paymentHeader())).status).toBe(200);
+      expect(onReject).not.toHaveBeenCalled();
+    });
+
+    it("still sends the response when the hook throws", async () => {
+      stubFacilitator({ verify: { isValid: false, invalidReason: "bad_signature" } });
+      const onReject = vi.fn(() => {
+        throw new Error("logger down");
+      });
+      const res = await request(makeApp({ onReject })).get("/paid").set("X-PAYMENT", paymentHeader());
+      expect(res.status).toBe(402);
+      expect(res.body.error).toBe("bad_signature");
+    });
+
+    it("swallows a rejected promise from an async hook", async () => {
+      stubFacilitator({ verify: { isValid: false, invalidReason: "bad_signature" } });
+      const onReject = vi.fn(async () => {
+        throw new Error("remote logger down");
+      });
+      const res = await request(makeApp({ onReject })).get("/paid").set("X-PAYMENT", paymentHeader());
+      expect(res.status).toBe(402);
+      // Let the hook's promise settle; vitest fails the run on an unhandled rejection.
+      await new Promise((r) => setImmediate(r));
+      expect(onReject).toHaveBeenCalledOnce();
+    });
   });
 });
