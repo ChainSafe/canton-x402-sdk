@@ -86,7 +86,26 @@ async function main() {
     }
     if (!creditRes.ok) {
       const body = await creditRes.text();
-      res.status(502).json({ error: `credit bureau returned ${creditRes.status}`, details: body.slice(0, 500) });
+      // A refused payment answers 402 with the facilitator's own rejection:
+      // `error` is the code (verify's invalidReason, or settle's errorReason)
+      // and `details` the sentence behind it, both from @chainsafe/x402-express.
+      // They sit AFTER the long `accepts[]`, so truncating the raw body loses
+      // exactly the part worth reading. Parse them out, and fold them into
+      // `error` — the one field the UI renders (mortgage-ui App.tsx), so a
+      // rejection says why on the screen rather than only in a curl.
+      let reason: string | undefined;
+      let detail: string | undefined;
+      try {
+        ({ error: reason, details: detail } = JSON.parse(body) as { error?: string; details?: string });
+      } catch {
+        // Not JSON — nothing to pull out; `body` below still carries it.
+      }
+      res.status(502).json({
+        error: [`credit bureau returned ${creditRes.status}`, reason, detail].filter(Boolean).join(": "),
+        reason,
+        details: detail,
+        body: body.slice(0, 2000),
+      });
       return;
     }
 
