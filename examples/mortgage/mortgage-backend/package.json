@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@canton-network/wallet-sdk": "^1.4.0",
+    "@canton-network/wallet-sdk": "^1.6.0",
     "@chainsafe/x402-core": "workspace:^",
     "@chainsafe/x402-server-sdk": "workspace:^",
     "dotenv": "^16.4.5",
