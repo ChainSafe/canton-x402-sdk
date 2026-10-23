@@ -74,7 +74,7 @@ export interface SchemeVerifier {
   verify(
     payload: X402PaymentPayload<unknown>,
     requirements: X402PaymentRequirements<unknown>,
-  ): VerifyResponse;
+  ): Promise<VerifyResponse>;
 }
 
 export const VerifyInvalidReasonSchema = v.picklist([
@@ -84,6 +84,7 @@ export const VerifyInvalidReasonSchema = v.picklist([
   "requirements_hash_mismatch",
   "bad_fingerprint",
   "bad_signature",
+  "prepared_transaction_hash_mismatch",
   "nonce_replayed",
   "missing_public_key",
   /** The signed prepared transaction does not transfer what the requirements demand. */
