@@ -89,16 +89,31 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: .github/scripts/publish-docs.sh preview docs/.vitepress/dist "${{ github.event.pull_request.number }}"
+      # One sticky comment, found by its own marker — the way ci.yml finds its
+      # coverage report. NOT `gh pr comment --edit-last`: that edits the last
+      # comment by whoever owns the token, and the coverage report is posted
+      # by the same github-actions[bot], so it rewrote the coverage report
+      # instead. A marker cannot collide.
       - name: Say where it is
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          URL: https://${{ github.repository_owner }}.github.io${{ env.SITE_BASE }}pr-${{ github.event.pull_request.number }}/
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          gh pr comment "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" \
-            --edit-last --create-if-none \
-            --body "📘 Docs preview: ${URL}
+          # Pages serves a lowercase host; the owner keeps its own casing.
+          url="https://${OWNER,,}.github.io${SITE_BASE}pr-${PR}/"
+          body="<!-- docs-preview -->
+          📘 Docs preview: ${url}
 
           Updated on every push. Removed when this pull request closes."
+          existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq 'map(select((.body // "") | startswith("<!-- docs-preview -->"))) | .[0].id // empty')
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$existing" -f body="$body" >/dev/null
+          else
+            gh api --method POST "repos/$REPO/issues/$PR/comments" -f body="$body" >/dev/null
+          fi
 
   publish:
     name: publish to Pages
