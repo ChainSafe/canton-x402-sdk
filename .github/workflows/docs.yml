@@ -86,6 +86,8 @@ jobs:
         env:
           DOCS_BASE: ${{ env.SITE_BASE }}pr-${{ github.event.pull_request.number }}/
       - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: .github/scripts/publish-docs.sh preview docs/.vitepress/dist "${{ github.event.pull_request.number }}"
       - name: Say where it is
         env:
@@ -114,6 +116,8 @@ jobs:
       # Replaces the root and keeps every pr-*/ — an open pull request's
       # preview must survive someone else's merge.
       - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: .github/scripts/publish-docs.sh site dist
 
   cleanup:
@@ -125,4 +129,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Remove
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: .github/scripts/publish-docs.sh remove "${{ github.event.pull_request.number }}"

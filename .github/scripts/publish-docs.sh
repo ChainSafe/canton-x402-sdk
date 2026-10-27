@@ -22,6 +22,25 @@ set -euo pipefail
 
 mode=${1:?usage: publish-docs.sh site|preview|remove ...}
 ATTEMPTS=${PUBLISH_ATTEMPTS:-5}
+
+# WHERE THE CREDENTIAL COMES FROM. actions/checkout writes its auth header
+# into the checked-out repository's own config, so a clone made anywhere else
+# has none — the first run of this failed with "could not read Username".
+# The token goes in the remote URL instead; Actions masks it in logs. Outside
+# CI (the local tests) the checkout's own remote is used as-is.
+remote_url() {
+  if [ -n "${GH_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+    printf 'https://x-access-token:%s@github.com/%s.git' "$GH_TOKEN" "$GITHUB_REPOSITORY"
+  else
+    git remote get-url origin
+  fi
+}
+
+# An auth or network failure is not a lost race, and retrying it five times
+# only delays the report. Only a rejected update is worth another attempt.
+is_race() {
+  grep -qiE 'rejected|non-fast-forward|fetch first|stale info' "$1"
+}
 PUSH_ERR=$(mktemp)
 trap 'rm -f "$PUSH_ERR"' EXIT
 
@@ -31,10 +50,10 @@ attempt() {
   # shellcheck disable=SC2064
   trap "rm -rf '$work'" RETURN
 
-  if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
-    git clone --quiet --depth 1 --branch gh-pages "$(git remote get-url origin)" "$work"
+  if git ls-remote --exit-code --heads "$(remote_url)" gh-pages >/dev/null 2>&1; then
+    git clone --quiet --depth 1 --branch gh-pages "$(remote_url)" "$work"
   else
-    git clone --quiet --depth 1 "$(git remote get-url origin)" "$work"
+    git clone --quiet --depth 1 "$(remote_url)" "$work"
     git -C "$work" checkout --quiet --orphan gh-pages
     git -C "$work" rm -rqf . >/dev/null 2>&1 || true
     # Pages would otherwise run Jekyll over this and drop what it does not like.
@@ -87,7 +106,7 @@ attempt() {
   # Git's own rejection goes to a file, not the log: a race that the next
   # attempt wins is not something an operator should have to read past. It is
   # printed only if every attempt fails.
-  if ! git -C "$work" push --quiet origin gh-pages 2>"$PUSH_ERR"; then
+  if ! git -C "$work" push --quiet "$(remote_url)" HEAD:gh-pages 2>"$PUSH_ERR"; then
     return 1
   fi
   echo "pushed: $message"
@@ -95,6 +114,11 @@ attempt() {
 
 for i in $(seq 1 "$ATTEMPTS"); do
   if attempt "$@"; then exit 0; fi
+  if ! is_race "$PUSH_ERR"; then
+    echo "::error::publishing to gh-pages failed, and not because of a race" >&2
+    cat "$PUSH_ERR" >&2
+    exit 1
+  fi
   if [ "$i" -lt "$ATTEMPTS" ]; then
     echo "push rejected — someone else wrote gh-pages; retrying ($i/$ATTEMPTS)" >&2
     sleep $(( i + RANDOM % 3 ))
