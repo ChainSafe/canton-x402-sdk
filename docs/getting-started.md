@@ -19,7 +19,8 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
   becomes your payout party.
 - A **Node.js + Express** server — the API you want to charge for.
 - Your facilitator's base URL, `FACILITATOR_URL`. The integration panel on the
-  merchant dashboard's **API keys** page shows it, ready to copy.
+  merchant dashboard's **API keys** page shows it, with the other values the
+  server below reads, as a `.env` you can copy.
 
 ### Set up your account
 
@@ -55,7 +56,8 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
    Call `GET $FACILITATOR_URL/v2/supported` once — the `exact-canton` entry
    in its `kinds` array carries the `network` id this facilitator settles on
    and `extra.asset.instrumentId.admin`, the DSO party that admins Amulet. You
-   pass both to the middleware below. The
+   pass both to the middleware below. The integration panel already has them,
+   as `NETWORK_ID` and `AMULET_ADMIN`. The
    [API reference](/api-reference#get-v2-supported) describes every field.
 
 5. **Gate a route**
@@ -73,50 +75,10 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
 
 ### Putting it together
 
-```ts
-import http from "node:http";
-import express from "express";
-import { FacilitatorClient } from "@chainsafe/x402-client";
-import { paymentRequired } from "@chainsafe/x402-express";
-import { amuletAsset } from "@chainsafe/x402-core";
+<<< @/snippets/gate-express.ts#snippet
 
-// From GET /v2/supported (step 4).
-const NETWORK = "canton:1220be58c2…";
-const DSO_PARTY = "DSO::1220be58c2…";
-
-const PAY_TO = "merchant::1220…"; // your payout party (step 1)
-const API_KEY = process.env.FACILITATOR_API_KEY!; // your API key (step 2)
-
-const facilitator = new FacilitatorClient(process.env.FACILITATOR_URL!, { apiKey: API_KEY });
-
-const app = express();
-
-// Gate one route behind a 0.05 CC payment, settled on Canton.
-app.use(
-  "/paid",
-  paymentRequired({
-    facilitator,
-    settle: true,
-    requirements: {
-      network: NETWORK,
-      payTo: PAY_TO,
-      asset: amuletAsset(DSO_PARTY),
-      amount: "0.05",
-      description: "Access to /paid",
-    },
-  }),
-);
-
-app.get("/paid", (req, res) => {
-  // Paid + verified — req.x402 carries the payer and the settle result.
-  res.json({ ok: true, payer: req.x402!.payer });
-});
-
-// Raise maxHeaderSize (step 6) or the paid retry 431s before the handler runs.
-http
-  .createServer({ maxHeaderSize: 4 * 1024 * 1024 }, app)
-  .listen(3000, () => console.log("listening on :3000"));
-```
+Its settings are the integration panel's `.env`: `FACILITATOR_URL`,
+`FACILITATOR_API_KEY`, `NETWORK_ID`, `MERCHANT_PARTY` and `AMULET_ADMIN`.
 
 ### Take your first payment
 
@@ -174,50 +136,7 @@ call the URL and get the paid response back.
 
 ### Putting it together
 
-```ts
-import { SDK } from "@canton-network/wallet-sdk";
-import { CantonX402Payer, createX402Fetch, devnetConfig } from "@chainsafe/x402-server-sdk";
-
-const net = devnetConfig({ ledgerClientUrl: process.env.LEDGER_CLIENT_URL! });
-const registryUrl = process.env.AMULET_REGISTRY_URL!; // Amulet Token Standard registry
-const DSO_PARTY = "DSO::1220be58c2…"; // from GET /v2/supported
-
-// OAuth2 for your participant's Ledger API (localnet uses method: "self_signed").
-const auth = {
-  method: "client_credentials",
-  configUrl: process.env.CANTON_OAUTH_CONFIG_URL!,
-  credentials: {
-    clientId: process.env.CANTON_OAUTH_CLIENT_ID!,
-    clientSecret: process.env.CANTON_OAUTH_CLIENT_SECRET!,
-    scope: net.auth.scope,
-    audience: net.auth.audience,
-  },
-} as const;
-
-const sdk = await SDK.create({
-  auth,
-  ledgerClientUrl: net.ledgerClientUrl,
-  token: { auth, registries: [registryUrl] },
-});
-
-const payer = new CantonX402Payer({
-  sdk,
-  key: {
-    partyId: process.env.PAYER_PARTY_ID!,
-    publicKey: process.env.PAYER_PUBLIC_KEY!,
-    privateKey: process.env.PAYER_PRIVATE_KEY!,
-  },
-  network: net.network,
-  registries: [{ instrumentId: { id: "Amulet", admin: DSO_PARTY }, registryUrl }],
-});
-
-// A fetch that pays 402s automatically.
-const pay = createX402Fetch(payer);
-
-// Call the gated endpoint — the 402 is paid and the request retried for you.
-const res = await pay("https://api.example.com/paid");
-const data = await res.json();
-```
+<<< @/snippets/pay-with-fetch.ts#snippet
 
 The [`examples/mortgage`](https://github.com/ChainSafe/canton-x402-sdk/tree/main/examples/mortgage)
 pair in the SDK repo is a full runnable payer + merchant, with the complete

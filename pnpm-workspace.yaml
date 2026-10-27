@@ -3,3 +3,6 @@ packages:
   # Examples are grouped by scenario (e.g. examples/mortgage/*), so each app inside
   # a scenario folder is its own workspace package.
   - "examples/*/*"
+  # The TypeScript the docs show, compiled by `pnpm typecheck` so a signature
+  # change fails the docs too (#69). Not published, never run.
+  - "docs/snippets"

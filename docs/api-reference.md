@@ -12,7 +12,9 @@ middleware sends. What each verify check means is on
 [The facilitator](/facilitator#what-verify-guarantees).
 
 `$FACILITATOR_URL` below is your facilitator's base URL. The integration panel
-on the merchant dashboard's **API keys** page shows it.
+on the merchant dashboard's **API keys** page shows it, and `$FACILITATOR_API_KEY`
+is a key you create on that same page (it is shown only once). Both are the
+names the panel's `.env` uses.
 
 ## `GET /v2/supported`
 
@@ -159,7 +161,7 @@ A body that is not a well-formed request answers `400` with
 ```bash
 curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $API_KEY" \
+  -H "Authorization: Bearer $FACILITATOR_API_KEY" \
   -d @- <<'JSON'
 {
   "x402Version": 2,
@@ -285,6 +287,6 @@ facilitator that is temporarily out of capacity answers `503` with a
 # payment.json holds the body above
 curl -sS -X POST "$FACILITATOR_URL/v2/settle" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $API_KEY" \
+  -H "Authorization: Bearer $FACILITATOR_API_KEY" \
   -d @payment.json
 ```
