@@ -1,23 +1,23 @@
-# The docs site: built on every pull request, published to GitHub Pages on main.
+# The docs site. The `gh-pages` branch IS the site: production at the root,
+# each pull request's preview under pr-<N>/, removed when it closes. All three
+# writers go through .github/scripts/publish-docs.sh, so "a publish must not
+# delete someone else's preview" is written once.
 #
-# NO `paths:` FILTER, deliberately. The build job is a required check, and a
-# required check that is skipped never reports — GitHub then waits for it
-# forever and the pull request cannot merge. Running it on every PR costs a few
-# seconds and removes that trap entirely. ci.yml makes the same choice.
-#
-# Internal links need no separate tool: `vitepress build` exits non-zero on a
-# dead one, so the build step is the link check. External links are NOT
-# checked, and should not be from a required job — they fail for reasons that
-# are not ours. A scheduled run is the place for those, if they are ever wanted.
-#
-# A pull request gets the built site as a downloadable artifact rather than a
-# URL: GitHub Pages has one environment and no preview deployments. Moving to a
-# per-PR URL means a host that supports it (Cloudflare Pages, as the facilitator
-# uses) and its token in this repo's secrets — a contained change to this file.
+# Four things here look like mistakes and are not:
+#   - No `paths:` filter. The build is a required check, and a skipped one
+#     never reports, so the pull request would wait on it forever.
+#   - No shared concurrency group. GitHub keeps one pending run per group and
+#     cancels the waiting one when a third arrives, which would drop a
+#     cleanup silently. publish-docs.sh retries a rejected push instead.
+#   - A preview is built again rather than reusing the artifact: VitePress
+#     bakes `base` in, and a preview is served from a deeper path.
+#   - Forks get no preview. Their token is read-only, and the alternative
+#     runs fork code against our credentials.
 name: Docs
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, closed]
   push:
     branches: [main]
   workflow_dispatch:
@@ -25,69 +25,104 @@ on:
 permissions:
   contents: read
 
+env:
+  # Where Pages serves the site from. A custom domain would make this "/".
+  SITE_BASE: /canton-x402-sdk/
+
 jobs:
   build:
-    # The name a branch-protection rule names. Changing it silently un-requires
-    # the check, so change the rule with it.
+    # The name a branch-protection rule names. Renaming it silently
+    # un-requires the check, so change the rule with it.
     name: build docs
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
-    # Supersede an earlier run on the same ref; a merge to main is handled by
-    # the deploy job's own group, which must not be cancelled mid-publish.
     concurrency:
       group: docs-build-${{ github.ref }}
       cancel-in-progress: true
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
+      - run: pnpm install --frozen-lockfile
       # Fails on a dead internal link, which is what makes this a link check.
       - name: Build
         run: pnpm docs:build
-
-      # What a reviewer opens, in place of the preview URL Pages cannot give.
-      - name: Upload the site for review
-        if: github.event_name == 'pull_request'
+        env:
+          DOCS_BASE: ${{ env.SITE_BASE }}
+      - name: Upload the site
         uses: actions/upload-artifact@v4
         with:
           name: docs-site
           path: docs/.vitepress/dist
           retention-days: 7
 
-      - name: Upload the site for Pages
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs/.vitepress/dist
-
-  deploy:
-    name: publish to Pages
+  preview:
+    name: publish preview
+    # Same-repo pull requests only: a fork's token cannot push.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      pages: write
-      id-token: write
-    # One publish at a time, and never cancelled: a half-finished deploy would
-    # leave the live site on whichever files happened to upload.
-    concurrency:
-      group: pages
-      cancel-in-progress: false
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: write
+      pull-requests: write
     steps:
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Built again rather than reusing the build job's artifact: a preview is
+      # served from a different path, and `base` is baked in.
+      - name: Build for the preview path
+        run: pnpm docs:build
+        env:
+          DOCS_BASE: ${{ env.SITE_BASE }}pr-${{ github.event.pull_request.number }}/
+      - name: Publish
+        run: .github/scripts/publish-docs.sh preview docs/.vitepress/dist "${{ github.event.pull_request.number }}"
+      - name: Say where it is
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          URL: https://${{ github.repository_owner }}.github.io${{ env.SITE_BASE }}pr-${{ github.event.pull_request.number }}/
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" \
+            --edit-last --create-if-none \
+            --body "📘 Docs preview: ${URL}
+
+          Updated on every push. Removed when this pull request closes."
+
+  publish:
+    name: publish to Pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: docs-site
+          path: dist
+      # Replaces the root and keeps every pr-*/ — an open pull request's
+      # preview must survive someone else's merge.
+      - name: Publish
+        run: .github/scripts/publish-docs.sh site dist
+
+  cleanup:
+    name: remove preview
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove
+        run: .github/scripts/publish-docs.sh remove "${{ github.event.pull_request.number }}"
