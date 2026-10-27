@@ -31,3 +31,7 @@ npm-debug.log*
 # Canton key files (never commit)
 *-key.json
 *.key.json
+
+# VitePress build output and cache (docs site — see docs/.vitepress/config.ts)
+docs/.vitepress/dist/
+docs/.vitepress/cache/
