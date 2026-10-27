@@ -1,0 +1,149 @@
+# The docs site. The `gh-pages` branch IS the site: production at the root,
+# each pull request's preview under pr-<N>/, removed when it closes. All three
+# writers go through .github/scripts/publish-docs.sh, so "a publish must not
+# delete someone else's preview" is written once.
+#
+# Four things here look like mistakes and are not:
+#   - No `paths:` filter. The build is a required check, and a skipped one
+#     never reports, so the pull request would wait on it forever.
+#   - No shared concurrency group. GitHub keeps one pending run per group and
+#     cancels the waiting one when a third arrives, which would drop a
+#     cleanup silently. publish-docs.sh retries a rejected push instead.
+#   - A preview is built again rather than reusing the artifact: VitePress
+#     bakes `base` in, and a preview is served from a deeper path.
+#   - Forks get no preview. Their token is read-only, and the alternative
+#     runs fork code against our credentials.
+name: Docs
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Where Pages serves the site from. A custom domain would make this "/".
+  SITE_BASE: /canton-x402-sdk/
+
+jobs:
+  build:
+    # The name a branch-protection rule names. Renaming it silently
+    # un-requires the check, so change the rule with it.
+    name: build docs
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: docs-build-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Fails on a dead internal link, which is what makes this a link check.
+      - name: Build
+        run: pnpm docs:build
+        env:
+          DOCS_BASE: ${{ env.SITE_BASE }}
+      - name: Upload the site
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: docs/.vitepress/dist
+          retention-days: 7
+
+  preview:
+    name: publish preview
+    # Same-repo pull requests only: a fork's token cannot push.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Built again rather than reusing the build job's artifact: a preview is
+      # served from a different path, and `base` is baked in.
+      - name: Build for the preview path
+        run: pnpm docs:build
+        env:
+          DOCS_BASE: ${{ env.SITE_BASE }}pr-${{ github.event.pull_request.number }}/
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/publish-docs.sh preview docs/.vitepress/dist "${{ github.event.pull_request.number }}"
+      # One sticky comment, found by its own marker — the way ci.yml finds its
+      # coverage report. NOT `gh pr comment --edit-last`: that edits the last
+      # comment by whoever owns the token, and the coverage report is posted
+      # by the same github-actions[bot], so it rewrote the coverage report
+      # instead. A marker cannot collide.
+      - name: Say where it is
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # Pages serves a lowercase host; the owner keeps its own casing.
+          url="https://${OWNER,,}.github.io${SITE_BASE}pr-${PR}/"
+          body="<!-- docs-preview -->
+          📘 Docs preview: ${url}
+
+          Updated on every push. Removed when this pull request closes."
+          existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq 'map(select((.body // "") | startswith("<!-- docs-preview -->"))) | .[0].id // empty')
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$existing" -f body="$body" >/dev/null
+          else
+            gh api --method POST "repos/$REPO/issues/$PR/comments" -f body="$body" >/dev/null
+          fi
+
+  publish:
+    name: publish to Pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: docs-site
+          path: dist
+      # Replaces the root and keeps every pr-*/ — an open pull request's
+      # preview must survive someone else's merge.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/publish-docs.sh site dist
+
+  cleanup:
+    name: remove preview
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/publish-docs.sh remove "${{ github.event.pull_request.number }}"
