@@ -12,6 +12,11 @@
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
+  // WHERE THE SITE IS SERVED FROM. GitHub project Pages serve under
+  // /<repo>/, so assets referenced from "/" would 404. A custom domain serves
+  // from the root instead: set DOCS_BASE=/ then, or drop this once the domain
+  // is the only way in.
+  base: process.env.DOCS_BASE ?? "/canton-x402-sdk/",
   title: "Canton x402",
   description:
     "Pay for an HTTP request on Canton: the x402 facilitator, and the SDK that talks to it.",
