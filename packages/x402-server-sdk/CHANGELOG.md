@@ -1,5 +1,13 @@
 # @chainsafe/x402-server-sdk
 
+## 0.1.2
+
+### Patch Changes
+
+- ecd453d: Require `@canton-network/wallet-sdk` ^1.6.0, so the ACS read the payer makes
+  sends the request body Canton 3.6 accepts.
+- 716b9e0: docs: refresh the x402-server-sdk README
+
 ## 0.1.1
 
 ### Patch Changes
