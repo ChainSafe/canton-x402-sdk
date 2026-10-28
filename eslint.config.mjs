@@ -2,7 +2,9 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["**/dist/**", "**/coverage/**", "**/node_modules/**"] },
+  // docs/.vitepress/cache holds the dev server's pre-bundled deps (gitignored, but
+  // `pnpm lint` after `pnpm docs:dev` would otherwise lint vendored Vue).
+  { ignores: ["**/dist/**", "**/coverage/**", "**/node_modules/**", "docs/.vitepress/cache/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

@@ -1,0 +1,23 @@
+{
+  "name": "@chainsafe/x402-docs-snippets",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The TypeScript the docs show, as files the workspace compiles (#69). Transcluded into docs/*.md; never run.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@canton-network/wallet-sdk": "^1.6.0",
+    "@chainsafe/x402-client": "workspace:^",
+    "@chainsafe/x402-core": "workspace:^",
+    "@chainsafe/x402-express": "workspace:^",
+    "@chainsafe/x402-server-sdk": "workspace:^",
+    "express": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^20.16.0",
+    "typescript": "^5.6.0"
+  }
+}
