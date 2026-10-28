@@ -10,7 +10,7 @@ import {
 } from "./index";
 import { requirementsHash } from "../hashing";
 import { HashingSchemeVersion } from "../types/payment";
-import { encodePreparedTransaction } from "./prepared-tx.fixtures";
+import { encodePreparedTransaction, encodePreparedTransactionGraph } from "./prepared-tx.fixtures";
 import type { CantonPaymentPayload, CantonPaymentRequirements, SchemeVerifier } from "../index";
 
 hashes.sha512 = sha512;
@@ -101,6 +101,21 @@ describe("exactCantonVerifier", () => {
     expect(result).toMatchObject({
       isValid: false,
       invalidReason: "prepared_transaction_hash_mismatch",
+    });
+  });
+
+  it("rejects an unsafe transaction graph before canonical hashing", async () => {
+    const { payload, requirements } = await buildSignedFixture();
+    const cyclicTransaction = encodePreparedTransactionGraph(["0"], [{ id: "0", children: ["0"] }]);
+    const maliciousPayload = {
+      ...payload,
+      payload: { ...payload.payload, preparedTransaction: cyclicTransaction },
+    };
+
+    expect(await verifier.verify(maliciousPayload, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "invalid_prepared_transaction_structure",
+      extensions: { detail: "duplicate_reference" },
     });
   });
 

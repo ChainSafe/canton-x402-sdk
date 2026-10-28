@@ -58,11 +58,50 @@ export interface EncodeOptions {
   choiceId?: string;
 }
 
+export interface PreparedTransactionGraphNode {
+  id: string;
+  children: string[];
+}
+
+/** Encode a minimal rollback-only graph for structural validation tests. */
+export function encodePreparedTransactionGraph(
+  roots: string[],
+  nodes: PreparedTransactionGraphNode[],
+): string {
+  const damlTxn = Writer.create().uint32(tag(1, WIRE_LEN)).string("2.1");
+  for (const root of roots) damlTxn.uint32(tag(2, WIRE_LEN)).string(root);
+  for (const node of nodes) {
+    const rollback = Writer.create();
+    for (const child of node.children) {
+      rollback.uint32(tag(1, WIRE_LEN)).string(child);
+    }
+    const damlNode = Writer.create()
+      .uint32(tag(1, WIRE_LEN))
+      .string(node.id)
+      .uint32(tag(1000, WIRE_LEN))
+      .bytes(wrap(4, rollback.finish()))
+      .finish();
+    damlTxn.uint32(tag(3, WIRE_LEN)).bytes(damlNode);
+  }
+
+  return bytesToBase64(
+    Writer.create()
+      .uint32(tag(1, WIRE_LEN))
+      .bytes(damlTxn.finish())
+      .uint32(tag(2, WIRE_LEN))
+      .bytes(new Uint8Array())
+      .finish(),
+  );
+}
+
 /**
  * Encode a `PreparedTransaction` base64 blob whose sole exercise is a
  * TransferFactory_Transfer for `transfer`. Field layout mirrors the decoder.
  */
-export function encodePreparedTransaction(transfer: DecodedTransfer, opts: EncodeOptions = {}): string {
+export function encodePreparedTransaction(
+  transfer: DecodedTransfer,
+  opts: EncodeOptions = {},
+): string {
   const positional = opts.positional ?? false;
 
   const instrument = recordValue(

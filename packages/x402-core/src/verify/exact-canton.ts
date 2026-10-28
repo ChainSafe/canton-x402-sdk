@@ -25,6 +25,7 @@ import type { X402PaymentRequirements } from "../types/requirements";
 import { amountGte, isExpired, requirementsHashMatches } from "./common";
 import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 import { computePreparedTransactionHash } from "./prepared-tx-hash";
+import { guardPreparedTransaction } from "./prepared-tx-guard";
 
 // @noble/ed25519 v3 needs sha512 wired (same as the facilitator's wallet.ts).
 ed25519Hashes.sha512 = sha512;
@@ -170,7 +171,18 @@ async function verifyExactCanton(
   if (inner.hashingSchemeVersion !== HashingSchemeVersion.V2) {
     return fail("internal_error", inner.payer);
   }
-  // 9. Derive the trusted hash from the submitted prepared transaction.
+  // 9. Bound and validate the graph before the upstream recursive hasher.
+  const graph = guardPreparedTransaction(inner.preparedTransaction);
+  if (!graph.ok) {
+    return {
+      isValid: false,
+      invalidReason: "invalid_prepared_transaction_structure",
+      payer: inner.payer,
+      extensions: { detail: graph.reason },
+    };
+  }
+
+  // 10. Derive the trusted hash from the submitted prepared transaction.
   let computedHash: string;
   try {
     computedHash = await computePreparedTransactionHash(
@@ -186,28 +198,38 @@ async function verifyExactCanton(
     };
   }
 
-  // 10. The client-supplied hash must describe this exact transaction.
+  // 11. The client-supplied hash must describe this exact transaction.
   if (computedHash.toLowerCase() !== inner.preparedTransactionHash.toLowerCase()) {
     return fail("prepared_transaction_hash_mismatch", inner.payer);
   }
 
-  // 11. Verify against the trusted, recomputed hash.
+  // 12. Verify against the trusted, recomputed hash.
   if (!verifySignature(computedHash, inner.partySignature, inner.publicKey)) {
     return fail("bad_signature", inner.payer);
   }
 
-  // 12. the signed transfer must actually move what the requirements demand.
+  // 13. the signed transfer must actually move what the requirements demand.
   //    requirementsHash proves the payload *references* these requirements;
   //    only decoding the prepared transaction proves it *satisfies* them —
   //    binding sender/receiver/instrument/amount so a valid signature over a
   //    divergent transfer (e.g. to another party, or a smaller amount) is rejected.
   const transfer = decodePreparedTransaction(inner.preparedTransaction);
   if (!transfer) {
-    return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: "undecodable" } };
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: "undecodable" },
+    };
   }
   const mismatch = findTransferMismatch(transfer, requirements, inner.payer);
   if (mismatch) {
-    return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: mismatch } };
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: mismatch },
+    };
   }
   return { isValid: true, payer: inner.payer };
 }
