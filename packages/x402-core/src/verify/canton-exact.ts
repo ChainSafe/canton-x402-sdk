@@ -32,6 +32,7 @@ import {
 import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 import { gunzipPreparedTransaction } from "./prepared-tx-codec";
 import { computePreparedTransactionHash } from "./prepared-tx-hash";
+import { guardPreparedTransaction } from "./prepared-tx-guard";
 
 // @noble/ed25519 v3 needs sha512 wired (same as the facilitator's wallet.ts).
 ed25519Hashes.sha512 = sha512;
@@ -238,8 +239,7 @@ async function verifyCantonExact(
   if (hashingSchemeVersion !== HashingSchemeVersion.V2) {
     return fail("internal_error", inner.payer);
   }
-
-  // Gunzip exactly once. Hashing and decoding both use these bytes.
+  // Gunzip exactly once. Hashing, guarding and decoding use these bytes.
   const prepared = gunzipPreparedTransaction(inner.preparedTransaction);
   if (prepared === null) {
     return {
@@ -252,7 +252,18 @@ async function verifyCantonExact(
 
   const preparedBase64 = bytesToBase64(prepared);
 
-  // 9. Derive the trusted hash from the submitted prepared transaction.
+  // Bound and validate the graph before the upstream recursive hasher.
+  const graph = guardPreparedTransaction(preparedBase64);
+  if (!graph.ok) {
+    return {
+      isValid: false,
+      invalidReason: "invalid_prepared_transaction_structure",
+      payer: inner.payer,
+      extensions: { detail: graph.reason },
+    };
+  }
+
+  // Derive the trusted hash from the validated prepared transaction.
   let computedHash: string;
   try {
     computedHash = await computePreparedTransactionHash(
@@ -268,17 +279,17 @@ async function verifyCantonExact(
     };
   }
 
-  // 10. The supplied hash must describe this exact transaction.
+  // The supplied hash must describe this exact transaction.
   if (computedHash.toLowerCase() !== inner.preparedTxHash.toLowerCase()) {
     return fail("prepared_transaction_hash_mismatch", inner.payer);
   }
 
-  // 11. Verify the payload's base64 signature against the trusted hash.
+  // Verify the payload's base64 signature against the trusted hash.
   if (!verifySignature(computedHash, signatureHex, inner.publicKey)) {
     return fail("bad_signature", inner.payer);
   }
 
-  // 12. the signed transfer must actually move what the requirements demand.
+  // 13. the signed transfer must actually move what the requirements demand.
   //    requirementsHash proves the payload *references* these requirements;
   //    only decoding the prepared transaction proves it *satisfies* them —
   //    binding sender/receiver/instrument/amount so a valid signature over a
@@ -287,11 +298,21 @@ async function verifyCantonExact(
   //    either bound is as undecodable as a bad protobuf.
   const transfer = decodePreparedTransaction(preparedBase64);
   if (!transfer) {
-    return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: "undecodable" } };
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: "undecodable" },
+    };
   }
   const mismatch = findTransferMismatch(transfer, requirements, inner.payer);
   if (mismatch) {
-    return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: mismatch } };
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: mismatch },
+    };
   }
   return { isValid: true, payer: inner.payer };
 }

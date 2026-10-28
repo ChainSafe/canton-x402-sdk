@@ -15,7 +15,12 @@ import {
 } from "./index";
 import { requirementsHash as requirementsHashOf } from "../hashing";
 import { HashingSchemeVersion } from "../types/payment";
-import { encodeNode, encodePreparedTransaction, wrap } from "./prepared-tx.fixtures";
+import {
+  encodeNode,
+  encodePreparedTransaction,
+  encodePreparedTransactionGraph,
+  wrap,
+} from "./prepared-tx.fixtures";
 import type {
   CantonPaymentPayload,
   CantonPaymentRequirements,
@@ -141,6 +146,21 @@ describe("cantonExactVerifier", () => {
     expect(result).toMatchObject({
       isValid: false,
       invalidReason: "prepared_transaction_hash_mismatch",
+    });
+  });
+
+  it("rejects an unsafe transaction graph before canonical hashing", async () => {
+    const { payload, requirements } = await buildSignedFixture();
+    const cyclicTransaction = encodePreparedTransactionGraph(["0"], [{ id: "0", children: ["0"] }]);
+    const maliciousPayload = {
+      ...payload,
+      payload: { ...payload.payload, preparedTransaction: cyclicTransaction },
+    };
+
+    expect(await verifier.verify(maliciousPayload, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "invalid_prepared_transaction_structure",
+      extensions: { detail: "duplicate_reference" },
     });
   });
 

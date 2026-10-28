@@ -85,6 +85,7 @@ export const VerifyInvalidReasonSchema = v.picklist([
   "bad_fingerprint",
   "bad_signature",
   "prepared_transaction_hash_mismatch",
+  "invalid_prepared_transaction_structure",
   "nonce_replayed",
   "missing_public_key",
   /** The signed prepared transaction does not transfer what the requirements demand. */

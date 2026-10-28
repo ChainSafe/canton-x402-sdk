@@ -84,11 +84,62 @@ export interface EncodeOptions {
 
 /** A `DamlTransaction.Node{1: node_id, 1000: v1}` around a v1 `Node` body. */
 export function encodeNode(nodeId: string, v1: Uint8Array): Uint8Array {
-  return Writer.create().uint32(tag(1, WIRE_LEN)).string(nodeId).uint32(tag(1000, WIRE_LEN)).bytes(v1).finish();
+  return Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string(nodeId)
+    .uint32(tag(1000, WIRE_LEN))
+    .bytes(v1)
+    .finish();
+}
+
+export interface PreparedTransactionGraphNode {
+  id: string;
+  children: string[];
+}
+
+/** Encode a minimal rollback-only graph for structural validation tests. */
+export function encodePreparedTransactionGraph(
+  roots: string[],
+  nodes: PreparedTransactionGraphNode[],
+): string {
+  const damlTxn = Writer.create().uint32(tag(1, WIRE_LEN)).string("2.1");
+
+  for (const root of roots) {
+    damlTxn.uint32(tag(2, WIRE_LEN)).string(root);
+  }
+
+  for (const node of nodes) {
+    const rollback = Writer.create();
+
+    for (const child of node.children) {
+      rollback.uint32(tag(1, WIRE_LEN)).string(child);
+    }
+
+    const damlNode = Writer.create()
+      .uint32(tag(1, WIRE_LEN))
+      .string(node.id)
+      .uint32(tag(1000, WIRE_LEN))
+      .bytes(wrap(4, rollback.finish()))
+      .finish();
+
+    damlTxn.uint32(tag(3, WIRE_LEN)).bytes(damlNode);
+  }
+
+  return bytesToBase64(
+    Writer.create()
+      .uint32(tag(1, WIRE_LEN))
+      .bytes(damlTxn.finish())
+      .uint32(tag(2, WIRE_LEN))
+      .bytes(new Uint8Array())
+      .finish(),
+  );
 }
 
 /** The TransferFactory_Transfer argument for `transfer`, as the exercise's `chosen_value`. */
-export function encodeChoiceArgument(transfer: DecodedTransfer, opts: EncodeOptions = {}): Uint8Array {
+export function encodeChoiceArgument(
+  transfer: DecodedTransfer,
+  opts: EncodeOptions = {},
+): Uint8Array {
   const positional = opts.positional ?? false;
   const extra = opts.extra ?? {};
 
