@@ -4,11 +4,15 @@
 // guards. Pure and stateless — the stateful guards (nonce replay) and on-chain
 // execution stay in the facilitator, which composes this verifier's result.
 
-import { sign as ed25519Sign, verify as ed25519Verify, hashes as ed25519Hashes } from "@noble/ed25519";
+import {
+  sign as ed25519Sign,
+  verify as ed25519Verify,
+  hashes as ed25519Hashes,
+} from "@noble/ed25519";
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import type { NetworkId } from "../types/common";
-import { isCantonPaymentInner } from "../types/payment";
+import { HashingSchemeVersion, isCantonPaymentInner } from "../types/payment";
 import { CantonPaymentRequirements, isCantonPaymentRequirements } from "../types/requirements";
 import type {
   SchemeVerifier,
@@ -20,6 +24,8 @@ import type { X402PaymentPayload } from "../types/payment";
 import type { X402PaymentRequirements } from "../types/requirements";
 import { amountGte, isExpired, requirementsHashMatches } from "./common";
 import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
+import { computePreparedTransactionHash } from "./prepared-tx-hash";
+import { guardPreparedTransaction } from "./prepared-tx-guard";
 
 // @noble/ed25519 v3 needs sha512 wired (same as the facilitator's wallet.ts).
 ed25519Hashes.sha512 = sha512;
@@ -118,11 +124,11 @@ function fail(reason: VerifyInvalidReason, payer?: string): VerifyResponseInvali
  * stateful checks (nonce replay, min-amount FX policy) and the on-chain execute
  * compose on top of a successful result here.
  */
-function verifyExactCanton(
+async function verifyExactCanton(
   networkId: NetworkId,
   payload: X402PaymentPayload<unknown>,
   requirements: X402PaymentRequirements<unknown>,
-): VerifyResponse {
+): Promise<VerifyResponse> {
   // 1. scheme
   if (payload.scheme !== EXACT_CANTON_SCHEME_ID || requirements.scheme !== EXACT_CANTON_SCHEME_ID) {
     return fail("scheme_mismatch");
@@ -161,22 +167,69 @@ function verifyExactCanton(
   if (!partySuffix || derivedFingerprint.toLowerCase() !== partySuffix.toLowerCase()) {
     return fail("bad_fingerprint", inner.payer);
   }
-  // 8. signature over the prepared-transaction hash
-  if (!verifySignature(inner.preparedTransactionHash, inner.partySignature, inner.publicKey)) {
+  // 8. Only V2 can currently be recomputed by the canonical hasher.
+  if (inner.hashingSchemeVersion !== HashingSchemeVersion.V2) {
+    return fail("internal_error", inner.payer);
+  }
+  // 9. Bound and validate the graph before the upstream recursive hasher.
+  const graph = guardPreparedTransaction(inner.preparedTransaction);
+  if (!graph.ok) {
+    return {
+      isValid: false,
+      invalidReason: "invalid_prepared_transaction_structure",
+      payer: inner.payer,
+      extensions: { detail: graph.reason },
+    };
+  }
+
+  // 10. Derive the trusted hash from the submitted prepared transaction.
+  let computedHash: string;
+  try {
+    computedHash = await computePreparedTransactionHash(
+      inner.preparedTransaction,
+      inner.hashingSchemeVersion,
+    );
+  } catch {
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: "undecodable" },
+    };
+  }
+
+  // 11. The client-supplied hash must describe this exact transaction.
+  if (computedHash.toLowerCase() !== inner.preparedTransactionHash.toLowerCase()) {
+    return fail("prepared_transaction_hash_mismatch", inner.payer);
+  }
+
+  // 12. Verify against the trusted, recomputed hash.
+  if (!verifySignature(computedHash, inner.partySignature, inner.publicKey)) {
     return fail("bad_signature", inner.payer);
   }
-  // 9. the signed transfer must actually move what the requirements demand.
+
+  // 13. the signed transfer must actually move what the requirements demand.
   //    requirementsHash proves the payload *references* these requirements;
   //    only decoding the prepared transaction proves it *satisfies* them —
   //    binding sender/receiver/instrument/amount so a valid signature over a
   //    divergent transfer (e.g. to another party, or a smaller amount) is rejected.
   const transfer = decodePreparedTransaction(inner.preparedTransaction);
   if (!transfer) {
-    return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: "undecodable" } };
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: "undecodable" },
+    };
   }
   const mismatch = findTransferMismatch(transfer, requirements, inner.payer);
   if (mismatch) {
-    return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: mismatch } };
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: mismatch },
+    };
   }
   return { isValid: true, payer: inner.payer };
 }

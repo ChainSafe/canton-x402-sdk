@@ -58,11 +58,70 @@ export interface EncodeOptions {
   choiceId?: string;
 }
 
+export interface PreparedTransactionGraphNode {
+  id: string;
+  children: string[];
+}
+
+export interface PreparedTransactionGraphOptions {
+  nodeSeedCount?: number;
+  inputContractCount?: number;
+}
+
+/** Encode a minimal rollback-only graph for structural validation tests. */
+export function encodePreparedTransactionGraph(
+  roots: string[],
+  nodes: PreparedTransactionGraphNode[],
+  options: PreparedTransactionGraphOptions = {},
+): string {
+  const damlTxn = Writer.create().uint32(tag(1, WIRE_LEN)).string("2.1");
+  for (const root of roots) damlTxn.uint32(tag(2, WIRE_LEN)).string(root);
+  for (const node of nodes) {
+    const rollback = Writer.create();
+    for (const child of node.children) {
+      rollback.uint32(tag(1, WIRE_LEN)).string(child);
+    }
+    const damlNode = Writer.create()
+      .uint32(tag(1, WIRE_LEN))
+      .string(node.id)
+      .uint32(tag(1000, WIRE_LEN))
+      .bytes(wrap(4, rollback.finish()))
+      .finish();
+    damlTxn.uint32(tag(3, WIRE_LEN)).bytes(damlNode);
+  }
+  for (let index = 0; index < (options.nodeSeedCount ?? 0); index += 1) {
+    const nodeSeed = Writer.create()
+      .uint32(tag(1, 0))
+      .int32(index)
+      .uint32(tag(2, WIRE_LEN))
+      .bytes(new Uint8Array())
+      .finish();
+    damlTxn.uint32(tag(4, WIRE_LEN)).bytes(nodeSeed);
+  }
+
+  const metadata = Writer.create();
+  for (let index = 0; index < (options.inputContractCount ?? 0); index += 1) {
+    metadata.uint32(tag(7, WIRE_LEN)).bytes(new Uint8Array());
+  }
+
+  return bytesToBase64(
+    Writer.create()
+      .uint32(tag(1, WIRE_LEN))
+      .bytes(damlTxn.finish())
+      .uint32(tag(2, WIRE_LEN))
+      .bytes(metadata.finish())
+      .finish(),
+  );
+}
+
 /**
  * Encode a `PreparedTransaction` base64 blob whose sole exercise is a
  * TransferFactory_Transfer for `transfer`. Field layout mirrors the decoder.
  */
-export function encodePreparedTransaction(transfer: DecodedTransfer, opts: EncodeOptions = {}): string {
+export function encodePreparedTransaction(
+  transfer: DecodedTransfer,
+  opts: EncodeOptions = {},
+): string {
   const positional = opts.positional ?? false;
 
   const instrument = recordValue(
@@ -90,7 +149,14 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
   );
 
   // Exercise{9: choice_id, 10: chosen_value}
+  // Exercise containing the transfer choice.
   const exercise = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string("2.1")
+    .uint32(tag(4, WIRE_LEN))
+    .bytes(new Uint8Array())
+    .uint32(tag(7, WIRE_LEN))
+    .string(transfer.sender)
     .uint32(tag(9, WIRE_LEN))
     .string(opts.choiceId ?? "TransferFactory_Transfer")
     .uint32(tag(10, WIRE_LEN))
@@ -98,8 +164,47 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
     .finish();
 
   const v1Node = wrap(3, exercise); // Node{3: exercise}
-  const damlNode = wrap(1000, v1Node); // DamlTransaction.Node{1000: v1}
-  const damlTxn = wrap(3, damlNode); // DamlTransaction{3: nodes[]}
-  const prepared = wrap(1, damlTxn); // PreparedTransaction{1: transaction}
+  const damlNode = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string("0")
+    .uint32(tag(1000, WIRE_LEN))
+    .bytes(v1Node)
+    .finish();
+  const nodeSeed = Writer.create()
+    .uint32(tag(1, 0))
+    .int32(0)
+    .uint32(tag(2, WIRE_LEN))
+    .bytes(new Uint8Array(32).fill(1))
+    .finish();
+  const damlTxn = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string("2.1")
+    .uint32(tag(2, WIRE_LEN))
+    .string("0")
+    .uint32(tag(3, WIRE_LEN))
+    .bytes(damlNode)
+    .uint32(tag(4, WIRE_LEN))
+    .bytes(nodeSeed)
+    .finish();
+  const submitterInfo = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string(transfer.sender)
+    .uint32(tag(2, WIRE_LEN))
+    .string("test-command")
+    .finish();
+  const metadata = Writer.create()
+    .uint32(tag(2, WIRE_LEN))
+    .bytes(submitterInfo)
+    .uint32(tag(3, WIRE_LEN))
+    .string("test-synchronizer")
+    .uint32(tag(5, WIRE_LEN))
+    .string("test-transaction")
+    .finish();
+  const prepared = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .bytes(damlTxn)
+    .uint32(tag(2, WIRE_LEN))
+    .bytes(metadata)
+    .finish();
   return bytesToBase64(prepared);
 }
