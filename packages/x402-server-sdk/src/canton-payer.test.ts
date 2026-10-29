@@ -54,10 +54,10 @@ function makeRequirements(over: Partial<CantonPaymentRequirements> = {}): Canton
   };
 }
 
-function makePayer(sdk: CantonX402PayerOptions["sdk"]) {
+function makePayer(sdk: CantonX402PayerOptions["sdk"], partyKey: CantonPartyKey = key) {
   return new CantonX402Payer({
     sdk,
-    key,
+    key: partyKey,
     network: NETWORK,
     registries: [{ instrumentId: { id: "Amulet", admin: "DSO::x" }, registryUrl: "https://registry.example" }],
   });
@@ -120,5 +120,38 @@ describe("CantonX402Payer.authorize", () => {
       makePayer(sdk).authorize(makeRequirements({ asset: { instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).rejects.toThrow(/unsupported requirement/);
     expect(prepare).not.toHaveBeenCalled();
+  });
+});
+
+describe("CantonX402Payer private key formats", () => {
+  // nacl / libsodium / wallet-sdk secret key layout: seed || publicKey.
+  const secret64 = toB64(new Uint8Array([...seed, ...getPublicKey(seed)]));
+
+  it("signs identically with a 64-byte secret key and a 32-byte seed", async () => {
+    const req = makeRequirements();
+    const from32 = (await makePayer(mockSdk().sdk).authorize(req)).payload;
+    const from64 = (await makePayer(mockSdk().sdk, { ...key, privateKey: secret64 }).authorize(req)).payload;
+
+    expect(from64.partySignature).toBe(from32.partySignature);
+    expect(verifySignature(from64.preparedTransactionHash, from64.partySignature, publicKeyB64)).toBe(true);
+  });
+
+  it("accepts a base64url-encoded seed", async () => {
+    const payer = makePayer(mockSdk().sdk, { ...key, privateKey: Buffer.from(seed).toString("base64url") });
+    const inner = (await payer.authorize(makeRequirements())).payload;
+    expect(verifySignature(inner.preparedTransactionHash, inner.partySignature, publicKeyB64)).toBe(true);
+  });
+
+  it("rejects a 64-byte secret key whose public half is not the configured public key", () => {
+    const other = new Uint8Array(32).fill(8);
+    const mismatched = toB64(new Uint8Array([...seed, ...getPublicKey(other)]));
+    expect(() => makePayer(mockSdk().sdk, { ...key, privateKey: mismatched })).toThrow(
+      /does not embed the configured public key/,
+    );
+  });
+
+  it.each([16, 33, 63, 65])("rejects a %i-byte private key at construction", (len) => {
+    const bad = toB64(new Uint8Array(len).fill(7));
+    expect(() => makePayer(mockSdk().sdk, { ...key, privateKey: bad })).toThrow(`got ${len} bytes`);
   });
 });
