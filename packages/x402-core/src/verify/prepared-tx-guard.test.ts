@@ -3,6 +3,7 @@ import { encodePreparedTransaction, encodePreparedTransactionGraph } from "./pre
 import {
   guardPreparedTransaction,
   MAX_PREPARED_TRANSACTION_BASE64_LENGTH,
+  MAX_PREPARED_TRANSACTION_INPUT_CONTRACTS,
   MAX_PREPARED_TRANSACTION_NODES,
 } from "./prepared-tx-guard";
 
@@ -59,6 +60,44 @@ describe("guardPreparedTransaction", () => {
     expect(guardPreparedTransaction(preparedTransaction)).toEqual({
       ok: false,
       reason: "node_limit",
+    });
+  });
+
+  it("accepts one node seed per node", () => {
+    const preparedTransaction = encodePreparedTransactionGraph(["0"], [{ id: "0", children: [] }], {
+      nodeSeedCount: 1,
+    });
+
+    expect(guardPreparedTransaction(preparedTransaction)).toEqual({ ok: true });
+  });
+
+  it("rejects more node seeds than nodes", () => {
+    const preparedTransaction = encodePreparedTransactionGraph(["0"], [{ id: "0", children: [] }], {
+      nodeSeedCount: 2,
+    });
+
+    expect(guardPreparedTransaction(preparedTransaction)).toEqual({
+      ok: false,
+      reason: "node_seed_limit",
+    });
+  });
+
+  it("accepts the maximum permitted number of input contracts", () => {
+    const preparedTransaction = encodePreparedTransactionGraph(["0"], [{ id: "0", children: [] }], {
+      inputContractCount: MAX_PREPARED_TRANSACTION_INPUT_CONTRACTS,
+    });
+
+    expect(guardPreparedTransaction(preparedTransaction)).toEqual({ ok: true });
+  });
+
+  it("rejects more than the permitted number of input contracts", () => {
+    const preparedTransaction = encodePreparedTransactionGraph(["0"], [{ id: "0", children: [] }], {
+      inputContractCount: MAX_PREPARED_TRANSACTION_INPUT_CONTRACTS + 1,
+    });
+
+    expect(guardPreparedTransaction(preparedTransaction)).toEqual({
+      ok: false,
+      reason: "input_contract_limit",
     });
   });
 

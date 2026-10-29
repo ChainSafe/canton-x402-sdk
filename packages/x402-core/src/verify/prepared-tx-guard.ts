@@ -7,11 +7,14 @@ export const MAX_PREPARED_TRANSACTION_BASE64_LENGTH =
 
 /** Bounds both the iterative validation work and the recursive work in the upstream hasher. */
 export const MAX_PREPARED_TRANSACTION_NODES = 1_024;
+export const MAX_PREPARED_TRANSACTION_INPUT_CONTRACTS = 1_024;
 
 export type PreparedTransactionGuardFailure =
   | "size_limit"
   | "undecodable"
   | "node_limit"
+  | "node_seed_limit"
+  | "input_contract_limit"
   | "duplicate_node_id"
   | "duplicate_reference"
   | "missing_node"
@@ -68,6 +71,14 @@ export function guardPreparedTransaction(
   if (!transaction) return { ok: false, reason: "undecodable" };
   if (transaction.nodes.length > MAX_PREPARED_TRANSACTION_NODES) {
     return { ok: false, reason: "node_limit" };
+  }
+  // Canton emits at most one seed per node; the hasher scans all seeds for each node.
+  if (transaction.nodeSeeds.length > transaction.nodes.length) {
+    return { ok: false, reason: "node_seed_limit" };
+  }
+  // Each input contract costs its own sha256 in the hasher.
+  if ((decoded.metadata?.inputContracts.length ?? 0) > MAX_PREPARED_TRANSACTION_INPUT_CONTRACTS) {
+    return { ok: false, reason: "input_contract_limit" };
   }
 
   const nodes = new Map<string, (typeof transaction.nodes)[number]>();
