@@ -63,10 +63,16 @@ export interface PreparedTransactionGraphNode {
   children: string[];
 }
 
+export interface PreparedTransactionGraphOptions {
+  nodeSeedCount?: number;
+  inputContractCount?: number;
+}
+
 /** Encode a minimal rollback-only graph for structural validation tests. */
 export function encodePreparedTransactionGraph(
   roots: string[],
   nodes: PreparedTransactionGraphNode[],
+  options: PreparedTransactionGraphOptions = {},
 ): string {
   const damlTxn = Writer.create().uint32(tag(1, WIRE_LEN)).string("2.1");
   for (const root of roots) damlTxn.uint32(tag(2, WIRE_LEN)).string(root);
@@ -83,13 +89,27 @@ export function encodePreparedTransactionGraph(
       .finish();
     damlTxn.uint32(tag(3, WIRE_LEN)).bytes(damlNode);
   }
+  for (let index = 0; index < (options.nodeSeedCount ?? 0); index += 1) {
+    const nodeSeed = Writer.create()
+      .uint32(tag(1, 0))
+      .int32(index)
+      .uint32(tag(2, WIRE_LEN))
+      .bytes(new Uint8Array())
+      .finish();
+    damlTxn.uint32(tag(4, WIRE_LEN)).bytes(nodeSeed);
+  }
+
+  const metadata = Writer.create();
+  for (let index = 0; index < (options.inputContractCount ?? 0); index += 1) {
+    metadata.uint32(tag(7, WIRE_LEN)).bytes(new Uint8Array());
+  }
 
   return bytesToBase64(
     Writer.create()
       .uint32(tag(1, WIRE_LEN))
       .bytes(damlTxn.finish())
       .uint32(tag(2, WIRE_LEN))
-      .bytes(new Uint8Array())
+      .bytes(metadata.finish())
       .finish(),
   );
 }
