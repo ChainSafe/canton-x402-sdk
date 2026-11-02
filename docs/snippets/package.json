@@ -1,6 +1,6 @@
 {
   "name": "@chainsafe/x402-docs-snippets",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "description": "The TypeScript the docs show, as files the workspace compiles (#69). Transcluded into docs/*.md; never run.",

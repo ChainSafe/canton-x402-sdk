@@ -1,6 +1,6 @@
 {
   "name": "@chainsafe/x402-express",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Express middleware for x402 payments on Canton — gate a route behind a Canton Coin payment, verified (and optionally settled) via a facilitator.",
   "license": "Apache-2.0",
   "repository": {

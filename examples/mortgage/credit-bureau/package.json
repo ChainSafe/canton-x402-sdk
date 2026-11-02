@@ -1,6 +1,6 @@
 {
   "name": "@chainsafe/x402-example-mortgage-bureau",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "description": "Demo credit bureau — an x402 merchant that sells a synthetic credit report per pull, settled via a Canton facilitator.",
