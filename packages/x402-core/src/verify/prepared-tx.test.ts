@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 import {
   encodeChoiceArgument,
+  encodeNode,
   encodePreparedTransaction,
   wrap,
   type EncodeOptions,
@@ -13,6 +14,13 @@ const TRANSFER: DecodedTransfer = {
   amount: "0.01",
   instrumentId: { id: "Amulet", admin: "DSO::1220dso" },
 };
+const OTHER: DecodedTransfer = { ...TRANSFER, receiver: "someone::1220", amount: "9" };
+
+const empty = new Uint8Array();
+const utf8 = (s: string) => new TextEncoder().encode(s);
+/** A v1 `Node` body: a TransferFactory_Transfer exercise for `t`. */
+const transferBody = (t: DecodedTransfer) =>
+  wrap(3, concat(wrap(9, utf8("TransferFactory_Transfer")), wrap(10, encodeChoiceArgument(t))));
 
 describe("decodePreparedTransaction", () => {
   it("round-trips a labeled record encoding", () => {
@@ -55,12 +63,9 @@ describe("decodePreparedTransaction on a non-canonical encoding", () => {
   // oneof, so a full decoder need not read the transfer a first-match walk
   // would. Canton never encodes these. Each case decodes to a transfer when
   // the canonical-encoding check is removed.
-  const empty = new Uint8Array();
-  const utf8 = (s: string) => new TextEncoder().encode(s);
-
   const cases: [string, EncodeOptions][] = [
     ["a node that is also a create", { extra: { node: wrap(1, empty) } }],
-    ["a node whose v1 body is written twice", { extra: { damlNode: wrap(1000, wrap(1, empty)) } }],
+    ["a node whose v1 body is written twice", { extra: { damlNode: wrap(1000, transferBody(OTHER)) } }],
     ["a transaction written twice", { extra: { prepared: wrap(1, empty) } }],
     [
       "an exercise whose choice id is written twice",
@@ -70,7 +75,10 @@ describe("decodePreparedTransaction on a non-canonical encoding", () => {
       "an exercise whose chosen value is written twice",
       { extra: { exercise: wrap(10, encodeChoiceArgument(TRANSFER)) } },
     ],
+    ["a node that is also a query_by_key", { extra: { node: wrap(5, empty) } }],
+    ["a node with a field other than node_id and v1", { extra: { damlNode: wrap(1001, empty) } }],
     ["a value with two members", { extra: { receiver: wrap(8, utf8("someone::1220")) } }],
+    ["a value with a member this decoder does not know", { extra: { receiver: wrap(17, empty) } }],
     [
       "a record field whose value is written twice",
       { extra: { receiverField: wrap(2, wrap(7, utf8("someone::1220"))) } },
@@ -82,10 +90,53 @@ describe("decodePreparedTransaction on a non-canonical encoding", () => {
   });
 
   it("still decodes when the other fields appear once each", () => {
-    // DamlTransaction.Node.node_id and Exercise.template_id
+    // PreparedTransaction.metadata and Exercise.template_id
     const blob = encodePreparedTransaction(TRANSFER, {
-      extra: { damlNode: wrap(1, utf8("0")), exercise: wrap(4, empty) },
+      extra: { prepared: wrap(2, empty), exercise: wrap(4, empty) },
     });
     expect(decodePreparedTransaction(blob)).toEqual(TRANSFER);
   });
 });
+
+describe("decodePreparedTransaction reads only the node tree under the roots", () => {
+  const create = wrap(1, empty); // v1 Node{1: create}
+  /** A repeated string `field`, once per value. */
+  const repeated = (field: number, values: string[]) =>
+    values.reduce<Uint8Array>((acc, v) => concat(acc, wrap(field, utf8(v))), empty);
+  const rollbackOf = (...children: string[]) => wrap(4, repeated(1, children)); // Rollback{1: children}
+  const parentOf = (...children: string[]) =>
+    wrap(3, concat(wrap(9, utf8("SomeOtherChoice")), repeated(12, children))); // Exercise{12: children}
+
+  it("decodes a transfer nested under another exercise", () => {
+    const blob = encodePreparedTransaction(TRANSFER, {
+      nodeId: "1",
+      roots: ["0"],
+      nodes: [encodeNode("0", parentOf("1"))],
+    });
+    expect(decodePreparedTransaction(blob)).toEqual(TRANSFER);
+  });
+
+  const cases: [string, EncodeOptions][] = [
+    // Canton keeps the last node of a repeated id, so it would not run the transfer.
+    ["two nodes with the same id", { nodes: [encodeNode("0", create)] }],
+    ["two transfers with the same id", { nodes: [encodeNode("0", transferBody(OTHER))] }],
+    ["a transfer node the roots cannot reach", { nodeId: "1", roots: ["0"], nodes: [encodeNode("0", create)] }],
+    // Canton refuses a transaction with a node outside the tree.
+    ["another node the roots cannot reach", { nodes: [encodeNode("1", create)] }],
+    ["a root that names no node", { roots: ["0", "9"] }],
+    ["a root that names no node, next to an unreachable node", { roots: ["0", "9"], nodes: [encodeNode("1", create)] }],
+    ["a node referenced twice", { roots: ["0", "0"] }],
+    ["a transfer under a rollback node", { nodeId: "1", roots: ["0"], nodes: [encodeNode("0", rollbackOf("1"))] }],
+  ];
+
+  it.each(cases)("returns null for %s", (_, opts) => {
+    expect(decodePreparedTransaction(encodePreparedTransaction(TRANSFER, opts))).toBeNull();
+  });
+});
+
+function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a);
+  out.set(b, a.length);
+  return out;
+}

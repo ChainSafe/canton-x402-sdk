@@ -74,6 +74,17 @@ export interface EncodeOptions {
   choiceId?: string;
   /** Raw bytes appended to a layer, e.g. `{ node: wrap(1, new Uint8Array()) }`. */
   extra?: Partial<Record<EncodeLayer, Uint8Array>>;
+  /** The transfer node's id (defaults to "0"). */
+  nodeId?: string;
+  /** `DamlTransaction.roots` (defaults to the transfer node alone). */
+  roots?: string[];
+  /** Further `DamlTransaction.nodes` (see `encodeNode`), listed after the transfer node. */
+  nodes?: Uint8Array[];
+}
+
+/** A `DamlTransaction.Node{1: node_id, 1000: v1}` around a v1 `Node` body. */
+export function encodeNode(nodeId: string, v1: Uint8Array): Uint8Array {
+  return Writer.create().uint32(tag(1, WIRE_LEN)).string(nodeId).uint32(tag(1000, WIRE_LEN)).bytes(v1).finish();
 }
 
 /** The TransferFactory_Transfer argument for `transfer`, as the exercise's `chosen_value`. */
@@ -125,9 +136,15 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
     .bytes(encodeChoiceArgument(transfer, opts))
     .finish();
 
+  const nodeId = opts.nodeId ?? "0";
   const v1Node = concat(wrap(3, concat(exercise, extra.exercise)), extra.node); // Node{3: exercise}
-  const damlNode = concat(wrap(1000, v1Node), extra.damlNode); // DamlTransaction.Node{1000: v1}
-  const damlTxn = wrap(3, damlNode); // DamlTransaction{3: nodes[]}
-  const prepared = concat(wrap(1, damlTxn), extra.prepared); // PreparedTransaction{1: transaction}
+  const damlNode = concat(encodeNode(nodeId, v1Node), extra.damlNode); // DamlTransaction.Node{1: node_id, 1000: v1}
+
+  // DamlTransaction{2: roots[], 3: nodes[]}
+  const damlTxn = Writer.create();
+  for (const root of opts.roots ?? [nodeId]) damlTxn.uint32(tag(2, WIRE_LEN)).string(root);
+  for (const node of [damlNode, ...(opts.nodes ?? [])]) damlTxn.uint32(tag(3, WIRE_LEN)).bytes(node);
+
+  const prepared = concat(wrap(1, damlTxn.finish()), extra.prepared); // PreparedTransaction{1: transaction}
   return bytesToBase64(prepared);
 }

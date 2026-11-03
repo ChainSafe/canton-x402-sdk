@@ -6,15 +6,16 @@
 // Isomorphic: uses protobufjs's minimal Reader (pure JS, no fs, no Buffer) over a
 // base64→Uint8Array decode. Only the narrow field path we need is walked; every
 // other field is skipped, so we don't vendor the full Canton proto closure.
-// Every message on that path must be canonically encoded (`assertCanonical`),
-// so this walker and a full protobuf decoder always read the same transaction.
+// Every message on that path must be canonically encoded (`assertCanonical`,
+// `assertSingleField`), and only the node tree under the roots is read, so this
+// walker and Canton always read the same transaction.
 //
 // Envelope (see canton interactive_submission_service.proto + _data.proto):
 //   PreparedTransaction{1: transaction}
-//     → DamlTransaction{3: nodes[]}
-//       → DamlTransaction.Node{1000: v1}
-//         → Node{3: exercise}
-//           → Exercise{9: choice_id, 10: chosen_value}
+//     → DamlTransaction{2: roots[], 3: nodes[]}
+//       → DamlTransaction.Node{1: node_id, 1000: v1}
+//         → Node{3: exercise | 4: rollback{1: children[]} | …}
+//           → Exercise{9: choice_id, 10: chosen_value, 12: children[]}
 //             → Value{14: record} → Record{2: fields[]} → RecordField{1: label, 2: value}
 // Value scalar oneof: numeric=6, party=7, text=8 (all length-delimited strings).
 //
@@ -76,17 +77,20 @@ function firstSub(bytes: Uint8Array, field: number): Uint8Array | null {
   return subMessages(bytes, field)[0] ?? null;
 }
 
-/** Every member of the `Value.sum` oneof (unit=1 … enum=16). */
-const VALUE_SUM = Array.from({ length: 16 }, (_, i) => i + 1);
+/** All strings of a repeated string `field`. */
+function strings(bytes: Uint8Array, field: number): string[] {
+  const r = Reader.create(bytes);
+  const out: string[] = [];
+  while (r.pos < r.len) {
+    const tag = r.uint32();
+    if (tag >>> 3 === field && (tag & 7) === 2) out.push(r.string());
+    else r.skipType(tag & 7);
+  }
+  return out;
+}
 
-/**
- * Throw on an encoding protobuf reads differently from this walker: a singular
- * field written more than once (protobuf MERGES the copies) or more than one
- * member of a oneof (protobuf keeps the LAST, this walker would read the first).
- * Canton never emits either, so a real prepared transaction always passes.
- * Fields are counted by number regardless of wire type.
- */
-function assertCanonical(bytes: Uint8Array, singular: readonly number[], oneof: readonly number[] = []): void {
+/** How often each field number occurs in a message, regardless of wire type. */
+function fieldCounts(bytes: Uint8Array): Map<number, number> {
   const counts = new Map<number, number>();
   const r = Reader.create(bytes);
   while (r.pos < r.len) {
@@ -94,16 +98,36 @@ function assertCanonical(bytes: Uint8Array, singular: readonly number[], oneof: 
     counts.set(tag >>> 3, (counts.get(tag >>> 3) ?? 0) + 1);
     r.skipType(tag & 7);
   }
+  return counts;
+}
+
+/**
+ * Throw when a singular field is written more than once: protobuf MERGES the
+ * copies, so a full decoder would not read what this walker reads. Canton
+ * never emits it, so a real prepared transaction always passes.
+ */
+function assertCanonical(bytes: Uint8Array, singular: readonly number[]): void {
+  const counts = fieldCounts(bytes);
   for (const field of singular) {
     if ((counts.get(field) ?? 0) > 1) throw new Error(`field ${field} is repeated`);
   }
-  const members = oneof.reduce((n, field) => n + (counts.get(field) ?? 0), 0);
-  if (members > 1) throw new Error("more than one oneof member");
+}
+
+/**
+ * Throw unless a message that is nothing but a oneof (v1 `Node`, `Value`)
+ * holds at most one field. Protobuf keeps the LAST member, including members
+ * newer than this walker (v1 `Node.query_by_key = 5`), while this walker would
+ * read the first it knows.
+ */
+function assertSingleField(bytes: Uint8Array): void {
+  let fields = 0;
+  for (const count of fieldCounts(bytes).values()) fields += count;
+  if (fields > 1) throw new Error("more than one oneof member");
 }
 
 /** Decode a Daml `Value` message (only the string scalars + nested record). */
 function readValue(bytes: Uint8Array): ValueNode {
-  assertCanonical(bytes, [], VALUE_SUM);
+  assertSingleField(bytes);
   const r = Reader.create(bytes);
   const out: ValueNode = {};
   while (r.pos < r.len) {
@@ -154,21 +178,59 @@ function pick(fields: RecordFieldNode[], label: string, index: number): ValueNod
   return labeled ? fields.find((f) => f.label === label)?.value : fields[index]?.value;
 }
 
-/** Read an Exercise node's choice_id (9) + chosen_value bytes (10). */
-function readExercise(bytes: Uint8Array): { choiceId: string; chosenValue: Uint8Array | null } {
+/** Read an Exercise node's choice_id (9), chosen_value bytes (10) and children (12). */
+function readExercise(bytes: Uint8Array): { choiceId: string; chosenValue: Uint8Array | null; children: string[] } {
   assertCanonical(bytes, [9, 10]);
   const r = Reader.create(bytes);
   let choiceId = "";
   let chosenValue: Uint8Array | null = null;
+  const children: string[] = [];
   while (r.pos < r.len) {
     const tag = r.uint32();
     const field = tag >>> 3;
     const wt = tag & 7;
     if (field === 9 && wt === 2) choiceId = r.string();
     else if (field === 10 && wt === 2) chosenValue = r.bytes();
+    else if (field === 12 && wt === 2) children.push(r.string());
     else r.skipType(wt);
   }
-  return { choiceId, chosenValue };
+  return { choiceId, chosenValue, children };
+}
+
+/** Read a `DamlTransaction.Node{1: node_id, 1000: v1}`. Any other field is refused. */
+function readNode(bytes: Uint8Array): { nodeId: string; v1: Uint8Array } {
+  assertCanonical(bytes, [1, 1000]);
+  const r = Reader.create(bytes);
+  let nodeId: string | undefined;
+  let v1: Uint8Array | undefined;
+  while (r.pos < r.len) {
+    const tag = r.uint32();
+    const field = tag >>> 3;
+    const wt = tag & 7;
+    if (field === 1 && wt === 2) nodeId = r.string();
+    else if (field === 1000 && wt === 2) v1 = r.bytes();
+    else throw new Error(`unexpected field ${field} in a node`);
+  }
+  if (nodeId === undefined || v1 === undefined) throw new Error("node without an id or a v1 body");
+  return { nodeId, v1 };
+}
+
+/** Read the TransferFactory_Transfer argument record `{ expectedAdmin, transfer }`. */
+function readTransfer(chosenValue: Uint8Array): DecodedTransfer | null {
+  const arg = readValue(chosenValue).record;
+  if (!arg) return null;
+  const transfer = pick(arg, "transfer", 1)?.record;
+  if (!transfer) return null;
+
+  const sender = pick(transfer, "sender", 0)?.str;
+  const receiver = pick(transfer, "receiver", 1)?.str;
+  const amount = pick(transfer, "amount", 2)?.str;
+  const instr = pick(transfer, "instrumentId", 3)?.record;
+  const id = instr && pick(instr, "id", 0)?.str;
+  const admin = instr && pick(instr, "admin", 1)?.str;
+
+  if (!sender || !receiver || !amount || !id || !admin) return null;
+  return { sender, receiver, amount, instrumentId: { id, admin } };
 }
 
 /**
@@ -184,34 +246,48 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
     const txn = firstSub(prepared, 1); // PreparedTransaction.transaction
     if (!txn) return null;
 
-    for (const node of subMessages(txn, 3)) {
-      // DamlTransaction.Node → 1000: v1 Node → 3: exercise
-      assertCanonical(node, [1000]);
-      const v1 = firstSub(node, 1000);
-      if (!v1) continue;
-      assertCanonical(v1, [], [1, 2, 3, 4]); // create | fetch | exercise | rollback
+    // DamlTransaction{2: roots[], 3: nodes[]}. Canton keeps the LAST node of a
+    // repeated id and refuses nodes the roots cannot reach, and the signed hash
+    // covers only the tree under the roots. So read exactly that tree.
+    const nodes = new Map<string, Uint8Array>();
+    for (const bytes of subMessages(txn, 3)) {
+      const { nodeId, v1 } = readNode(bytes);
+      if (nodes.has(nodeId)) throw new Error(`node ${nodeId} is repeated`);
+      nodes.set(nodeId, v1);
+    }
+
+    const reached = new Set<string>();
+    const stack: { nodeId: string; rolledBack: boolean }[] = [];
+    const reach = (ids: string[], rolledBack: boolean): void => {
+      // Pushed in reverse so nodes are visited in the order the tree lists them.
+      for (const nodeId of [...ids].reverse()) {
+        if (reached.has(nodeId)) throw new Error(`node ${nodeId} is referenced twice`);
+        reached.add(nodeId);
+        stack.push({ nodeId, rolledBack });
+      }
+    };
+    reach(strings(txn, 2), false);
+
+    let transferArg: Uint8Array | null | undefined; // the first TransferFactory_Transfer's chosen_value
+    for (let next = stack.pop(); next; next = stack.pop()) {
+      const v1 = nodes.get(next.nodeId);
+      if (!v1) throw new Error(`node ${next.nodeId} is missing`);
+      assertSingleField(v1); // create=1 | fetch=2 | exercise=3 | rollback=4 | query_by_key=5
+      const rollback = firstSub(v1, 4);
+      if (rollback) reach(strings(rollback, 1), true); // Rollback{1: children[]}
       const exercise = firstSub(v1, 3);
       if (!exercise) continue;
-      const { choiceId, chosenValue } = readExercise(exercise);
-      if (choiceId !== TRANSFER_CHOICE || !chosenValue) continue;
 
-      // chosen_value: TransferFactory_Transfer arg record { expectedAdmin, transfer }
-      const arg = readValue(chosenValue).record;
-      if (!arg) return null;
-      const transfer = pick(arg, "transfer", 1)?.record;
-      if (!transfer) return null;
-
-      const sender = pick(transfer, "sender", 0)?.str;
-      const receiver = pick(transfer, "receiver", 1)?.str;
-      const amount = pick(transfer, "amount", 2)?.str;
-      const instr = pick(transfer, "instrumentId", 3)?.record;
-      const id = instr && pick(instr, "id", 0)?.str;
-      const admin = instr && pick(instr, "admin", 1)?.str;
-
-      if (!sender || !receiver || !amount || !id || !admin) return null;
-      return { sender, receiver, amount, instrumentId: { id, admin } };
+      const { choiceId, chosenValue, children } = readExercise(exercise);
+      reach(children, next.rolledBack);
+      if (choiceId !== TRANSFER_CHOICE) continue;
+      // A transfer under a rollback node moves nothing.
+      if (next.rolledBack) throw new Error("transfer under a rollback node");
+      if (transferArg === undefined) transferArg = chosenValue;
     }
-    return null;
+    if (reached.size !== nodes.size) throw new Error("a node is not reachable from the roots");
+
+    return transferArg ? readTransfer(transferArg) : null;
   } catch {
     return null;
   }

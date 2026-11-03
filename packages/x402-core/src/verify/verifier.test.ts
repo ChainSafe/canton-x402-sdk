@@ -9,7 +9,7 @@ import {
   signHash,
 } from "./index";
 import { requirementsHash } from "../hashing";
-import { encodePreparedTransaction, wrap } from "./prepared-tx.fixtures";
+import { encodeNode, encodePreparedTransaction, wrap } from "./prepared-tx.fixtures";
 import type {
   CantonPaymentPayload,
   CantonPaymentRequirements,
@@ -156,6 +156,26 @@ describe("cantonExactVerifier", () => {
         instrumentId: requirements.asset.instrumentId,
       },
       { extra: { node: wrap(1, new Uint8Array()) } },
+    );
+    const p = { ...payload, payload: { ...payload.payload, preparedTransaction } };
+    expect(verifier.verify(p, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      extensions: { detail: "undecodable" },
+    });
+  });
+
+  it("rejects a prepared transaction that lists a second node under the transfer node's id", () => {
+    // Canton keeps the last node of a repeated id, so it would run the create.
+    const { payload, requirements, payer } = buildSignedFixture();
+    const preparedTransaction = encodePreparedTransaction(
+      {
+        sender: payer,
+        receiver: requirements.payTo,
+        amount: requirements.maxAmountRequired,
+        instrumentId: requirements.asset.instrumentId,
+      },
+      { nodes: [encodeNode("0", wrap(1, new Uint8Array()))] },
     );
     const p = { ...payload, payload: { ...payload.payload, preparedTransaction } };
     expect(verifier.verify(p, requirements)).toMatchObject({
