@@ -1,0 +1,105 @@
+name: Snapshot
+
+# A throwaway release for integration testing, published from any branch or from
+# main BEFORE the Version PR is merged. Lets a consumer (the facilitator) install
+# the real artifacts over npm and prove it builds, without releasing anything.
+#
+# WHY NOT A GIT DEPENDENCY instead. `x402-server-sdk` and `x402-express` declare
+# their siblings as `workspace:^`, which only becomes a real version at publish
+# time. Installed from a git ref there is no workspace to resolve it against and
+# the install fails. `changeset version` rewrites those specifiers, so a snapshot
+# is the cheapest way to get an installable build of a dependent package.
+#
+# Versions look like `0.0.0-<tag>-<YYYYMMDDHHmmss>`. The `0.0.0` base is
+# deliberate: it sorts below every real version, so no range such as `^0.1.1` can
+# ever resolve to a snapshot. A consumer must pin it exactly, or ask for the tag.
+#
+# NOT CLEANABLE. npm allows unpublish for 72 hours, then only `npm deprecate`.
+# One snapshot per integration round, not per commit.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "npm dist-tag to publish under (never 'latest')"
+        required: true
+        default: next
+
+concurrency:
+  group: snapshot-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read # no commits, no tags — nothing is written back to the repo
+  id-token: write # npm provenance (OIDC), same as the real release
+
+jobs:
+  snapshot:
+    name: publish a snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse to publish over 'latest'
+        if: inputs.tag == 'latest'
+        run: |
+          echo "::error::'latest' would point real installs at a throwaway build."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4 # reads packageManager from package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Fail fast if there is nothing to snapshot
+        run: |
+          if ! ls .changeset/*.md >/dev/null 2>&1 || \
+             [ "$(ls .changeset/*.md | grep -vc 'README.md$')" = "0" ]; then
+            echo "::error::No changesets. A snapshot would publish the current versions over again."
+            exit 1
+          fi
+
+      # The ONE authoritative build, as in release.yml: topological, so
+      # cross-package declarations resolve. Packages have no `prepack` on purpose
+      # — per-package rebuilds race during parallel publish.
+      - name: Build
+        run: pnpm build
+
+      # Rewrites versions in the working tree to 0.0.0-<tag>-<timestamp> and
+      # resolves every `workspace:^` to that version. Never committed: this job
+      # has `contents: read`.
+      - name: Version
+        run: pnpm changeset version --snapshot "${{ inputs.tag }}"
+
+      # --tag is load-bearing. Without it the publish MOVES the `latest`
+      # dist-tag onto the snapshot and every plain `npm install` gets it.
+      # --no-git-tag because this job cannot, and should not, push tags.
+      - name: Publish
+        run: pnpm changeset publish --tag "${{ inputs.tag }}" --no-git-tag
+
+      - name: What to pin
+        run: |
+          {
+            echo "### Snapshot published"
+            echo
+            echo 'Pin these exactly in the consumer — no caret, it is meaningless on a `0.0.0` prerelease.'
+            echo
+            echo '```json'
+            node -e '
+              const { readdirSync, readFileSync } = require("fs");
+              for (const d of readdirSync("packages")) {
+                const p = JSON.parse(readFileSync(`packages/${d}/package.json`, "utf8"));
+                if (!p.private) console.log(`  "${p.name}": "${p.version}",`);
+              }
+            '
+            echo '```'
+            echo
+            echo "Flip the consumer back to a real version before merging it."
+          } >> "$GITHUB_STEP_SUMMARY"
