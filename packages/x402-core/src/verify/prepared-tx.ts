@@ -6,6 +6,8 @@
 // Isomorphic: uses protobufjs's minimal Reader (pure JS, no fs, no Buffer) over a
 // base64→Uint8Array decode. Only the narrow field path we need is walked; every
 // other field is skipped, so we don't vendor the full Canton proto closure.
+// Every message on that path must be canonically encoded (`assertCanonical`),
+// so this walker and a full protobuf decoder always read the same transaction.
 //
 // Envelope (see canton interactive_submission_service.proto + _data.proto):
 //   PreparedTransaction{1: transaction}
@@ -74,8 +76,34 @@ function firstSub(bytes: Uint8Array, field: number): Uint8Array | null {
   return subMessages(bytes, field)[0] ?? null;
 }
 
+/** Every member of the `Value.sum` oneof (unit=1 … enum=16). */
+const VALUE_SUM = Array.from({ length: 16 }, (_, i) => i + 1);
+
+/**
+ * Throw on an encoding protobuf reads differently from this walker: a singular
+ * field written more than once (protobuf MERGES the copies) or more than one
+ * member of a oneof (protobuf keeps the LAST, this walker would read the first).
+ * Canton never emits either, so a real prepared transaction always passes.
+ * Fields are counted by number regardless of wire type.
+ */
+function assertCanonical(bytes: Uint8Array, singular: readonly number[], oneof: readonly number[] = []): void {
+  const counts = new Map<number, number>();
+  const r = Reader.create(bytes);
+  while (r.pos < r.len) {
+    const tag = r.uint32();
+    counts.set(tag >>> 3, (counts.get(tag >>> 3) ?? 0) + 1);
+    r.skipType(tag & 7);
+  }
+  for (const field of singular) {
+    if ((counts.get(field) ?? 0) > 1) throw new Error(`field ${field} is repeated`);
+  }
+  const members = oneof.reduce((n, field) => n + (counts.get(field) ?? 0), 0);
+  if (members > 1) throw new Error("more than one oneof member");
+}
+
 /** Decode a Daml `Value` message (only the string scalars + nested record). */
 function readValue(bytes: Uint8Array): ValueNode {
+  assertCanonical(bytes, [], VALUE_SUM);
   const r = Reader.create(bytes);
   const out: ValueNode = {};
   while (r.pos < r.len) {
@@ -100,6 +128,7 @@ function readRecordFields(recordBytes: Uint8Array): RecordFieldNode[] {
 
 /** Decode a `RecordField{1: label, 2: value}`. */
 function readRecordField(bytes: Uint8Array): RecordFieldNode {
+  assertCanonical(bytes, [1, 2]);
   const r = Reader.create(bytes);
   let label = "";
   let value: ValueNode = {};
@@ -127,6 +156,7 @@ function pick(fields: RecordFieldNode[], label: string, index: number): ValueNod
 
 /** Read an Exercise node's choice_id (9) + chosen_value bytes (10). */
 function readExercise(bytes: Uint8Array): { choiceId: string; chosenValue: Uint8Array | null } {
+  assertCanonical(bytes, [9, 10]);
   const r = Reader.create(bytes);
   let choiceId = "";
   let chosenValue: Uint8Array | null = null;
@@ -150,13 +180,16 @@ function readExercise(bytes: Uint8Array): { choiceId: string; chosenValue: Uint8
 export function decodePreparedTransaction(preparedTransactionBase64: string): DecodedTransfer | null {
   try {
     const prepared = base64ToBytes(preparedTransactionBase64);
+    assertCanonical(prepared, [1]);
     const txn = firstSub(prepared, 1); // PreparedTransaction.transaction
     if (!txn) return null;
 
     for (const node of subMessages(txn, 3)) {
       // DamlTransaction.Node → 1000: v1 Node → 3: exercise
+      assertCanonical(node, [1000]);
       const v1 = firstSub(node, 1000);
       if (!v1) continue;
+      assertCanonical(v1, [], [1, 2, 3, 4]); // create | fetch | exercise | rollback
       const exercise = firstSub(v1, 3);
       if (!exercise) continue;
       const { choiceId, chosenValue } = readExercise(exercise);

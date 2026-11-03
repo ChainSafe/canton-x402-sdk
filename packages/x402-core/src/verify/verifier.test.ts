@@ -9,7 +9,7 @@ import {
   signHash,
 } from "./index";
 import { requirementsHash } from "../hashing";
-import { encodePreparedTransaction } from "./prepared-tx.fixtures";
+import { encodePreparedTransaction, wrap } from "./prepared-tx.fixtures";
 import type {
   CantonPaymentPayload,
   CantonPaymentRequirements,
@@ -141,6 +141,27 @@ describe("cantonExactVerifier", () => {
     expect(verifier.verify(p, requirements)).toMatchObject({
       isValid: false,
       invalidReason: "bad_signature",
+    });
+  });
+
+  it("rejects a prepared transaction whose transfer node is also encoded as another node type", () => {
+    // Correctly signed and the transfer matches, but protobuf keeps the last
+    // member of a oneof, so Canton would read this node as a create.
+    const { payload, requirements, payer } = buildSignedFixture();
+    const preparedTransaction = encodePreparedTransaction(
+      {
+        sender: payer,
+        receiver: requirements.payTo,
+        amount: requirements.maxAmountRequired,
+        instrumentId: requirements.asset.instrumentId,
+      },
+      { extra: { node: wrap(1, new Uint8Array()) } },
+    );
+    const p = { ...payload, payload: { ...payload.payload, preparedTransaction } };
+    expect(verifier.verify(p, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      extensions: { detail: "undecodable" },
     });
   });
 
