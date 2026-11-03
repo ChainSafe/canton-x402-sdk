@@ -25,8 +25,8 @@ that signature.
 
 ## The payment scheme
 
-- `exact-canton` — the payer transfers Canton Coin (Amulet) directly to your
-  party; you receive CC.
+- `exact` on a `canton:*` network — the payer transfers Canton Coin (Amulet)
+  directly to your party; you receive CC.
 
 [`GET /v2/supported`](/api-reference#get-v2-supported) is the authority on
 what a given facilitator accepts — the network id and the asset to pay in.

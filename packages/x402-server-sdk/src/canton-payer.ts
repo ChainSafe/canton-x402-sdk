@@ -1,4 +1,5 @@
 import {
+  EXACT_SCHEME_ID,
   isExpired,
   isValidAmount,
   requirementsHash,
@@ -11,7 +12,6 @@ import {
 import type { SDKInterface } from "@canton-network/wallet-sdk";
 import type { X402Payer } from "./payer.js";
 
-const EXACT_CANTON = "exact-canton";
 
 /** The external party's Ed25519 key material (client-side only). */
 export interface CantonPartyKey {
@@ -41,7 +41,7 @@ export interface CantonX402PayerOptions {
 }
 
 /**
- * Canton exact-canton payer over `@canton-network/wallet-sdk`: builds a Token
+ * Canton canton-exact payer over `@canton-network/wallet-sdk`: builds a Token
  * Standard transfer, prepares it (interactive submission), Ed25519-signs the hash,
  * and assembles the X-PAYMENT payload — without executing (the facilitator settles).
  */
@@ -50,7 +50,7 @@ export class CantonX402Payer implements X402Payer {
 
   supports(requirements: CantonPaymentRequirements): boolean {
     return (
-      requirements.scheme === EXACT_CANTON &&
+      requirements.scheme === EXACT_SCHEME_ID &&
       requirements.network === this.opts.network &&
       this.registryFor(requirements.asset.instrumentId) !== undefined
     );

@@ -100,19 +100,23 @@ describe("isExpired", () => {
 
 describe("canton network-id guard", () => {
   it("accepts canton:… and rejects other CAIP-2 / non-strings", () => {
+    expect(isCantonNetworkId("canton:devnet")).toBe(true);
+    expect(isCantonNetworkId("canton:mainnet")).toBe(true);
+    // Shape only. The guard does not know which names are registered —
+    // that the network is one this deployment settles is the verifier's job.
     expect(isCantonNetworkId("canton:1220ab")).toBe(true);
     expect(isCantonNetworkId("eip155:1")).toBe(false);
     expect(isCantonNetworkId("canton:")).toBe(false);
     expect(isCantonNetworkId(123)).toBe(false);
-    expect(parseCantonNetworkId("canton:1220ab")).toBe("canton:1220ab");
+    expect(parseCantonNetworkId("canton:devnet")).toBe("canton:devnet");
     expect(() => parseCantonNetworkId("eip155:1")).toThrow();
   });
 });
 
 describe("shape guards + scheme/network match", () => {
   const requirements = {
-    scheme: "exact-canton",
-    network: "canton:1220x",
+    scheme: "exact",
+    network: "canton:devnet",
     maxAmountRequired: "0.01",
     payTo: "merchant::1220x",
     resource: "/r",
@@ -131,8 +135,8 @@ describe("shape guards + scheme/network match", () => {
   };
   const payload = {
     x402Version: 2,
-    scheme: "exact-canton",
-    network: "canton:1220x",
+    scheme: "exact",
+    network: "canton:devnet",
     payload: inner,
   } as unknown as CantonPaymentPayload;
 
@@ -150,12 +154,12 @@ describe("shape guards + scheme/network match", () => {
       isX402PaymentPayload({
         x402Version: 2,
         scheme: "batch-settlement-canton",
-        network: "canton:1220x",
+        network: "canton:devnet",
         payload: { ethereumTxHash: "0x" },
       }),
     ).toBe(true);
-    expect(isX402PaymentPayload({ x402Version: 2, scheme: "", network: "canton:1220x", payload: {} })).toBe(false);
-    expect(isX402PaymentPayload({ x402Version: 1, scheme: "exact-canton", network: "n", payload: {} })).toBe(false);
+    expect(isX402PaymentPayload({ x402Version: 2, scheme: "", network: "canton:devnet", payload: {} })).toBe(false);
+    expect(isX402PaymentPayload({ x402Version: 1, scheme: "exact", network: "n", payload: {} })).toBe(false);
     expect(isX402PaymentPayload({})).toBe(false);
     expect(isCantonVerifyRequest({ x402Version: 2, paymentPayload: payload, paymentRequirements: requirements })).toBe(true);
     expect(isCantonVerifyRequest({ x402Version: 2 })).toBe(false);

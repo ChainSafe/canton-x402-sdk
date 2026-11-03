@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { amountGte } from "./common";
-import { findTransferMismatch } from "./exact-canton";
+import { findTransferMismatch } from "./canton-exact";
 import type { DecodedTransfer } from "./prepared-tx";
 import type { CantonPaymentRequirements } from "../types/requirements";
 
@@ -26,8 +26,8 @@ describe("amountGte — decimal-safe >=", () => {
 describe("findTransferMismatch", () => {
   const PAYER = "alice::1220beef";
   const requirements: CantonPaymentRequirements = {
-    scheme: "exact-canton",
-    network: "canton:1220be58c29e",
+    scheme: "exact",
+    network: "canton:devnet",
     maxAmountRequired: "0.01",
     asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
     payTo: "merchant::1220dead",

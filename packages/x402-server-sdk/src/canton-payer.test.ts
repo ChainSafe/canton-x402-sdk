@@ -42,7 +42,7 @@ function mockSdk() {
 
 function makeRequirements(over: Partial<CantonPaymentRequirements> = {}): CantonPaymentRequirements {
   return {
-    scheme: "exact-canton",
+    scheme: "exact",
     network: NETWORK,
     maxAmountRequired: "1.5",
     asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
@@ -70,7 +70,7 @@ describe("CantonX402Payer.authorize", () => {
     const result = await makePayer(sdk).authorize(req);
     const inner = result.payload;
 
-    expect(result).toMatchObject({ x402Version: 2, scheme: "exact-canton", network: NETWORK });
+    expect(result).toMatchObject({ x402Version: 2, scheme: "exact", network: NETWORK });
     expect(inner.payer).toBe(key.partyId);
     expect(inner.publicKey).toBe(publicKeyB64);
     expect(inner.requirementsHash).toBe(requirementsHash(req));

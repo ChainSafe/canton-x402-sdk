@@ -24,6 +24,7 @@ import {
   amuletAsset,
   DEVNET_DSO_PARTY,
   DEVNET_NETWORK,
+  LOCALNET_NETWORK,
   MAINNET_DSO_PARTY,
   MAINNET_NETWORK,
 } from "@chainsafe/x402-core";
@@ -31,11 +32,12 @@ import {
 // ─── Config ────────────────────────────────────────────────────────────────
 const NETWORK = (process.env.NETWORK ?? "localnet").toLowerCase();
 
-/** Network id + DSO party default from the chosen network; LocalNet must supply them. */
-function networkDefaults(): { networkId?: string; dso?: string } {
+/** Network id + DSO party default from the chosen network. */
+function networkDefaults(): { networkId: string; dso?: string } {
   if (NETWORK === "devnet") return { networkId: DEVNET_NETWORK, dso: DEVNET_DSO_PARTY };
   if (NETWORK === "mainnet") return { networkId: MAINNET_NETWORK, dso: MAINNET_DSO_PARTY };
-  return {}; // localnet: per-instance, pass NETWORK_ID + DSO_PARTY
+  // LocalNet allocates its DSO at runtime, so that one still has to be passed.
+  return { networkId: LOCALNET_NETWORK };
 }
 const def = networkDefaults();
 const NETWORK_ID = process.env.NETWORK_ID ?? def.networkId;
@@ -46,9 +48,10 @@ const PORT = Number(process.env.BUREAU_PORT ?? 4001);
 const FACILITATOR_URL = process.env.FACILITATOR_URL;
 const FACILITATOR_API_KEY = process.env.FACILITATOR_API_KEY;
 
-if (!NETWORK_ID || !DSO_PARTY || !BUREAU_PARTY || !FACILITATOR_URL) {
+// NETWORK_ID always has a default now, so it is not checked here.
+if (!DSO_PARTY || !BUREAU_PARTY || !FACILITATOR_URL) {
   throw new Error(
-    "credit-bureau: set NETWORK_ID, DSO_PARTY, BUREAU_PARTY and FACILITATOR_URL " +
+    "credit-bureau: set DSO_PARTY, BUREAU_PARTY and FACILITATOR_URL " +
       "(see examples/mortgage/.env.example).",
   );
 }

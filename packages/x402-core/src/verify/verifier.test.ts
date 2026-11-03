@@ -2,9 +2,8 @@ import { describe, it, expect } from "vitest";
 import { getPublicKey, hashes } from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha2.js";
 import {
-  createExactCantonVerifier,
+  createCantonExactVerifier,
   createVerifierRegistry,
-  EXACT_CANTON_SCHEME_ID,
   EXACT_SCHEME_ID,
   fingerprintForPublicKey,
   signHash,
@@ -16,11 +15,11 @@ import type {
   CantonPaymentRequirements,
   SchemeVerifier,
 } from "../index";
-import { SPEC_DEVNET_NETWORK } from "../networks";
+import { DEVNET_NETWORK, MAINNET_NETWORK } from "../networks";
 
 hashes.sha512 = sha512;
 
-const NETWORK = "canton:1220synchronizer";
+const NETWORK = DEVNET_NETWORK;
 const toB64 = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes));
 
 // A deterministic payer keypair + a well-formed, correctly-signed payload for it.
@@ -32,7 +31,7 @@ function buildSignedFixture() {
   const payer = `alice::${fingerprint}`;
 
   const requirements: CantonPaymentRequirements = {
-    scheme: "exact-canton",
+    scheme: "exact",
     network: NETWORK,
     maxAmountRequired: "0.01",
     asset: { instrumentId: { id: "Amulet", admin: "DSO::1220dso" } },
@@ -56,7 +55,7 @@ function buildSignedFixture() {
 
   const payload: CantonPaymentPayload = {
     x402Version: 2,
-    scheme: "exact-canton",
+    scheme: "exact",
     network: NETWORK,
     payload: {
       payer,
@@ -72,11 +71,11 @@ function buildSignedFixture() {
   return { requirements, payload, payer };
 }
 
-describe("exactCantonVerifier", () => {
-  const verifier = createExactCantonVerifier(NETWORK);
+describe("cantonExactVerifier", () => {
+  const verifier = createCantonExactVerifier(NETWORK);
 
   it("has the expected identity", () => {
-    expect(verifier.schemeId).toBe("exact-canton");
+    expect(verifier.schemeId).toBe("exact");
     expect(verifier.networkId).toBe(NETWORK);
   });
 
@@ -97,7 +96,7 @@ describe("exactCantonVerifier", () => {
 
   it("rejects a network the verifier is not bound to", () => {
     const { payload, requirements } = buildSignedFixture();
-    const other = "canton:1220other";
+    const other = "canton:mainnet";
     const result = verifier.verify({ ...payload, network: other }, { ...requirements, network: other });
     expect(result).toMatchObject({ isValid: false, invalidReason: "network_mismatch" });
   });
@@ -174,12 +173,12 @@ describe("exactCantonVerifier", () => {
 });
 
 describe("createVerifierRegistry", () => {
-  const verifier = createExactCantonVerifier(NETWORK);
+  const verifier = createCantonExactVerifier(NETWORK);
   const registry = createVerifierRegistry([verifier]);
 
   it("finds a registered verifier by (scheme, network)", () => {
-    expect(registry.find("exact-canton", NETWORK)).toBe(verifier);
-    expect(registry.find("exact-canton", "canton:1220other")).toBeUndefined();
+    expect(registry.find("exact", NETWORK)).toBe(verifier);
+    expect(registry.find("exact", "canton:mainnet")).toBeUndefined();
     expect(registry.find("unknown-scheme", NETWORK)).toBeUndefined();
   });
 
@@ -190,7 +189,7 @@ describe("createVerifierRegistry", () => {
 
   it("returns scheme_mismatch for an unregistered (scheme, network)", () => {
     const { payload, requirements } = buildSignedFixture();
-    const p = { ...payload, network: "canton:1220unregistered" };
+    const p = { ...payload, network: "canton:testnet" };
     expect(registry.verify(p, requirements)).toEqual({
       isValid: false,
       invalidReason: "scheme_mismatch",
@@ -215,9 +214,7 @@ describe("createVerifierRegistry", () => {
   });
 });
 
-describe("exactCantonVerifier scheme/network migration", () => {
-  const OTHER_NETWORK = SPEC_DEVNET_NETWORK;
-
+describe("the ids the verifier answers to", () => {
   /**
    * The fixture re-pointed at another scheme/network. `requirementsHash` walks
    * the whole requirements object, so changing either re-derives it — a payload
@@ -243,80 +240,67 @@ describe("exactCantonVerifier scheme/network migration", () => {
     return v.verify(f.payload, f.requirements);
   };
 
-  // Stage 1 — today. Nothing passed, nothing changes.
-  describe("before the migration", () => {
-    const verifier = createExactCantonVerifier(NETWORK);
+  const verifier = createCantonExactVerifier(NETWORK);
 
-    it("advertises and accepts only the id we have always used", () => {
-      expect(verifier.schemeId).toBe(EXACT_CANTON_SCHEME_ID);
-      expect(verifies(verifier, EXACT_CANTON_SCHEME_ID)).toMatchObject({ isValid: true });
-      expect(verifies(verifier, EXACT_SCHEME_ID)).toEqual({
-        isValid: false,
-        invalidReason: "scheme_mismatch",
-      });
+  it("advertises the id the registered spec fixes", () => {
+    expect(verifier.schemeId).toBe(EXACT_SCHEME_ID);
+    expect(verifier.schemeId).toBe("exact");
+    expect(verifier.networkId).toBe(NETWORK);
+  });
+
+  it("accepts the spec's id", () => {
+    expect(verifies(verifier, EXACT_SCHEME_ID)).toMatchObject({ isValid: true });
+  });
+
+  it("refuses the retired `exact-canton` id", () => {
+    expect(verifies(verifier, "exact-canton")).toEqual({
+      isValid: false,
+      invalidReason: "scheme_mismatch",
     });
   });
 
-  // Stage 2 — during. Lead with the spec's id, keep existing clients paying.
-  describe("during the migration", () => {
-    const verifier = createExactCantonVerifier(NETWORK, {
-      schemeId: EXACT_SCHEME_ID,
-      acceptSchemes: [EXACT_CANTON_SCHEME_ID],
-    });
-
-    it("advertises the spec's id", () => {
-      expect(verifier.schemeId).toBe(EXACT_SCHEME_ID);
-    });
-
-    it("accepts both the advertised id and the one being retired", () => {
-      expect(verifies(verifier, EXACT_SCHEME_ID)).toMatchObject({ isValid: true });
-      expect(verifies(verifier, EXACT_CANTON_SCHEME_ID)).toMatchObject({ isValid: true });
-    });
-
-    it("still refuses an id that is neither", () => {
-      expect(verifies(verifier, "exact-evm-to-canton-cc")).toEqual({
-        isValid: false,
-        invalidReason: "scheme_mismatch",
-      });
-    });
-
-    it("refuses a payload and requirements that name DIFFERENT accepted ids", () => {
-      // Both are accepted; they still have to agree. Paying `exact` against a
-      // quote of `exact-canton` is two parties disagreeing about the contract.
-      const { payload, requirements } = fixtureFor(EXACT_CANTON_SCHEME_ID, NETWORK);
-      expect(
-        verifier.verify({ ...payload, scheme: EXACT_SCHEME_ID }, requirements),
-      ).toEqual({ isValid: false, invalidReason: "scheme_mismatch" });
+  it("refuses an unrelated scheme id", () => {
+    expect(verifies(verifier, "exact-evm-to-canton-cc")).toEqual({
+      isValid: false,
+      invalidReason: "scheme_mismatch",
     });
   });
 
-  // Stage 3 — after. Retiring the legacy id is deleting one option.
-  describe("after the migration", () => {
-    const verifier = createExactCantonVerifier(NETWORK, { schemeId: EXACT_SCHEME_ID });
+  it("refuses a payload and requirements that disagree about the scheme", () => {
+    // Both sides are checked, so naming the right id on one is not enough.
+    const { payload, requirements } = fixtureFor(EXACT_SCHEME_ID, NETWORK);
+    expect(
+      verifier.verify({ ...payload, scheme: "exact-canton" }, requirements),
+    ).toEqual({ isValid: false, invalidReason: "scheme_mismatch" });
+  });
 
-    it("no longer accepts the retired id", () => {
-      expect(verifies(verifier, EXACT_SCHEME_ID)).toMatchObject({ isValid: true });
-      expect(verifies(verifier, EXACT_CANTON_SCHEME_ID)).toEqual({
-        isValid: false,
-        invalidReason: "scheme_mismatch",
-      });
+  it("refuses requirements naming another scheme, even when the payload is right", () => {
+    // Needs its own case: with only the payload side checked this reaches the
+    // hash check and reports requirements_hash_mismatch instead.
+    const { payload, requirements } = fixtureFor(EXACT_SCHEME_ID, NETWORK);
+    expect(
+      verifier.verify(payload, { ...requirements, scheme: "exact-canton" }),
+    ).toEqual({ isValid: false, invalidReason: "scheme_mismatch" });
+  });
+
+  it("refuses requirements naming another network, even when the payload is right", () => {
+    const { payload, requirements } = fixtureFor(EXACT_SCHEME_ID, NETWORK);
+    expect(
+      verifier.verify(payload, { ...requirements, network: MAINNET_NETWORK }),
+    ).toEqual({ isValid: false, invalidReason: "network_mismatch" });
+  });
+
+  it("refuses a network other than the one it is bound to", () => {
+    expect(verifies(verifier, EXACT_SCHEME_ID, MAINNET_NETWORK)).toEqual({
+      isValid: false,
+      invalidReason: "network_mismatch",
     });
   });
 
-
-  describe("networks migrate the same way", () => {
-    it("accepts an additional network, advertises only the bound one", () => {
-      const verifier = createExactCantonVerifier(NETWORK, {
-        acceptNetworks: [OTHER_NETWORK],
-      });
-      expect(verifier.networkId).toBe(NETWORK);
-      expect(verifies(verifier, EXACT_CANTON_SCHEME_ID, OTHER_NETWORK)).toMatchObject({
-        isValid: true,
-      });
-      expect(verifies(verifier, EXACT_CANTON_SCHEME_ID, "canton:1220other")).toMatchObject({
-        isValid: false,
-        invalidReason: "network_mismatch",
-      });
-    });
+  it("refuses a payload and requirements that disagree about the network", () => {
+    const { payload, requirements } = fixtureFor(EXACT_SCHEME_ID, NETWORK);
+    expect(
+      verifier.verify({ ...payload, network: MAINNET_NETWORK }, requirements),
+    ).toEqual({ isValid: false, invalidReason: "network_mismatch" });
   });
 });

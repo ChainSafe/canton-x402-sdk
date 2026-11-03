@@ -37,7 +37,7 @@ app.use(
     facilitator,
     settle: true, // capture the payment after a valid verify (default: false)
     requirements: {
-      network: "canton:1220…",
+      network: "canton:devnet",
       payTo: "merchant::1220…",
       asset: { instrumentId: { id: "Amulet", admin: "DSO::1220…" } },
       amount: "0.05", // any field can also be a (req) => value resolver

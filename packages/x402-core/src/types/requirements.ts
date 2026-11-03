@@ -33,7 +33,7 @@ export interface X402PaymentRequirements<TAsset = AssetSpec, TExtra = Record<str
 }
 
 /**
- * exact-canton requirements: a Splice {@link AssetSpec}, sent in the 402's accepts[].
+ * canton-exact requirements: a Splice {@link AssetSpec}, sent in the 402's accepts[].
  * Schema-first — the concrete shape, its validator, and its type are one definition.
  */
 export const CantonPaymentRequirementsSchema = v.object({
@@ -51,7 +51,7 @@ export const CantonPaymentRequirementsSchema = v.object({
 });
 export type CantonPaymentRequirements = v.InferOutput<typeof CantonPaymentRequirementsSchema>;
 
-/** exact-canton requirements guard + parser (schema-derived). */
+/** canton-exact requirements guard + parser (schema-derived). */
 export function isCantonPaymentRequirements(x: unknown): x is CantonPaymentRequirements {
   return v.is(CantonPaymentRequirementsSchema, x);
 }
@@ -65,7 +65,7 @@ export function parseCantonPaymentRequirements(input: unknown): CantonPaymentReq
  * per-scheme seam). `looseObject` so a scheme's extra keys pass through. Mirrors
  * {@link isX402PaymentPayload} — envelope-level validation only; the per-scheme
  * verifier checks the concrete asset (use {@link isCantonPaymentRequirements} for
- * exact-canton). This is the requirements shape carried in the X402 request +
+ * canton-exact). This is the requirements shape carried in the X402 request +
  * X-PAYMENT envelopes.
  */
 export const X402PaymentRequirementsEnvelopeSchema = v.looseObject({
@@ -89,7 +89,7 @@ export function isX402PaymentRequirements(x: unknown): x is X402PaymentRequireme
  * header. Produced by the merchant middleware; parsed by the auto-pay client.
  *
  * Generic over the `accepts[]` element (`TRequirements`) so a mixed-scheme offer
- * (e.g. exact-canton + a bridge scheme) is expressible as a union; every other
+ * (e.g. canton-exact + a bridge scheme) is expressible as a union; every other
  * field is shared. Generic → type-only.
  */
 export interface X402PaymentRequiredResponse<TRequirements = CantonPaymentRequirements> {
@@ -100,7 +100,7 @@ export interface X402PaymentRequiredResponse<TRequirements = CantonPaymentRequir
   error?: string;
 }
 
-/** exact-canton 402 response: `accepts[]` of {@link CantonPaymentRequirements}. */
+/** canton-exact 402 response: `accepts[]` of {@link CantonPaymentRequirements}. */
 export const CantonPaymentRequiredResponseSchema = v.object({
   x402Version: v.literal(2),
   accepts: v.array(CantonPaymentRequirementsSchema),

@@ -1,4 +1,9 @@
-import { DEVNET_NETWORK, MAINNET_NETWORK, type NetworkId } from "@chainsafe/x402-core";
+import {
+  DEVNET_NETWORK,
+  LOCALNET_NETWORK,
+  MAINNET_NETWORK,
+  type NetworkId,
+} from "@chainsafe/x402-core";
 
 /**
  * Auth defaults for building a wallet-sdk `TokenProviderConfig`. The caller adds
@@ -15,7 +20,7 @@ export interface AuthDefaults {
  * network id (for `X402Payer`) + the ledger endpoint + auth defaults.
  */
 export interface CantonNetworkConfig {
-  /** Network id, e.g. `canton:1220…`. */
+  /** Network id — one of `canton:mainnet|testnet|devnet`. */
   network: NetworkId;
   /** JSON Ledger API base URL (`SDK.create({ ledgerClientUrl })`). */
   ledgerClientUrl: string;
@@ -26,14 +31,12 @@ export interface CantonNetworkConfig {
 const CN_AUDIENCE = "https://canton.network.global";
 
 /**
- * LocalNet: the ledger URL is the well-known localhost default, but the network id
- * is per-instance (the local synchronizer's fingerprint), so pass `network`.
+ * LocalNet: the ledger URL is the well-known localhost default. `network`
+ * defaults to `LOCALNET_NETWORK`; pass one to override.
  */
-export function localnetConfig(
-  opts: { network: NetworkId } & Partial<Omit<CantonNetworkConfig, "network">>,
-): CantonNetworkConfig {
+export function localnetConfig(opts: Partial<CantonNetworkConfig> = {}): CantonNetworkConfig {
   return {
-    network: opts.network,
+    network: opts.network ?? LOCALNET_NETWORK,
     ledgerClientUrl: opts.ledgerClientUrl ?? "http://localhost:2975",
     auth: opts.auth ?? { audience: CN_AUDIENCE, scope: "", issuer: "unsafe-auth" },
   };

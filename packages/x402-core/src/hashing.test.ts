@@ -9,9 +9,13 @@ import type { CantonPaymentRequirements } from "./index";
 // canonicalization drifts, requirementsHash diverges and every /v2/verify fails —
 // so this test pins byte-for-byte parity. Regenerate ONLY if the facilitator's
 // algorithm intentionally changes (and update the facilitator in lockstep).
+//
+// Last regenerated when `scheme` became `exact` and `network` a registered
+// name. The hash covers every value in the object, so a renamed value moves it
+// even though the algorithm is untouched.
 const REQUIREMENTS: CantonPaymentRequirements = {
-  scheme: "exact-canton",
-  network: "canton:1220be58c29e",
+  scheme: "exact",
+  network: "canton:devnet",
   maxAmountRequired: "0.01",
   asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
@@ -22,12 +26,12 @@ const REQUIREMENTS: CantonPaymentRequirements = {
 
 const GOLDEN_CANONICAL =
   '{"asset":{"instrumentId":{"admin":"DSO::1220be58c29e","id":"Amulet"}},' +
-  '"maxAmountRequired":"0.01","network":"canton:1220be58c29e",' +
+  '"maxAmountRequired":"0.01","network":"canton:devnet",' +
   '"nonce":"550e8400-e29b-41d4-a716-446655440000","payTo":"merchant::1220dead",' +
-  '"resource":"/api/resource","scheme":"exact-canton",' +
+  '"resource":"/api/resource","scheme":"exact",' +
   '"validBefore":"2026-01-01T00:00:00.000Z"}';
 
-const GOLDEN_HASH = "bdae45a239db3b771ee0ee5f70b4310f6b8894245666a3c7718b0a14674e0529";
+const GOLDEN_HASH = "8a7526d584c00a70a5e9629b798e246de27f60f72e233e1315793c6d01eeb55e";
 
 describe("requirements hashing — facilitator parity", () => {
   it("canonicalizes to the golden string (keys sorted, nested sorted)", () => {

@@ -44,11 +44,10 @@ function authOverride(): { auth: { audience: string; scope: string } } | undefin
 }
 
 /**
- * Optional network-id override. devnet/mainnet default to the SDK's baked-in synchronizer
- * fingerprint; a DevNet reset rotates that fingerprint, so set NETWORK_ID (+ DSO_PARTY,
- * already honored below) to the live value to override without editing/republishing the
- * SDK. Unset ⇒ SDK default. Must match the bureau's advertised `network`, or `supports()`
- * rejects the 402 and the payment silently doesn't happen.
+ * Optional network-id override; unset ⇒ the SDK's default for NETWORK. Must match
+ * the bureau's advertised `network`, or `supports()` rejects the 402 and the
+ * payment silently doesn't happen. A DevNet reset does not require this — the id
+ * is a registered name, not a fingerprint — but DSO_PARTY does change.
  */
 function networkOverride(): { network: NetworkId } | undefined {
   const network = process.env.NETWORK_ID?.trim();
@@ -63,7 +62,7 @@ function netConfig(): CantonNetworkConfig {
   if (NETWORK === "mainnet")
     return mainnetConfig({ ledgerClientUrl: req(ledgerClientUrl, "LEDGER_CLIENT_URL"), ...networkOverride(), ...authOverride() });
   return localnetConfig({
-    network: req(process.env.NETWORK_ID, "NETWORK_ID") as NetworkId,
+    ...networkOverride(),
     ...(ledgerClientUrl ? { ledgerClientUrl } : {}),
   });
 }

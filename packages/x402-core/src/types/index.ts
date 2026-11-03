@@ -1,12 +1,12 @@
-// x402 exact-canton wire types — the canonical contract shared by the client SDK
+// x402 canton-exact wire types — the canonical contract shared by the client SDK
 // and the facilitator server. Spec: canton-x402 spec §5–§6.
 //
-// v2 (exact-canton) only; legacy v1 shapes are intentionally not carried over.
+// v2 (canton-exact) only; legacy v1 shapes are intentionally not carried over.
 // Organized by domain: common (shared kernel) · requirements · payment ·
 // facilitator (verify/settle/supported) · payment-object.
 //
 // Multi-scheme generics: the chain-agnostic bases carry the scheme seams
-// via defaulted type params, and the exact-canton types are thin aliases —
+// via defaulted type params, and the canton-exact types are thin aliases —
 //
 //   interface X402PaymentPayload<TInner>            { x402Version; scheme; network; payload: TInner }
 //   interface X402PaymentRequirements<TAsset,TExtra> { …; asset: TAsset; extra?: TExtra }

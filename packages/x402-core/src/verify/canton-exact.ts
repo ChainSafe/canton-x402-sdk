@@ -1,8 +1,9 @@
-// The `exact-canton` scheme verifier + its Canton-specific primitives. Composes
-// the scheme-agnostic checks in ./common with Ed25519 signature verification, the
-// Canton key-fingerprint derivation, and the canton-id / canton-payload shape
-// guards. Pure and stateless — the stateful guards (nonce replay) and on-chain
-// execution stay in the facilitator, which composes this verifier's result.
+// The canton-exact scheme verifier + its Canton-specific primitives — that is,
+// scheme `exact` on a `canton:*` network. Composes the scheme-agnostic checks in
+// ./common with Ed25519 signature verification, the Canton key-fingerprint
+// derivation, and the canton-id / canton-payload shape guards. Pure and
+// stateless — the stateful guards (nonce replay) and on-chain execution stay in
+// the facilitator, which composes this verifier's result.
 
 import { sign as ed25519Sign, verify as ed25519Verify, hashes as ed25519Hashes } from "@noble/ed25519";
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
@@ -25,23 +26,9 @@ import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 ed25519Hashes.sha512 = sha512;
 
 /**
- * The id this scheme has always used, and what a verifier advertises unless
- * told otherwise. The one being migrated away from: see
- * {@link ExactCantonVerifierOptions}.
- *
- * Exported now that the facilitator composes this verifier and needs the
- * constant rather than the `"exact-canton"` literal.
- */
-export const EXACT_CANTON_SCHEME_ID = "exact-canton";
-
-/**
- * The identifier the registered Canton scheme spec fixes
- * (`specs/schemes/exact/scheme_exact_canton.md`), and where this scheme is
- * headed. A deployment still advertising {@link EXACT_CANTON_SCHEME_ID} cannot
- * be paid by a conforming client at all.
- *
- * Defined here, not in the facilitator, so both ends of the wire read the id
- * from one place.
+ * The scheme identifier on the wire, fixed by the registered Canton scheme spec
+ * (`specs/schemes/exact/scheme_exact_canton.md`). Exported so the facilitator
+ * reads it from here rather than repeating the literal.
  */
 export const EXACT_SCHEME_ID = "exact";
 
@@ -109,8 +96,9 @@ export function signHash(hashHex: string, privateKeyBase64: string): string {
 }
 
 // ─── canton network-id boundary guard ──────────────────────────────────────
-// NetworkId is a plain string (scheme-generic); this validates the exact-canton
-// `canton:<synchronizer-id>` form at untrusted boundaries (env, raw input).
+// NetworkId is a plain string (scheme-generic); this validates the `canton:<name>`
+// form at untrusted boundaries (env, raw input). Shape only — that the name is
+// one this deployment settles is the verifier's network check, not this guard's.
 
 export function isCantonNetworkId(x: unknown): x is NetworkId {
   return typeof x === "string" && /^canton:.+/.test(x);
@@ -126,32 +114,22 @@ function fail(reason: VerifyInvalidReason, payer?: string): VerifyResponseInvali
 }
 
 /**
- * The pure exact-canton verification, factored out of the facilitator's
+ * The pure canton-exact verification, factored out of the facilitator's
  * `V2CantonExact.verify`. Runs the stateless checks in order; the facilitator's
  * stateful checks (nonce replay, min-amount FX policy) and the on-chain execute
  * compose on top of a successful result here.
  */
-function verifyExactCanton(
-  accepted: Accepted,
+function verifyCantonExact(
+  networkId: NetworkId,
   payload: X402PaymentPayload<unknown>,
   requirements: X402PaymentRequirements<unknown>,
 ): VerifyResponse {
-  // 1. scheme — payload and requirements must name the SAME id, and it must be
-  // one this deployment accepts. Both halves matter: the equality was implicit
-  // while there was one id, and a payload paying `exact` against requirements
-  // quoting `exact-canton` is two parties disagreeing about the contract, not a
-  // spelling to be smoothed over.
-  if (
-    payload.scheme !== requirements.scheme ||
-    !accepted.schemes.has(payload.scheme)
-  ) {
+  // 1. scheme — both sides must name the one id the spec fixes.
+  if (payload.scheme !== EXACT_SCHEME_ID || requirements.scheme !== EXACT_SCHEME_ID) {
     return fail("scheme_mismatch");
   }
   // 2. network — payload, requirements, and this verifier's binding must agree
-  if (
-    payload.network !== requirements.network ||
-    !accepted.networks.has(payload.network)
-  ) {
+  if (payload.network !== requirements.network || payload.network !== networkId) {
     return fail("network_mismatch");
   }
   // 3. shapes — narrow the unknown inner/requirements before reading fields.
@@ -226,74 +204,17 @@ export function findTransferMismatch(
   return null;
 }
 
-/** Every id one verifier answers to, advertised or merely accepted. */
-interface Accepted {
-  readonly schemes: ReadonlySet<string>;
-  readonly networks: ReadonlySet<string>;
-}
-
 /**
- * What a verifier advertises, and what else it will take.
+ * Build an canton-exact {@link SchemeVerifier} bound to one Canton network (a
+ * registered `canton:mainnet|testnet|devnet` name — see ../networks). The
+ * registry dispatches on `(schemeId, networkId)`.
  *
- * Shaped for a migration with three stages, each a configuration change rather
- * than a code change:
- *
- * ```ts
- * //    now — advertise and accept the id we always have
- * createExactCantonVerifier(net)
- * //    during — lead with the spec's id, keep paying clients working
- * createExactCantonVerifier(net, {
- *   schemeId: EXACT_SCHEME_ID,
- *   acceptSchemes: [EXACT_CANTON_SCHEME_ID],
- * })
- * //    after — drop the legacy id by deleting one line
- * createExactCantonVerifier(net, { schemeId: EXACT_SCHEME_ID })
- * ```
- *
- * That is why the legacy id is not pinned into the accepted set: it has to be
- * removable, and the spec's id has to be able to become the advertised one.
- *
- * Accept many, advertise one. `schemeId` / `networkId` on the returned verifier
- * are what the registry dispatches on and what `/supported` publishes, so a
- * client is never left guessing which of several ids is the real one.
+ * Accepts that scheme id and that network id only; there is no alias set.
  */
-export interface ExactCantonVerifierOptions {
-  /**
-   * The scheme id this verifier advertises. Defaults to
-   * {@link EXACT_CANTON_SCHEME_ID}; set {@link EXACT_SCHEME_ID} to lead with
-   * the identifier the registered spec fixes.
-   */
-  readonly schemeId?: string;
-  /** Accepted but not advertised — the id being migrated away from. */
-  readonly acceptSchemes?: readonly string[];
-  /**
-   * Network ids accepted but not advertised, the same migration in the other
-   * dimension: lead with a registered id (`SPEC_DEVNET_NETWORK` and friends in
-   * ../networks) while a synchronizer hash is still quoted, then drop the hash.
-   */
-  readonly acceptNetworks?: readonly NetworkId[];
-}
-
-/**
- * Build an exact-canton {@link SchemeVerifier} bound to a specific Canton network
- * (`canton:<synchronizer-id>`) — mirroring how the facilitator reads its network
- * from the chain provider. The registry dispatches on `(schemeId, networkId)`.
- *
- * The verifier always accepts what it advertises; `acceptSchemes` /
- * `acceptNetworks` add ids it will take but not publish.
- */
-export function createExactCantonVerifier(
-  networkId: NetworkId,
-  options: ExactCantonVerifierOptions = {},
-): SchemeVerifier {
-  const schemeId = options.schemeId ?? EXACT_CANTON_SCHEME_ID;
-  const accepted: Accepted = {
-    schemes: new Set([schemeId, ...(options.acceptSchemes ?? [])]),
-    networks: new Set<string>([networkId, ...(options.acceptNetworks ?? [])]),
-  };
+export function createCantonExactVerifier(networkId: NetworkId): SchemeVerifier {
   return {
-    schemeId,
+    schemeId: EXACT_SCHEME_ID,
     networkId,
-    verify: (payload, requirements) => verifyExactCanton(accepted, payload, requirements),
+    verify: (payload, requirements) => verifyCantonExact(networkId, payload, requirements),
   };
 }

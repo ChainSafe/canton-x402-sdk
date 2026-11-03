@@ -48,7 +48,7 @@ function makeApp(opts: Partial<PaymentRequiredOptions> = {}): Express {
 /** Build an `X-PAYMENT` header echoing acceptable requirements. */
 function paymentHeader(overrides: Record<string, unknown> = {}): string {
   const requirements = {
-    scheme: "exact-canton",
+    scheme: "exact",
     network: "canton:x",
     maxAmountRequired: "0.05",
     asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
@@ -61,7 +61,7 @@ function paymentHeader(overrides: Record<string, unknown> = {}): string {
   } as unknown as CantonPaymentRequirements;
   const payload = {
     x402Version: 2,
-    scheme: "exact-canton",
+    scheme: "exact",
     network: "canton:x",
     payload: {
       payer: "alice::x",
@@ -135,7 +135,7 @@ describe("paymentRequired", () => {
       paymentRequired({
         ...baseOptions,
         requirements: () => ({
-          scheme: "exact-canton",
+          scheme: "exact",
           network: "canton:x",
           maxAmountRequired: "0.05",
           asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
