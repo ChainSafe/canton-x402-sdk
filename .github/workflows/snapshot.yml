@@ -37,12 +37,27 @@ jobs:
   snapshot:
     name: publish a snapshot
     runs-on: ubuntu-latest
+
+    # Through the environment, never `${{ }}` inside a `run:` body: that is a
+    # textual substitution made before the shell sees the script, and this job
+    # holds `id-token: write`.
+    env:
+      TAG: ${{ inputs.tag }}
+
     steps:
-      - name: Refuse to publish over 'latest'
-        if: inputs.tag == 'latest'
+      - name: Validate the dist-tag
         run: |
-          echo "::error::'latest' would point real installs at a throwaway build."
-          exit 1
+          if [ "$TAG" = "latest" ]; then
+            echo "::error::'latest' would point real installs at a throwaway build."
+            exit 1
+          fi
+          # Also keeps the result valid semver: the tag becomes part of
+          # `0.0.0-<tag>-<datetime>`, so `v1.0` or `my_tag` would otherwise fail
+          # deep inside `changeset version`.
+          if [[ ! "$TAG" =~ ^[a-z0-9-]+$ ]]; then
+            echo "::error::tag must match [a-z0-9-]+ (got '$TAG')"
+            exit 1
+          fi
 
       - uses: actions/checkout@v4
 
@@ -76,13 +91,13 @@ jobs:
       # resolves every `workspace:^` to that version. Never committed: this job
       # has `contents: read`.
       - name: Version
-        run: pnpm changeset version --snapshot "${{ inputs.tag }}"
+        run: pnpm changeset version --snapshot "$TAG"
 
       # --tag is load-bearing. Without it the publish MOVES the `latest`
       # dist-tag onto the snapshot and every plain `npm install` gets it.
       # --no-git-tag because this job cannot, and should not, push tags.
       - name: Publish
-        run: pnpm changeset publish --tag "${{ inputs.tag }}" --no-git-tag
+        run: pnpm changeset publish --tag "$TAG" --no-git-tag
 
       - name: What to pin
         run: |
