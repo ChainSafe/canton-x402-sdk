@@ -84,5 +84,9 @@ jobs:
           # By FILENAME, not by the `name:` inside it — renaming the workflow
           # would otherwise break this silently. A dispatch is the one thing
           # GITHUB_TOKEN may still trigger; a push or a tag from here could not.
-          gh workflow run docs.yml --ref main
+          #
+          # --ref picks the workflow FILE; sha picks what it builds. They differ
+          # when someone merges while this release is still running, and then
+          # main's HEAD is not what was published.
+          gh workflow run docs.yml --ref main -f sha="$GITHUB_SHA"
           echo "Dispatched the docs publish for this release." >> "$GITHUB_STEP_SUMMARY"

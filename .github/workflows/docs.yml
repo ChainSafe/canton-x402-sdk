@@ -23,6 +23,14 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      sha:
+        description: >-
+          Commit to build. release.yml passes the released commit, because main
+          moves on while a release runs and the site must describe what was
+          actually published. Empty = the ref you dispatched.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -43,6 +51,8 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }} # empty on push/pull_request → the usual default
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -131,6 +141,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }} # the released commit's publish script, not main's
       - uses: actions/download-artifact@v4
         with:
           name: docs-site
