@@ -6,6 +6,9 @@ import {
   MAINNET_NETWORK,
   MAINNET_SYNCHRONIZER_ID,
   MAINNET_DSO_PARTY,
+  SPEC_DEVNET_NETWORK,
+  SPEC_MAINNET_NETWORK,
+  SPEC_TESTNET_NETWORK,
   amuletAsset,
 } from "./networks";
 
@@ -28,5 +31,20 @@ describe("networks", () => {
     expect(amuletAsset(DEVNET_DSO_PARTY)).toEqual({
       instrumentId: { id: "Amulet", admin: DEVNET_DSO_PARTY },
     });
+  });
+});
+
+describe("the registered network ids", () => {
+  it("are the three the Canton scheme spec fixes", () => {
+    expect(SPEC_MAINNET_NETWORK).toBe("canton:mainnet");
+    expect(SPEC_TESTNET_NETWORK).toBe("canton:testnet");
+    expect(SPEC_DEVNET_NETWORK).toBe("canton:devnet");
+  });
+
+  it("are distinct from the fingerprint ids they replace", () => {
+    // The `canton:<fp>` ids are transitional: a deployment accepts both during
+    // the migration, then advertises only these and drops those.
+    expect(SPEC_DEVNET_NETWORK).not.toBe(DEVNET_NETWORK);
+    expect(SPEC_MAINNET_NETWORK).not.toBe(MAINNET_NETWORK);
   });
 });
