@@ -52,7 +52,7 @@ None required. There is no request body.
 | Field                      | Meaning                                                                                                                                                                                    |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `kinds[]`                  | One entry per (scheme, network) pair the deployment settles. A deployment on one Canton network returns exactly one.                                                                       |
-| `scheme`                   | `exact` — the id the registered Canton scheme spec fixes. Copy into `paymentRequirements.scheme`.                                                                                          |
+| `scheme`                   | `exact` — the scheme id defined by the registered Canton scheme spec. Copy into `paymentRequirements.scheme`.                                                                              |
 | `network`                  | One of the registered names `canton:mainnet`, `canton:testnet`, `canton:devnet`. It does not carry the synchronizer id — read it from here rather than deriving it.                        |
 | `extra.asset.instrumentId` | The asset to price in — `{ id, admin }`. `admin` is the network's DSO party: it admins Amulet, and the facilitator checks payments against it, so configure from here rather than by hand. |
 

@@ -12,7 +12,7 @@ import {
 } from "./networks";
 
 describe("network ids", () => {
-  it("are the three names the registered Canton scheme spec fixes", () => {
+  it("are the three names the registered Canton scheme spec lists", () => {
     expect(MAINNET_NETWORK).toBe("canton:mainnet");
     expect(TESTNET_NETWORK).toBe("canton:testnet");
     expect(DEVNET_NETWORK).toBe("canton:devnet");

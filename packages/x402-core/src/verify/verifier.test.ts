@@ -242,7 +242,7 @@ describe("the ids the verifier answers to", () => {
 
   const verifier = createCantonExactVerifier(NETWORK);
 
-  it("advertises the id the registered spec fixes", () => {
+  it("advertises the id the registered spec defines", () => {
     expect(verifier.schemeId).toBe(EXACT_SCHEME_ID);
     expect(verifier.schemeId).toBe("exact");
     expect(verifier.networkId).toBe(NETWORK);

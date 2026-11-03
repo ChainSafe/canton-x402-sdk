@@ -5,7 +5,7 @@
 ---
 
 **Breaking.** The scheme and network ids are the ones the registered Canton
-scheme spec fixes. There is no alias and no grace period.
+scheme spec defines. There is no alias and no grace period.
 
 ```diff
 - "scheme":  "exact-canton",

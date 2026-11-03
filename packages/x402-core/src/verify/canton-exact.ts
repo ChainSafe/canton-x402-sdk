@@ -26,7 +26,7 @@ import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 ed25519Hashes.sha512 = sha512;
 
 /**
- * The scheme identifier on the wire, fixed by the registered Canton scheme spec
+ * The scheme identifier on the wire, defined by the registered Canton scheme spec
  * (`specs/schemes/exact/scheme_exact_canton.md`). Exported so the facilitator
  * reads it from here rather than repeating the literal.
  */
@@ -124,7 +124,7 @@ function verifyCantonExact(
   payload: X402PaymentPayload<unknown>,
   requirements: X402PaymentRequirements<unknown>,
 ): VerifyResponse {
-  // 1. scheme — both sides must name the one id the spec fixes.
+  // 1. scheme — both sides must name the one id the spec defines.
   if (payload.scheme !== EXACT_SCHEME_ID || requirements.scheme !== EXACT_SCHEME_ID) {
     return fail("scheme_mismatch");
   }
