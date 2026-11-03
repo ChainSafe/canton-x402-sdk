@@ -6,6 +6,8 @@
 # Four things here look like mistakes and are not:
 #   - No `paths:` filter. The build is a required check, and a skipped one
 #     never reports, so the pull request would wait on it forever.
+#   - A push to main BUILDS but does not publish. Only a release does, so the
+#     site never describes an API npm has not got yet.
 #   - No shared concurrency group. GitHub keeps one pending run per group and
 #     cancels the waiting one when a third arrives, which would drop a
 #     cleanup silently. publish-docs.sh retries a rejected push instead.
@@ -117,7 +119,12 @@ jobs:
 
   publish:
     name: publish to Pages
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # NOT on every push to main. The site documents the PUBLISHED packages, and
+    # main runs ahead of npm — between a merge and the Version PR landing, a
+    # reader would be shown an API they cannot install. release.yml dispatches
+    # this workflow after it actually publishes; a dispatch by hand is the
+    # escape hatch for a docs-only fix that should not wait for a release.
+    if: github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
     permissions:

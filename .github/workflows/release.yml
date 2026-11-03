@@ -16,6 +16,7 @@ permissions:
   contents: write # create the Version PR / push tags
   pull-requests: write # open and update the Version PR
   id-token: write # npm provenance (OIDC)
+  actions: write # dispatch the docs publish once something is actually released
 
 jobs:
   release:
@@ -46,6 +47,7 @@ jobs:
         run: pnpm build
 
       - name: Create Version PR or publish
+        id: changesets
         uses: changesets/action@v1
         with:
           # Publishes the artifacts built by the Build step above (no rebuild on
@@ -56,3 +58,31 @@ jobs:
           title: "chore: version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The docs site tracks RELEASES, not main (see docs.yml): a plain merge
+      # leaves the site on the released API, and merging the Version PR moves it.
+      #
+      # NO `if:` ON THE STEP, deliberately. A skipped step is invisible — if
+      # `published` ever stopped being "true" the docs would quietly stop
+      # deploying, nothing would fail, and the first sign would be a stale site
+      # weeks later. Branching inside the script costs one line and makes every
+      # release state in its summary which way it went.
+      - name: Publish the docs for this release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          # Through the environment, as everywhere else in this repo: `${{ }}`
+          # inside a `run:` body is substituted textually before the shell sees it.
+          PUBLISHED: ${{ steps.changesets.outputs.published }}
+        run: |
+          if [ "$PUBLISHED" != "true" ]; then
+            echo "Nothing was published (published='$PUBLISHED')." \
+              "The docs site stays on the last released API." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # By FILENAME, not by the `name:` inside it — renaming the workflow
+          # would otherwise break this silently. A dispatch is the one thing
+          # GITHUB_TOKEN may still trigger; a push or a tag from here could not.
+          gh workflow run docs.yml --ref main
+          echo "Dispatched the docs publish for this release." >> "$GITHUB_STEP_SUMMARY"
