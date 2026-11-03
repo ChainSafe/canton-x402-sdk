@@ -5,10 +5,10 @@ name: Snapshot
 # the real artifacts over npm and prove it builds, without releasing anything.
 #
 # WHY NOT A GIT DEPENDENCY instead. `x402-server-sdk` and `x402-express` declare
-# their siblings as `workspace:^`, which only becomes a real version at publish
+# their siblings as `workspace:`, which only becomes a real version at publish
 # time. Installed from a git ref there is no workspace to resolve it against and
-# the install fails. `changeset version` rewrites those specifiers, so a snapshot
-# is the cheapest way to get an installable build of a dependent package.
+# the install fails. Publishing resolves it, so a snapshot is the cheapest way to
+# get an installable build of a dependent package.
 #
 # Versions look like `0.0.0-<tag>-<YYYYMMDDHHmmss>`. The `0.0.0` base is
 # deliberate: it sorts below every real version, so no range such as `^0.1.1` can
@@ -38,6 +38,13 @@ jobs:
     name: publish a snapshot
     runs-on: ubuntu-latest
 
+    # A dispatch runs the workflow file from the CHOSEN REF, and npm's trusted
+    # publisher matches on org, repo, workflow filename and environment — not on
+    # the ref. Without this gate, anyone with write access could push a branch
+    # whose copy drops the checks below and publish with this repo's provenance.
+    # Protect this environment with required reviewers and a branch restriction.
+    environment: snapshot
+
     # Through the environment, never `${{ }}` inside a `run:` body: that is a
     # textual substitution made before the shell sees the script, and this job
     # holds `id-token: write`.
@@ -51,11 +58,16 @@ jobs:
             echo "::error::'latest' would point real installs at a throwaway build."
             exit 1
           fi
-          # Also keeps the result valid semver: the tag becomes part of
+          # Must start with a letter. A leading `-` is the dangerous case: mri
+          # reads `--tag -` as a flag with no value, changesets then defaults the
+          # release tag to `latest`, and every package's `latest` moves to a
+          # throwaway build. The `=` forms below close the same hole at the
+          # parser; this keeps it out of the run entirely.
+          # It also keeps the result valid semver — the tag becomes part of
           # `0.0.0-<tag>-<datetime>`, so `v1.0` or `my_tag` would otherwise fail
           # deep inside `changeset version`.
-          if [[ ! "$TAG" =~ ^[a-z0-9-]+$ ]]; then
-            echo "::error::tag must match [a-z0-9-]+ (got '$TAG')"
+          if [[ ! "$TAG" =~ ^[a-z][a-z0-9-]*$ ]]; then
+            echo "::error::tag must match [a-z][a-z0-9-]* (got '$TAG')"
             exit 1
           fi
 
@@ -73,45 +85,70 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Fail fast if there is nothing to snapshot
-        run: |
-          if ! ls .changeset/*.md >/dev/null 2>&1 || \
-             [ "$(ls .changeset/*.md | grep -vc 'README.md$')" = "0" ]; then
-            echo "::error::No changesets. A snapshot would publish the current versions over again."
-            exit 1
-          fi
-
       # The ONE authoritative build, as in release.yml: topological, so
       # cross-package declarations resolve. Packages have no `prepack` on purpose
       # — per-package rebuilds race during parallel publish.
       - name: Build
         run: pnpm build
 
-      # Rewrites versions in the working tree to 0.0.0-<tag>-<timestamp> and
-      # resolves every `workspace:^` to that version. Never committed: this job
+      # Working tree only, and it does two things that `workspace:^` would not.
+      #
+      # `changeset version` does NOT rewrite the workspace protocol — pnpm does,
+      # at publish. With `^`, `determineDependents` reads it as `^<oldVersion>`
+      # and bumps a dependent only when the NORMAL next version escapes that
+      # range: a patch to x402-core gives 0.1.2, still inside `^0.1.1`, so the
+      # dependents are never snapshotted and the consumer keeps a real
+      # x402-server-sdk whose core range can never match `0.0.0-next-…`.
+      # With `*`, every dependent is bumped.
+      #
+      # It also stops the published dependency drifting: `^0.0.0-next-<ts>`
+      # matches any LATER `0.0.0-*` prerelease, including another tag's, so a
+      # consumer pinning one package exactly could still resolve a different
+      # run's build. `*` publishes as the exact version.
+      - name: Pin internal dependencies exactly
+        run: sed -i 's/"workspace:\^"/"workspace:*"/' packages/*/package.json
+
+      # Rewrites versions to 0.0.0-<tag>-<timestamp>. Never committed: this job
       # has `contents: read`.
       - name: Version
-        run: pnpm changeset version --snapshot "$TAG"
+        run: pnpm changeset version --snapshot="$TAG"
+
+      # Checked AFTER versioning, because changeset files are not releases: an
+      # empty changeset (the repo's `--empty` convention) passes a file count,
+      # then publish reports "no unpublished projects" and exits 0 — and the
+      # summary below would claim success having published nothing.
+      - name: Fail if nothing was snapshotted
+        run: |
+          grep -lq "\"version\": \"0.0.0-$TAG-" packages/*/package.json || {
+            echo "::error::No releasing changeset, so there is nothing to snapshot."
+            exit 1
+          }
 
       # --tag is load-bearing. Without it the publish MOVES the `latest`
       # dist-tag onto the snapshot and every plain `npm install` gets it.
       # --no-git-tag because this job cannot, and should not, push tags.
       - name: Publish
-        run: pnpm changeset publish --tag "$TAG" --no-git-tag
+        run: pnpm changeset publish --tag="$TAG" --no-git-tag
 
       - name: What to pin
         run: |
           {
             echo "### Snapshot published"
             echo
-            echo 'Pin these exactly in the consumer — no caret, it is meaningless on a `0.0.0` prerelease.'
+            echo 'Pin every line exactly. A caret is NOT safe here: `^0.0.0-<tag>-<ts>`'
+            echo 'matches any later `0.0.0-*` prerelease, including another run or tag.'
             echo
             echo '```json'
             node -e '
               const { readdirSync, readFileSync } = require("fs");
+              const prefix = `0.0.0-${process.env.TAG}-`;
               for (const d of readdirSync("packages")) {
                 const p = JSON.parse(readFileSync(`packages/${d}/package.json`, "utf8"));
-                if (!p.private) console.log(`  "${p.name}": "${p.version}",`);
+                // Only what THIS run produced — a package left at its real
+                // version is not part of the snapshot.
+                if (!p.private && p.version.startsWith(prefix)) {
+                  console.log(`  "${p.name}": "${p.version}",`);
+                }
               }
             '
             echo '```'
