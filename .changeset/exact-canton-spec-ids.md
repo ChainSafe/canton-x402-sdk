@@ -1,11 +1,15 @@
 ---
-"@chainsafe/x402-core": minor
-"@chainsafe/x402-express": minor
-"@chainsafe/x402-server-sdk": minor
+"@chainsafe/x402-core": major
+"@chainsafe/x402-express": major
+"@chainsafe/x402-server-sdk": major
 ---
 
 **Breaking.** The scheme and network ids are the ones the registered Canton
 scheme spec defines. There is no alias and no grace period.
+
+Marked `major` because this is part of the 1.0 release that makes the packages
+conform to the registered spec. Nothing ships until that whole set is merged, so
+every breaking change in it lands in one version rather than a run of them.
 
 ```diff
 - "scheme":  "exact-canton",
