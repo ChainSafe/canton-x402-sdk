@@ -91,6 +91,14 @@ describe("isValidAmount — the quoted, atomic form", () => {
     for (const bad of ["", ".5", "abc", "-1", "1e3", "1,5", " 1 "])
       expect(isValidAmount(bad)).toBe(false);
   });
+
+  it("is bounded at Daml's precision, so BigInt never sees a huge input", () => {
+    // BigInt parsing is superlinear and this runs on unauthenticated input.
+    // 38 digits is Numeric's precision, so nothing longer can exist on ledger.
+    expect(isValidAmount("9".repeat(38))).toBe(true);
+    expect(isValidAmount("9".repeat(39))).toBe(false);
+    expect(isValidAmount("9".repeat(3_000_000))).toBe(false);
+  });
 });
 
 describe("isValidLedgerAmount — the on-ledger Decimal", () => {
@@ -100,6 +108,13 @@ describe("isValidLedgerAmount — the on-ledger Decimal", () => {
   it("rejects malformed amounts", () => {
     for (const bad of ["", "1.", ".5", "1.12345678901", "abc", "-1", "1e3", "1,5"])
       expect(isValidLedgerAmount(bad)).toBe(false);
+  });
+
+  it("bounds the integer part too, not just the fraction", () => {
+    // 28 integer digits + 10 fractional = Numeric 10's 38 places.
+    expect(isValidLedgerAmount("9".repeat(28) + ".5")).toBe(true);
+    expect(isValidLedgerAmount("9".repeat(29) + ".5")).toBe(false);
+    expect(isValidLedgerAmount("9".repeat(3_000_000))).toBe(false);
   });
 });
 

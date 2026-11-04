@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { createServer } from "node:http";
 import express, { type Express } from "express";
 import request from "supertest";
 import {
@@ -127,6 +128,73 @@ describe("paymentRequired", () => {
     const res = await request(app).get("/paid").set("X-PAYMENT", paymentHeader({ amount: echoed }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_underpriced");
+  });
+
+  it("refuses an oversized echoed amount without parsing it", async () => {
+    // The echoed amount reaches BigInt before any signature is checked, and
+    // BigInt parsing is superlinear — ~300ms for three million digits against
+    // ~6ms for Number. Node's default 16KB header limit hides this, but our own
+    // docs tell merchants to raise maxHeaderSize for the Canton payload, so the
+    // server here is built the way we tell them to build it. The length bound
+    // in isValidAmount is what keeps this a cheap 402.
+    stubFacilitator();
+    const server = createServer({ maxHeaderSize: 4 * 1024 * 1024 }, makeApp());
+    const started = Date.now();
+    const res = await request(server)
+      .get("/paid")
+      .set("X-PAYMENT", paymentHeader({ amount: "9".repeat(1_000_000) }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_amount_invalid");
+    expect(Date.now() - started).toBeLessThan(2_000);
+    server.close();
+  });
+
+  it("rejects a decimal amount from a BUILDER, not just the declarative spec", async () => {
+    // The builder returned before the check, so a decimal reached the 402 and
+    // the paid retry then threw on BigInt(policy.amount) — a 500 for the
+    // merchant's own config, surfacing one request too late.
+    stubFacilitator();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: () =>
+          ({
+            scheme: "exact",
+            network: "canton:x",
+            amount: "0.05", // CC where atomic units are required
+            asset: "CC",
+            extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            nonce: "n",
+            validBefore: new Date(Date.now() + 300_000).toISOString(),
+          }) as unknown as CantonPaymentRequirements,
+      }),
+    );
+    app.get("/paid", (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(500);
+    expect(res.body.details).toMatch(/atomic units/);
+  });
+
+  it("rejects a decimal amount in an additionalAccepts entry", async () => {
+    // Advertised in the same 402, so it is held to the same rule.
+    stubFacilitator();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        additionalAccepts: () =>
+          [{ ...JSON.parse(JSON.stringify(baseOptions.requirements)), amount: "0.10" }] as unknown as CantonPaymentRequirements[],
+      }),
+    );
+    app.get("/paid", (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(500);
+    expect(res.body.details).toMatch(/atomic units/);
   });
 
   it("rejects a decimal amount rather than quietly misreading it", async () => {

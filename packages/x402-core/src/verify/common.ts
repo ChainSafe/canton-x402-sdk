@@ -10,14 +10,28 @@ import type { X402PaymentRequirements } from "../types/requirements";
 /** Decimal places every Canton instrument uses on the wire: 1 token = 1e10. */
 export const WIRE_DECIMALS = 10;
 
+// BOUNDED ON PURPOSE. Both forms are parsed with BigInt on unauthenticated
+// input — the middleware compares an echoed amount before any signature is
+// checked — and BigInt parsing is superlinear: ~300ms for three million digits
+// against ~6ms for Number. A merchant following our own guidance runs with
+// `maxHeaderSize: 4 * 1024 * 1024`, so an unbounded pattern hands an attacker
+// that cost for the price of one request.
+//
+// The limits are Daml's, not arbitrary: `Numeric 10` carries 38 digits of
+// precision with ten after the point, so a ledger amount has at most 28 integer
+// digits, and the atomic form — that value times 1e10 — has at most 38. Nothing
+// longer can exist on ledger to be quoted in the first place.
+const MAX_LEDGER_INTEGER_DIGITS = 28;
+const MAX_ATOMIC_DIGITS = 38;
+
 /** `PaymentRequirements.amount`: a non-negative integer string of atomic units. */
 export function isValidAmount(amount: string): boolean {
-  return /^\d+$/.test(amount);
+  return new RegExp(`^\\d{1,${MAX_ATOMIC_DIGITS}}$`).test(amount);
 }
 
 /** An on-ledger transfer amount: a non-negative decimal with at most 10 places. */
 export function isValidLedgerAmount(amount: string): boolean {
-  return /^\d+(\.\d{1,10})?$/.test(amount);
+  return new RegExp(`^\\d{1,${MAX_LEDGER_INTEGER_DIGITS}}(\\.\\d{1,10})?$`).test(amount);
 }
 
 /**
