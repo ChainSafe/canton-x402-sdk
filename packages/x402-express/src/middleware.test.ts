@@ -295,6 +295,19 @@ describe("paymentRequired", () => {
     expect(res.body.error).toBe("policy_asset");
   });
 
+  it("answers 402, not 500, when the echoed requirements carry no `extra`", async () => {
+    // The header is only ENVELOPE-validated on decode, and the envelope is a
+    // looseObject that does not require `extra`. Reading `extra.instrumentId`
+    // without narrowing threw a TypeError, so attacker-controlled input chose
+    // our status code — and a 500 reads as a merchant bug, not a refusal.
+    stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set("X-PAYMENT", paymentHeader({ extra: undefined }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_requirements_invalid");
+  });
+
   it("rejects a payment minted for a different resource (request↔payment binding)", async () => {
     // Same price/payTo/asset, but the payment was issued for another path — it
     // must not be replayable against this one.

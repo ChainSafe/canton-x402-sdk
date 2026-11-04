@@ -2,11 +2,13 @@ import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { randomUUID } from "node:crypto";
 import {
   assetSymbol,
+  isCantonPaymentRequirements,
   isValidAmount,
   decodePaymentHeader,
   type AssetSpec,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
+  type X402PaymentRequirements,
   type SettleResponse,
   type VerifyResponse,
 } from "@chainsafe/x402-core";
@@ -259,9 +261,17 @@ async function resolve<T>(value: Resolvable<T>, req: Request): Promise<T> {
 
 /** Ensure client-echoed requirements are acceptable per merchant policy. */
 function validateEchoedRequirements(
-  echoed: CantonPaymentRequirements,
+  echoed: X402PaymentRequirements<unknown>,
   policy: CantonPaymentRequirements,
 ): string | null {
+  // The header is only ENVELOPE-validated on decode, and the envelope is a
+  // looseObject that does not require `extra`. decodePaymentHeader types the
+  // result optimistically as canton-exact; nothing has checked it. Narrow
+  // before reading a field, or a header without `extra` throws a TypeError and
+  // answers 500 instead of 402 — attacker-controlled input choosing our status
+  // code. This is also why the parameter is the envelope type, not the
+  // concrete one: the old signature asserted a shape no one had verified.
+  if (!isCantonPaymentRequirements(echoed)) return "policy_requirements_invalid";
   if (echoed.scheme !== policy.scheme) return "policy_scheme";
   if (echoed.network !== policy.network) return "policy_network";
   if (echoed.payTo !== policy.payTo) return "policy_payTo";
