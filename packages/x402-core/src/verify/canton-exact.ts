@@ -113,6 +113,9 @@ const PREPARED_TX_HASH = /^[0-9a-f]{64}$/;
 /** Standard alphabet, padded, nothing else. */
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
+/** 64 bytes always encode to 88 characters of padded base64. */
+const SIGNATURE_BASE64_LENGTH = 88;
+
 function bytesToBase64(bytes: Uint8Array): string {
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
@@ -134,9 +137,15 @@ export function signatureToBase64(signatureHex: string): string {
  * is what keeps it from being read as one. Canonical means the encoding
  * {@link signatureToBase64} produces: no URL-safe alphabet, no missing padding,
  * no non-zero padding bits.
+ *
+ * The length is checked first because the value comes from the client. Run on
+ * a few million characters, the regex below exhausts V8's backtracking stack
+ * and throws instead of returning false.
  */
 export function signatureFromBase64(signatureBase64: string): string | null {
-  if (!BASE64.test(signatureBase64)) return null;
+  if (signatureBase64.length !== SIGNATURE_BASE64_LENGTH || !BASE64.test(signatureBase64)) {
+    return null;
+  }
   const bytes = base64ToBytes(signatureBase64);
   if (bytes.length !== 64 || bytesToBase64(bytes) !== signatureBase64) return null;
   return bytesToHex(bytes);
@@ -209,10 +218,11 @@ function verifyCantonExact(
   if (!partySuffix || derivedFingerprint.toLowerCase() !== partySuffix.toLowerCase()) {
     return fail("bad_fingerprint", inner.payer);
   }
-  // 8. signature over the prepared-transaction hash. A hash or signature in any
-  //    other encoding cannot be what the ledger checks at execute, so it is a
-  //    bad signature here too, even where the bytes would verify (an upper-case
-  //    hash decodes to the same bytes).
+  // 8. signature over the prepared-transaction hash, each in the one encoding
+  //    the spec gives it. The facilitator relays `signature` to the ledger as
+  //    is. `preparedTxHash` is keyed on (the facilitator's submissionId), so one
+  //    hash has one spelling: an upper-case copy decodes to the same bytes and
+  //    would verify, and is still refused.
   const signatureHex = signatureFromBase64(inner.signature);
   if (
     !PREPARED_TX_HASH.test(inner.preparedTxHash) ||

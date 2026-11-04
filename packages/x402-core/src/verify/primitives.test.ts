@@ -106,6 +106,9 @@ describe("signatureToBase64 / signatureFromBase64", () => {
     expect(signatureFromBase64(toB64(new Uint8Array(65)))).toBeNull();
     expect(signatureFromBase64("")).toBeNull();
   });
+  it("refuses megabytes without throwing", () => {
+    expect(signatureFromBase64("A".repeat(5 * 1024 * 1024))).toBeNull();
+  });
   it("refuses non-canonical encodings of the same bytes", () => {
     expect(signatureFromBase64(sigB64.replace(/\+/g, "-").replace(/\//g, "_"))).toBeNull();
     expect(signatureFromBase64(sigB64.slice(0, -2))).toBeNull();

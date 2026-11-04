@@ -1,4 +1,5 @@
 ---
+"@chainsafe/x402-client": major
 "@chainsafe/x402-core": major
 "@chainsafe/x402-express": major
 "@chainsafe/x402-server-sdk": major
@@ -29,3 +30,7 @@ the version prepare used.
 
 No compatibility shim: the old field names are not read. Clients and
 facilitators move together, as with the rest of the 1.0 set.
+
+`@chainsafe/x402-client` is major too: `FacilitatorClient.verify` and `settle`
+take the payload type, so the change reaches its signatures. Without its own
+changeset it would only get a patch bump from the core dependency.

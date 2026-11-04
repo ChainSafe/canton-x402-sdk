@@ -73,7 +73,7 @@ function buildSignedFixture() {
     },
   };
 
-  return { requirements, payload, payer, signatureHex };
+  return { requirements, payload, payer, signatureHex, seedB64: toB64(seed) };
 }
 
 const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -212,9 +212,12 @@ describe("cantonExactVerifier", () => {
     const nonCanonical = withPaddingBitSet(signature);
     // Decodes to the very same signature, so only the canonical check refuses it.
     expect(atob(nonCanonical)).toBe(atob(signature));
+    const urlSafe = signature.replace(/\+/g, "-").replace(/\//g, "_");
+    // The fixture's signature is fixed, and it has a "+" or a "/" to replace.
+    expect(urlSafe).not.toBe(signature);
     // Hex is what a payer built against the old field sends. Its 128 digits are
     // valid base64 too, so the 64-byte check is what refuses it.
-    for (const variant of [signatureHex, signature.replace(/=+$/, ""), nonCanonical, ` ${signature}`]) {
+    for (const variant of [signatureHex, signature.replace(/=+$/, ""), nonCanonical, urlSafe, ` ${signature}`]) {
       const p = { ...payload, payload: { ...payload.payload, signature: variant } };
       expect(verifier.verify(p, requirements)).toMatchObject({
         isValid: false,
@@ -223,13 +226,26 @@ describe("cantonExactVerifier", () => {
     }
   });
 
-  it("reads preparedTxHash only as 64 lower-case hex digits", () => {
+  it("answers bad_signature for a signature of megabytes, rather than throwing", () => {
+    // Unbounded, the base64 regex runs out of backtracking stack at about 4.5M
+    // characters and throws.
     const { payload, requirements } = buildSignedFixture();
+    const p = { ...payload, payload: { ...payload.payload, signature: "A".repeat(5 * 1024 * 1024) } };
+    expect(verifier.verify(p, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "bad_signature",
+    });
+  });
+
+  it("reads preparedTxHash only as 64 lower-case hex digits", () => {
+    const { payload, requirements, seedB64 } = buildSignedFixture();
     const hash = payload.payload.preparedTxHash;
-    // Upper case decodes to the bytes that were signed, so the signature would
-    // verify; the encoding check is what refuses it.
-    for (const preparedTxHash of [hash.toUpperCase(), `1220${hash}`, `0x${hash}`]) {
-      const p = { ...payload, payload: { ...payload.payload, preparedTxHash } };
+    // Each variant carries a valid signature over its own bytes, so the
+    // encoding check is the only thing that can refuse it. Upper case is the
+    // same 32 bytes that were signed.
+    for (const preparedTxHash of [hash.toUpperCase(), `1220${hash}`, `${hash}00`, hash.slice(2)]) {
+      const signature = signatureToBase64(signHash(preparedTxHash, seedB64));
+      const p = { ...payload, payload: { ...payload.payload, preparedTxHash, signature } };
       expect(verifier.verify(p, requirements)).toMatchObject({
         isValid: false,
         invalidReason: "bad_signature",
