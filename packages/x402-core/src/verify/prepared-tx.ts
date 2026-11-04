@@ -7,8 +7,9 @@
 // base64→Uint8Array decode. Only the narrow field path we need is walked; every
 // other field is skipped, so we don't vendor the full Canton proto closure.
 // Every message on that path must be canonically encoded (`assertCanonical`,
-// `assertSingleField`), and only the node tree under the roots is read, so this
-// walker and Canton always read the same transaction.
+// `assertSingleField`), the wire format is read as strictly as protobuf-java
+// reads it (`StrictReader`), and only the node tree under the roots is read, so
+// this walker and Canton read the same transaction.
 //
 // Envelope (see canton interactive_submission_service.proto + _data.proto):
 //   PreparedTransaction{1: transaction}
@@ -42,6 +43,53 @@ const TRANSFER_CHOICE = "TransferFactory_Transfer";
 
 // ── protobuf wire helpers (over protobufjs minimal Reader) ──────────────────
 
+const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+/**
+ * protobufjs's Reader, made to agree with protobuf-java (what Canton parses
+ * with) wherever the two would otherwise read the same bytes differently:
+ * - a tag or length is a varint of at most 5 bytes. protobufjs skips a fixed
+ *   10 bytes for a longer one, Java reads on to its terminator.
+ * - a string is valid UTF-8, BOM included. protobufjs drops stray bytes.
+ * - groups (deprecated, never emitted by Canton) are refused. protobufjs ends
+ *   one at any end-group tag, Java only at the matching one.
+ */
+class StrictReader extends Reader {
+  override uint32(): number {
+    let value = 0;
+    for (let i = 0; i < 5; i++) {
+      if (this.pos >= this.len) throw new Error("truncated varint");
+      const byte = this.buf[this.pos++];
+      value = (value | ((byte & 0x7f) << (7 * i))) >>> 0;
+      if (byte < 0x80) return value;
+    }
+    throw new Error("varint longer than 5 bytes");
+  }
+
+  override string(): string {
+    return UTF8.decode(this.bytes());
+  }
+
+  override skipType(wireType: number): Reader {
+    if (wireType === 3 || wireType === 4) throw new Error("protobuf groups are not supported");
+    return super.skipType(wireType);
+  }
+}
+
+/**
+ * A node id as Canton reads it: it parses ids as integers, so "0", "00", "+0"
+ * and "٠" are all node 0 to Canton while a string compare tells them apart.
+ * Only the canonical spelling of a non-negative int32 keeps the two in step.
+ * Checked where a node is defined; a reference spelled any other way then
+ * names no node and is refused as missing.
+ */
+function nodeIdOf(id: string): string {
+  if (!/^(0|[1-9][0-9]{0,9})$/.test(id) || Number(id) > 2147483647) {
+    throw new Error(`node id ${JSON.stringify(id)} is not a canonical integer`);
+  }
+  return id;
+}
+
 /** A decoded Daml `Value`: either a scalar string (party/text/numeric) or a record. */
 interface ValueNode {
   str?: string;
@@ -62,7 +110,7 @@ function base64ToBytes(b64: string): Uint8Array {
 
 /** All length-delimited (wire type 2) sub-message byte slices for `field`. */
 function subMessages(bytes: Uint8Array, field: number): Uint8Array[] {
-  const r = Reader.create(bytes);
+  const r = new StrictReader(bytes);
   const out: Uint8Array[] = [];
   while (r.pos < r.len) {
     const tag = r.uint32();
@@ -79,7 +127,7 @@ function firstSub(bytes: Uint8Array, field: number): Uint8Array | null {
 
 /** All strings of a repeated string `field`. */
 function strings(bytes: Uint8Array, field: number): string[] {
-  const r = Reader.create(bytes);
+  const r = new StrictReader(bytes);
   const out: string[] = [];
   while (r.pos < r.len) {
     const tag = r.uint32();
@@ -92,7 +140,7 @@ function strings(bytes: Uint8Array, field: number): string[] {
 /** How often each field number occurs in a message, regardless of wire type. */
 function fieldCounts(bytes: Uint8Array): Map<number, number> {
   const counts = new Map<number, number>();
-  const r = Reader.create(bytes);
+  const r = new StrictReader(bytes);
   while (r.pos < r.len) {
     const tag = r.uint32();
     counts.set(tag >>> 3, (counts.get(tag >>> 3) ?? 0) + 1);
@@ -115,20 +163,20 @@ function assertCanonical(bytes: Uint8Array, singular: readonly number[]): void {
 
 /**
  * Throw unless a message that is nothing but a oneof (v1 `Node`, `Value`)
- * holds at most one field. Protobuf keeps the LAST member, including members
+ * holds exactly one field. Protobuf keeps the LAST member, including members
  * newer than this walker (v1 `Node.query_by_key = 5`), while this walker would
- * read the first it knows.
+ * read the first it knows; and Canton refuses one with no member at all.
  */
 function assertSingleField(bytes: Uint8Array): void {
   let fields = 0;
   for (const count of fieldCounts(bytes).values()) fields += count;
-  if (fields > 1) throw new Error("more than one oneof member");
+  if (fields !== 1) throw new Error(`a oneof holds ${fields} members`);
 }
 
 /** Decode a Daml `Value` message (only the string scalars + nested record). */
 function readValue(bytes: Uint8Array): ValueNode {
   assertSingleField(bytes);
-  const r = Reader.create(bytes);
+  const r = new StrictReader(bytes);
   const out: ValueNode = {};
   while (r.pos < r.len) {
     const tag = r.uint32();
@@ -153,7 +201,7 @@ function readRecordFields(recordBytes: Uint8Array): RecordFieldNode[] {
 /** Decode a `RecordField{1: label, 2: value}`. */
 function readRecordField(bytes: Uint8Array): RecordFieldNode {
   assertCanonical(bytes, [1, 2]);
-  const r = Reader.create(bytes);
+  const r = new StrictReader(bytes);
   let label = "";
   let value: ValueNode = {};
   while (r.pos < r.len) {
@@ -181,7 +229,7 @@ function pick(fields: RecordFieldNode[], label: string, index: number): ValueNod
 /** Read an Exercise node's choice_id (9), chosen_value bytes (10) and children (12). */
 function readExercise(bytes: Uint8Array): { choiceId: string; chosenValue: Uint8Array | null; children: string[] } {
   assertCanonical(bytes, [9, 10]);
-  const r = Reader.create(bytes);
+  const r = new StrictReader(bytes);
   let choiceId = "";
   let chosenValue: Uint8Array | null = null;
   const children: string[] = [];
@@ -200,14 +248,14 @@ function readExercise(bytes: Uint8Array): { choiceId: string; chosenValue: Uint8
 /** Read a `DamlTransaction.Node{1: node_id, 1000: v1}`. Any other field is refused. */
 function readNode(bytes: Uint8Array): { nodeId: string; v1: Uint8Array } {
   assertCanonical(bytes, [1, 1000]);
-  const r = Reader.create(bytes);
+  const r = new StrictReader(bytes);
   let nodeId: string | undefined;
   let v1: Uint8Array | undefined;
   while (r.pos < r.len) {
     const tag = r.uint32();
     const field = tag >>> 3;
     const wt = tag & 7;
-    if (field === 1 && wt === 2) nodeId = r.string();
+    if (field === 1 && wt === 2) nodeId = nodeIdOf(r.string());
     else if (field === 1000 && wt === 2) v1 = r.bytes();
     else throw new Error(`unexpected field ${field} in a node`);
   }

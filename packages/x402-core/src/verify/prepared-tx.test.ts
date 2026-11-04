@@ -89,6 +89,29 @@ describe("decodePreparedTransaction on a non-canonical encoding", () => {
     expect(decodePreparedTransaction(encodePreparedTransaction(TRANSFER, opts))).toBeNull();
   });
 
+  // protobufjs alone reads each of these differently from protobuf-java.
+  const wireCases: [string, number[]][] = [
+    // A 6-byte tag: protobufjs skips a fixed 10 bytes, Java reads 6.
+    ["a tag written as a 6-byte varint", [0xa0, 0x86, 0x80, 0x80, 0x80, 0x00, 0, 0, 0, 0, 0]],
+    // Field 100, then a 6-byte length 0: same split on a length.
+    ["a length written as a 6-byte varint", [0xa2, 0x06, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00, 0, 0, 0, 0]],
+    // Field 100 as a group: protobufjs ends it at any end-group tag.
+    ["a group", [0xa3, 0x06, 0xa4, 0x06]],
+  ];
+
+  it.each(wireCases)("returns null for %s", (_, bytes) => {
+    const blob = encodePreparedTransaction(TRANSFER, { extra: { exercise: Uint8Array.from(bytes) } });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  it("returns null for a string that is not valid UTF-8", () => {
+    // protobufjs drops the stray 0x80 and reads the transfer choice.
+    const choice = concat(concat(utf8("Transfer"), Uint8Array.of(0x80)), utf8("Factory_Transfer"));
+    const exercise = concat(wrap(9, choice), wrap(10, encodeChoiceArgument(TRANSFER)));
+    const txn = concat(wrap(2, utf8("0")), wrap(3, encodeNode("0", wrap(3, exercise))));
+    expect(decodePreparedTransaction(btoa(String.fromCharCode(...wrap(1, txn))))).toBeNull();
+  });
+
   it("still decodes when the other fields appear once each", () => {
     // PreparedTransaction.metadata and Exercise.template_id
     const blob = encodePreparedTransaction(TRANSFER, {
@@ -116,6 +139,14 @@ describe("decodePreparedTransaction reads only the node tree under the roots", (
     expect(decodePreparedTransaction(blob)).toEqual(TRANSFER);
   });
 
+  it("decodes a transfer next to a rollback node", () => {
+    const blob = encodePreparedTransaction(TRANSFER, {
+      roots: ["0", "1"],
+      nodes: [encodeNode("1", rollbackOf("2")), encodeNode("2", create)],
+    });
+    expect(decodePreparedTransaction(blob)).toEqual(TRANSFER);
+  });
+
   const cases: [string, EncodeOptions][] = [
     // Canton keeps the last node of a repeated id, so it would not run the transfer.
     ["two nodes with the same id", { nodes: [encodeNode("0", create)] }],
@@ -126,6 +157,17 @@ describe("decodePreparedTransaction reads only the node tree under the roots", (
     ["a root that names no node", { roots: ["0", "9"] }],
     ["a root that names no node, next to an unreachable node", { roots: ["0", "9"], nodes: [encodeNode("1", create)] }],
     ["a node referenced twice", { roots: ["0", "0"] }],
+    // Canton parses ids as integers, so "00" and "٠" are node 0 to it.
+    ...["00", "+0", "٠"].map((alias): [string, EncodeOptions] => [
+      `a child id "${alias}" that Canton reads as the transfer node's`,
+      { extra: { exercise: wrap(12, utf8(alias)) }, nodes: [encodeNode(alias, create)] },
+    ]),
+    ["a node id that is not an integer", { nodeId: "a", roots: ["a"] }],
+    ["a node with an empty v1 body", { roots: ["0", "1"], nodes: [encodeNode("1", empty)] }],
+    [
+      "a transfer under an exercise under a rollback node",
+      { nodeId: "1", roots: ["0"], nodes: [encodeNode("0", rollbackOf("2")), encodeNode("2", parentOf("1"))] },
+    ],
     ["a transfer under a rollback node", { nodeId: "1", roots: ["0"], nodes: [encodeNode("0", rollbackOf("1"))] }],
   ];
 
