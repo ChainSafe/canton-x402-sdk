@@ -1,7 +1,7 @@
 ---
-"@chainsafe/x402-core": minor
-"@chainsafe/x402-express": minor
-"@chainsafe/x402-server-sdk": minor
+"@chainsafe/x402-core": major
+"@chainsafe/x402-express": major
+"@chainsafe/x402-server-sdk": major
 ---
 
 **Breaking.** PaymentRequirements takes the shape the registered Canton scheme
