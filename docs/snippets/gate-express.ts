@@ -32,7 +32,7 @@ app.use(
       network: NETWORK,
       payTo: PAY_TO,
       asset: amuletAsset(DSO_PARTY),
-      amount: "0.05",
+      amount: "0.05", // whole tokens; the middleware converts to atomic units
       description: "Access to /paid",
     },
   }),

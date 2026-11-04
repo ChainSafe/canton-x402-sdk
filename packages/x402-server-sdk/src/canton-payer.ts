@@ -1,7 +1,7 @@
 import {
   EXACT_SCHEME_ID,
   isExpired,
-  isValidAmount,
+  atomicToLedger,
   requirementsHash,
   signHash,
   type CantonPaymentPayload,
@@ -75,8 +75,10 @@ export class CantonX402Payer implements X402Payer {
     }
 
     // Per-request validity — not a capability, so checked here rather than in supports().
-    if (!isValidAmount(requirements.amount)) {
-      throw new Error(`x402: invalid amount "${requirements.amount}"`);
+    // Quoted in atomic units; the wallet SDK builds the transfer in Decimal.
+    const ledgerAmount = atomicToLedger(requirements.amount);
+    if (ledgerAmount === null) {
+      throw new Error(`x402: invalid amount "${requirements.amount}" (expected atomic units)`);
     }
     if (isExpired(requirements.validBefore)) {
       throw new Error(`x402: requirements expired at ${requirements.validBefore}`);
@@ -88,7 +90,7 @@ export class CantonX402Payer implements X402Payer {
     const [command, disclosed] = await sdk.token.transfer.create({
       sender: key.partyId,
       recipient: requirements.payTo,
-      amount: requirements.amount,
+      amount: ledgerAmount,
       instrumentId: requirements.extra.instrumentId.id,
       registryUrl,
     });

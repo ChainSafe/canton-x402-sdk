@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   assetSymbol,
   isValidAmount,
+  ledgerToAtomic,
   decodePaymentHeader,
   type AssetSpec,
   type CantonPaymentPayload,
@@ -27,7 +28,12 @@ export interface RequirementsSpec {
   asset: Resolvable<AssetSpec>;
   /** Network id — on Canton a `canton:<name>` from x402-core's networks. */
   network: Resolvable<string>;
-  /** Price (decimal string). */
+  /**
+   * Price in WHOLE TOKENS as a decimal string (`"0.05"` is 0.05 CC), at most
+   * ten places. Not atomic units — the middleware converts, because the wire's
+   * `amount` is atomic and getting the two the wrong way round misprices by
+   * 1e10.
+   */
   amount: Resolvable<string>;
   /** Scheme id. Default `exact`. */
   scheme?: Resolvable<string>;
@@ -137,7 +143,7 @@ class PaymentRejection extends Error {
  *     network: "canton:devnet",
  *     payTo: "merchant::1220…",
  *     asset: { instrumentId: { id: "Amulet", admin: "DSO::1220…" } },
- *     amount: "0.05", // or a per-request (req) => "0.05"
+ *     amount: "0.05", // whole tokens — converted to atomic units on the wire
  *   },
  * }));
  */
@@ -228,10 +234,14 @@ async function buildRequirements(
   const source = options.requirements;
   if (typeof source === "function") return source(req);
 
-  const amount = await resolve(source.amount, req);
+  const priced = await resolve(source.amount, req);
   const instrument = await resolve(source.asset, req);
-  if (!isValidAmount(amount)) {
-    throw new Error(`paymentRequired: amount "${amount}" is not a valid decimal amount`);
+  // The merchant prices in whole tokens; the wire carries atomic units.
+  const amount = ledgerToAtomic(priced);
+  if (amount === null) {
+    throw new Error(
+      `paymentRequired: amount "${priced}" is not a valid decimal amount (≤10 places)`,
+    );
   }
   const validForSeconds = source.validForSeconds
     ? await resolve(source.validForSeconds, req)
@@ -239,7 +249,7 @@ async function buildRequirements(
   return {
     scheme: await resolve(source.scheme ?? DEFAULT_SCHEME, req),
     network: await resolve(source.network, req),
-    amount,
+    amount: amount.toString(),
     // The merchant declares the instrument; the spec's `asset` is only a
     // symbol, so the full `{admin, id}` travels where a payer can read it.
     asset: assetSymbol(instrument.instrumentId),
@@ -273,12 +283,14 @@ function validateEchoedRequirements(
   if (echoed.extra.instrumentId.id !== policy.extra.instrumentId.id) return "policy_asset";
   if (echoed.extra.instrumentId.admin !== policy.extra.instrumentId.admin) return "policy_asset";
   if (echoed.asset !== policy.asset) return "policy_asset";
-  // Validate the amount's FORMAT before comparing: Number("abc") is NaN and
-  // Number("Infinity") is Infinity, and both make the "<" test false — so a
-  // malformed amount would otherwise slip past the underpricing check.
+  // Validate the FORMAT before comparing, or a malformed amount slips past the
+  // "<" test — Number("abc") is NaN and Number("Infinity") is Infinity, and
+  // both compare false.
   if (!isValidAmount(echoed.amount)) return "policy_amount_invalid";
-  // The merchant priced this request; an echoed requirement must not undercut it.
-  if (Number(echoed.amount) < Number(policy.amount)) return "policy_underpriced";
+  // BigInt, not Number: atomic units are 1e10 larger than the token amount, so
+  // anything over ~900k CC exceeds Number.MAX_SAFE_INTEGER and two different
+  // prices start comparing equal.
+  if (BigInt(echoed.amount) < BigInt(policy.amount)) return "policy_underpriced";
   if (Date.parse(echoed.validBefore) <= Date.now()) return "requirements_expired";
   return null;
 }

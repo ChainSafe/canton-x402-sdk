@@ -50,7 +50,7 @@ function paymentHeader(overrides: Record<string, unknown> = {}): string {
   const requirements = {
     scheme: "exact",
     network: "canton:x",
-    amount: "0.05",
+    amount: "500000000",
     asset: "CC",
     extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
     payTo: "merchant::x",
@@ -98,7 +98,17 @@ describe("paymentRequired", () => {
     app.get("/paid", (_req, res) => res.json({ ok: true }));
     const res = await request(app).get("/paid");
     expect(res.status).toBe(402);
-    expect(res.body.accepts[0].amount).toBe("0.09");
+    // The resolver returns the merchant's price in CC; the wire carries atomic.
+    expect(res.body.accepts[0].amount).toBe("900000000");
+  });
+
+  it("converts the merchant's price to atomic units on the wire", async () => {
+    // The merchant keeps pricing in whole tokens. Getting this backwards
+    // misprices by 1e10, so it is pinned on its own rather than incidentally.
+    stubFacilitator();
+    const res = await request(makeApp()).get("/paid");
+    expect(res.status).toBe(402);
+    expect(res.body.accepts[0].amount).toBe("500000000"); // 0.05 CC
   });
 
   it("uses a merchant-supplied nonce generator (so it can record it)", async () => {
@@ -138,7 +148,7 @@ describe("paymentRequired", () => {
         requirements: () => ({
           scheme: "exact",
           network: "canton:x",
-          amount: "0.05",
+          amount: "500000000",
           asset: "CC",
           extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
           payTo: "merchant::x",
@@ -162,7 +172,7 @@ describe("paymentRequired", () => {
     expect(res.body.x402Version).toBe(2);
     expect(res.body.error).toBe("payment_required");
     const req0 = res.body.accepts[0];
-    expect(req0).toMatchObject({ payTo: "merchant::x", amount: "0.05", network: "canton:x" });
+    expect(req0).toMatchObject({ payTo: "merchant::x", amount: "500000000", network: "canton:x" });
     expect(typeof req0.nonce).toBe("string");
     expect(Date.parse(req0.validBefore)).toBeGreaterThan(Date.now());
   });
@@ -237,7 +247,7 @@ describe("paymentRequired", () => {
     stubFacilitator();
     const res = await request(makeApp())
       .get("/paid")
-      .set("X-PAYMENT", paymentHeader({ amount: "0.01" }));
+      .set("X-PAYMENT", paymentHeader({ amount: "100000000" }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_underpriced");
   });
@@ -334,7 +344,7 @@ describe("paymentRequired", () => {
       const onReject = vi.fn();
       await request(makeApp({ onReject }))
         .get("/paid")
-        .set("X-PAYMENT", paymentHeader({ amount: "0.01" }));
+        .set("X-PAYMENT", paymentHeader({ amount: "100000000" }));
       expect(onReject.mock.calls[0][0]).toMatchObject({ status: 402, reason: "policy_underpriced" });
     });
 

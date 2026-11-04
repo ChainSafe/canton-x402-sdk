@@ -8,6 +8,7 @@ import {
   verifySignature,
   signHash,
   isValidAmount,
+  isValidLedgerAmount,
   isExpired,
   schemeNetworkMatches,
   isCantonNetworkId,
@@ -78,13 +79,27 @@ describe("signHash", () => {
   });
 });
 
-describe("isValidAmount", () => {
+describe("isValidAmount — the quoted, atomic form", () => {
+  it("accepts a non-negative integer string", () => {
+    for (const ok of ["0", "1", "500000000", "123456789012345678901234567890"])
+      expect(isValidAmount(ok)).toBe(true);
+  });
+  it("rejects a decimal — that is the ledger's unit, not the quote's", () => {
+    for (const bad of ["0.01", "10.1234567890", "1."]) expect(isValidAmount(bad)).toBe(false);
+  });
+  it("rejects malformed amounts", () => {
+    for (const bad of ["", ".5", "abc", "-1", "1e3", "1,5", " 1 "])
+      expect(isValidAmount(bad)).toBe(false);
+  });
+});
+
+describe("isValidLedgerAmount — the on-ledger Decimal", () => {
   it("accepts decimals up to 10 places", () => {
-    for (const ok of ["0", "1", "0.01", "10.1234567890"]) expect(isValidAmount(ok)).toBe(true);
+    for (const ok of ["0", "1", "0.01", "10.1234567890"]) expect(isValidLedgerAmount(ok)).toBe(true);
   });
   it("rejects malformed amounts", () => {
     for (const bad of ["", "1.", ".5", "1.12345678901", "abc", "-1", "1e3", "1,5"])
-      expect(isValidAmount(bad)).toBe(false);
+      expect(isValidLedgerAmount(bad)).toBe(false);
   });
 });
 
@@ -117,7 +132,7 @@ describe("shape guards + scheme/network match", () => {
   const requirements = {
     scheme: "exact",
     network: "canton:devnet",
-    amount: "0.01",
+    amount: "100000000",
     payTo: "merchant::1220x",
     resource: "/r",
     nonce: "n",

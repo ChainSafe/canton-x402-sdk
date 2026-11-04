@@ -16,7 +16,7 @@ import type { CantonPaymentRequirements } from "./index";
 const REQUIREMENTS: CantonPaymentRequirements = {
   scheme: "exact",
   network: "canton:devnet",
-  amount: "0.01",
+  amount: "100000000",
   asset: "CC",
   extra: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
@@ -26,14 +26,14 @@ const REQUIREMENTS: CantonPaymentRequirements = {
 };
 
 const GOLDEN_CANONICAL =
-  '{"amount":"0.01","asset":"CC",' +
+  '{"amount":"100000000","asset":"CC",' +
   '"extra":{"instrumentId":{"admin":"DSO::1220be58c29e","id":"Amulet"}},' +
   '"network":"canton:devnet",' +
   '"nonce":"550e8400-e29b-41d4-a716-446655440000","payTo":"merchant::1220dead",' +
   '"resource":"/api/resource","scheme":"exact",' +
   '"validBefore":"2026-01-01T00:00:00.000Z"}';
 
-const GOLDEN_HASH = "c690ec7b17fc25933bf1004931143c96605b21f8202997a259c039681ab64ed4";
+const GOLDEN_HASH = "b5895306638ffbdfd2ba8c84ba6522eb579e63858455b8e5eeee2f4be1dc9ce2";
 
 describe("requirements hashing — facilitator parity", () => {
   it("canonicalizes to the golden string (keys sorted, nested sorted)", () => {

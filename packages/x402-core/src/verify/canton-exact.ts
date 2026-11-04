@@ -19,7 +19,7 @@ import type {
 } from "../types/facilitator";
 import type { X402PaymentPayload } from "../types/payment";
 import type { X402PaymentRequirements } from "../types/requirements";
-import { amountGte, isExpired, requirementsHashMatches } from "./common";
+import { amountMatches, isExpired, requirementsHashMatches } from "./common";
 import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 
 // @noble/ed25519 v3 needs sha512 wired (same as the facilitator's wallet.ts).
@@ -186,8 +186,9 @@ function verifyCantonExact(
  * Check a decoded transfer against the requirements. Returns `null` when the
  * transfer satisfies them, or a short field detail (`"sender" | "receiver" |
  * "instrument" | "amount"`) naming the first divergence — surfaced in the
- * `transfer_mismatch` response's `extensions.detail`. Overpayment is allowed
- * (`transfer.amount >= requirements.amount`); the compare is decimal-safe.
+ * `transfer_mismatch` response's `extensions.detail`. The amount must be EQUAL,
+ * not merely sufficient (Rule 4), and the two sides are in different units — the
+ * transfer carries an on-ledger Decimal, the requirements an atomic integer.
  */
 export function findTransferMismatch(
   transfer: DecodedTransfer,
@@ -202,7 +203,7 @@ export function findTransferMismatch(
   if (transfer.instrumentId.id !== want.id || transfer.instrumentId.admin !== want.admin) {
     return "instrument";
   }
-  if (!amountGte(transfer.amount, requirements.amount)) return "amount";
+  if (!amountMatches(transfer.amount, requirements.amount)) return "amount";
   return null;
 }
 

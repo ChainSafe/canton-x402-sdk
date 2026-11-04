@@ -40,7 +40,7 @@ app.use(
       network: "canton:devnet",
       payTo: "merchant::1220…",
       asset: { instrumentId: { id: "Amulet", admin: "DSO::1220…" } },
-      amount: "0.05", // any field can also be a (req) => value resolver
+      amount: "0.05", // whole tokens, NOT atomic units; any field can be a (req) => value
     },
   }),
 );

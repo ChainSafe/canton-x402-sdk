@@ -29,7 +29,7 @@ export interface DecodedTransfer {
   sender: string;
   /** Receiving party — must equal `requirements.payTo`. */
   receiver: string;
-  /** Transfer amount as a decimal string — must be ≥ `requirements.amount`. */
+  /** On-ledger `Decimal`. Equals `requirements.amount` once converted from atomic units. */
   amount: string;
   /** Instrument moved — must equal `requirements.extra.instrumentId`. */
   instrumentId: { id: string; admin: string };

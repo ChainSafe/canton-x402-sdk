@@ -7,24 +7,62 @@ import { requirementsHash } from "../hashing";
 import type { X402PaymentPayload } from "../types/payment";
 import type { X402PaymentRequirements } from "../types/requirements";
 
-/** Decimal string with up to 10 fractional places (matches `amount`). */
+// TWO LAYERS, TWO UNITS. `PaymentRequirements.amount` is an integer string of
+// atomic units; an on-ledger transfer amount is a Daml `Decimal`. Daml's
+// `Decimal` is `Numeric 10` — a fixed ten decimal places — so one atomic unit is
+// 1e-10 of a token, for every Canton instrument rather than for Canton Coin
+// specifically. The spec writes it as "1 CC = 1e10 units" because CC is its
+// example.
+const ATOMIC_PLACES = 10;
+
+/** `PaymentRequirements.amount`: a non-negative integer string of atomic units. */
 export function isValidAmount(amount: string): boolean {
+  return /^\d+$/.test(amount);
+}
+
+/** An on-ledger transfer amount: a non-negative decimal with at most 10 places. */
+export function isValidLedgerAmount(amount: string): boolean {
   return /^\d+(\.\d{1,10})?$/.test(amount);
 }
 
 /**
- * Decimal-safe `a >= b` for x402 amount strings (non-negative, ≤10dp). Compares
- * via integer scaling with BigInt — no float rounding. Returns false if either
- * string is not a valid amount, so a malformed input never reads as "enough".
+ * On-ledger `Decimal` → atomic units. `null` when the input is not a valid
+ * ledger amount, so a malformed value can never compare equal to anything.
  */
-export function amountGte(a: string, b: string): boolean {
-  if (!isValidAmount(a) || !isValidAmount(b)) return false;
-  const [ai, af = ""] = a.split(".");
-  const [bi, bf = ""] = b.split(".");
-  const scale = Math.max(af.length, bf.length);
-  const an = BigInt(ai + af.padEnd(scale, "0"));
-  const bn = BigInt(bi + bf.padEnd(scale, "0"));
-  return an >= bn;
+export function ledgerToAtomic(amount: string): bigint | null {
+  if (!isValidLedgerAmount(amount)) return null;
+  const [whole, frac = ""] = amount.split(".");
+  return BigInt(whole + frac.padEnd(ATOMIC_PLACES, "0"));
+}
+
+/**
+ * Atomic units → on-ledger `Decimal`, trailing zeros trimmed. `null` on a
+ * malformed input. The payer needs this: it quotes in atomic units and hands a
+ * Decimal to the wallet SDK.
+ */
+export function atomicToLedger(amount: string): string | null {
+  if (!isValidAmount(amount)) return null;
+  const padded = amount.padStart(ATOMIC_PLACES + 1, "0");
+  const whole = padded.slice(0, -ATOMIC_PLACES).replace(/^0+(?=\d)/, "");
+  const frac = padded.slice(-ATOMIC_PLACES).replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole;
+}
+
+/**
+ * Does an on-ledger transfer amount equal the quoted atomic amount?
+ *
+ * EQUAL, not at-least. `exact` is the scheme's distinguishing property, and
+ * Rule 4 says the transfer amount MUST equal `paymentRequirements.amount`
+ * converted to Decimal. Accepting an overpayment takes funds the payer cannot
+ * get back.
+ *
+ * Both sides normalise to atomic units first, so `0.30` and `0.3` are the same
+ * amount and a malformed string on either side is never a match.
+ */
+export function amountMatches(ledgerAmount: string, atomicAmount: string): boolean {
+  const got = ledgerToAtomic(ledgerAmount);
+  if (got === null || !isValidAmount(atomicAmount)) return false;
+  return got === BigInt(atomicAmount);
 }
 
 /** True iff `validBefore` (ISO 8601) is unparseable or at/before `now` (expired). */
