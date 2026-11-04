@@ -34,6 +34,9 @@ export interface X402PaymentRequirements<TExtra = Record<string, unknown>> {
   extra?: TExtra;
 }
 
+/** A required string field: present and not empty. */
+const nonEmptyString = v.pipe(v.string(), v.minLength(1));
+
 /**
  * The canton-exact `extra`. `looseObject`, so the keys the spec defines are
  * named and typed while anything else a deployment adds still passes through —
@@ -53,16 +56,19 @@ export type CantonRequirementsExtra = v.InferOutput<typeof CantonRequirementsExt
  * concrete shape, its validator, and its type are one definition.
  */
 export const CantonPaymentRequirementsSchema = v.object({
-  scheme: v.string(),
-  network: v.string(),
-  amount: v.string(),
+  // Every required string is non-empty. Without that the CONCRETE guard was
+  // looser than the ENVELOPE one, which is backwards: `asset: ""` passed
+  // isCantonPaymentRequirements and failed isX402PaymentRequirements.
+  scheme: nonEmptyString,
+  network: nonEmptyString,
+  amount: nonEmptyString,
   /** A symbol: `"CC"`, or a registry token's own. The instrument is in `extra`. */
-  asset: v.string(),
-  payTo: v.string(),
-  resource: v.string(),
+  asset: nonEmptyString,
+  payTo: nonEmptyString,
+  resource: nonEmptyString,
   description: v.optional(v.string()),
-  nonce: v.string(),
-  validBefore: v.string(),
+  nonce: nonEmptyString,
+  validBefore: nonEmptyString,
   maxTimeoutSeconds: v.optional(v.number()),
   extra: CantonRequirementsExtraSchema,
 });
@@ -86,13 +92,13 @@ export function parseCantonPaymentRequirements(input: unknown): CantonPaymentReq
  * X-PAYMENT envelopes.
  */
 export const X402PaymentRequirementsEnvelopeSchema = v.looseObject({
-  scheme: v.pipe(v.string(), v.minLength(1)),
-  network: v.string(),
-  amount: v.pipe(v.string(), v.minLength(1)),
-  payTo: v.pipe(v.string(), v.minLength(1)),
-  nonce: v.pipe(v.string(), v.minLength(1)),
-  validBefore: v.pipe(v.string(), v.minLength(1)),
-  asset: v.pipe(v.string(), v.minLength(1)),
+  scheme: nonEmptyString,
+  network: nonEmptyString,
+  amount: nonEmptyString,
+  payTo: nonEmptyString,
+  nonce: nonEmptyString,
+  validBefore: nonEmptyString,
+  asset: nonEmptyString,
 });
 
 export function isX402PaymentRequirements(x: unknown): x is X402PaymentRequirements<unknown> {
