@@ -23,7 +23,7 @@ holds the state involved:
 2. **Still valid** — `validBefore` is still in the future.
 3. **Bound to your exact terms** — the payload's `requirementsHash` must match
    the requirements it is verified against. That hash covers `payTo`,
-   `maxAmountRequired`, `resource` and `nonce`, so it proves the payload refers
+   `amount`, `resource` and `nonce`, so it proves the payload refers
    to your terms; check 6 proves the signed transfer satisfies them.
 4. **The key belongs to the payer** — the fingerprint derived from the
    payload's `publicKey` must match the `::` suffix of the payer's party id, so

@@ -33,8 +33,9 @@ function buildSignedFixture() {
   const requirements: CantonPaymentRequirements = {
     scheme: "exact",
     network: NETWORK,
-    maxAmountRequired: "0.01",
-    asset: { instrumentId: { id: "Amulet", admin: "DSO::1220dso" } },
+    amount: "0.01",
+    asset: "CC",
+    extra: { instrumentId: { id: "Amulet", admin: "DSO::1220dso" } },
     payTo: "merchant::1220merch",
     resource: "/api/resource",
     nonce: "550e8400-e29b-41d4-a716-446655440000",
@@ -49,8 +50,8 @@ function buildSignedFixture() {
   const preparedTransaction = encodePreparedTransaction({
     sender: payer,
     receiver: requirements.payTo,
-    amount: requirements.maxAmountRequired,
-    instrumentId: requirements.asset.instrumentId,
+    amount: requirements.amount,
+    instrumentId: requirements.extra.instrumentId,
   });
 
   const payload: CantonPaymentPayload = {

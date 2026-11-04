@@ -7,7 +7,7 @@ import { requirementsHash } from "../hashing";
 import type { X402PaymentPayload } from "../types/payment";
 import type { X402PaymentRequirements } from "../types/requirements";
 
-/** Decimal string with up to 10 fractional places (matches `maxAmountRequired`). */
+/** Decimal string with up to 10 fractional places (matches `amount`). */
 export function isValidAmount(amount: string): boolean {
   return /^\d+(\.\d{1,10})?$/.test(amount);
 }

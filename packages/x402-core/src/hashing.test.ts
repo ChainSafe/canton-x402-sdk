@@ -16,8 +16,9 @@ import type { CantonPaymentRequirements } from "./index";
 const REQUIREMENTS: CantonPaymentRequirements = {
   scheme: "exact",
   network: "canton:devnet",
-  maxAmountRequired: "0.01",
-  asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+  amount: "0.01",
+  asset: "CC",
+  extra: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
   resource: "/api/resource",
   nonce: "550e8400-e29b-41d4-a716-446655440000",
@@ -25,13 +26,14 @@ const REQUIREMENTS: CantonPaymentRequirements = {
 };
 
 const GOLDEN_CANONICAL =
-  '{"asset":{"instrumentId":{"admin":"DSO::1220be58c29e","id":"Amulet"}},' +
-  '"maxAmountRequired":"0.01","network":"canton:devnet",' +
+  '{"amount":"0.01","asset":"CC",' +
+  '"extra":{"instrumentId":{"admin":"DSO::1220be58c29e","id":"Amulet"}},' +
+  '"network":"canton:devnet",' +
   '"nonce":"550e8400-e29b-41d4-a716-446655440000","payTo":"merchant::1220dead",' +
   '"resource":"/api/resource","scheme":"exact",' +
   '"validBefore":"2026-01-01T00:00:00.000Z"}';
 
-const GOLDEN_HASH = "8a7526d584c00a70a5e9629b798e246de27f60f72e233e1315793c6d01eeb55e";
+const GOLDEN_HASH = "c690ec7b17fc25933bf1004931143c96605b21f8202997a259c039681ab64ed4";
 
 describe("requirements hashing — facilitator parity", () => {
   it("canonicalizes to the golden string (keys sorted, nested sorted)", () => {
@@ -44,6 +46,7 @@ describe("requirements hashing — facilitator parity", () => {
 
   it("is order-independent (field order in the object doesn't change the hash)", () => {
     const reordered: CantonPaymentRequirements = {
+      extra: REQUIREMENTS.extra,
       validBefore: REQUIREMENTS.validBefore,
       scheme: REQUIREMENTS.scheme,
       resource: REQUIREMENTS.resource,
@@ -51,7 +54,7 @@ describe("requirements hashing — facilitator parity", () => {
       nonce: REQUIREMENTS.nonce,
       asset: REQUIREMENTS.asset,
       network: REQUIREMENTS.network,
-      maxAmountRequired: REQUIREMENTS.maxAmountRequired,
+      amount: REQUIREMENTS.amount,
     };
     expect(requirementsHash(reordered)).toBe(GOLDEN_HASH);
   });

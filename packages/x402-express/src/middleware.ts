@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { randomUUID } from "node:crypto";
 import {
+  assetSymbol,
   isValidAmount,
   decodePaymentHeader,
   type AssetSpec,
@@ -228,6 +229,7 @@ async function buildRequirements(
   if (typeof source === "function") return source(req);
 
   const amount = await resolve(source.amount, req);
+  const instrument = await resolve(source.asset, req);
   if (!isValidAmount(amount)) {
     throw new Error(`paymentRequired: amount "${amount}" is not a valid decimal amount`);
   }
@@ -237,8 +239,11 @@ async function buildRequirements(
   return {
     scheme: await resolve(source.scheme ?? DEFAULT_SCHEME, req),
     network: await resolve(source.network, req),
-    maxAmountRequired: amount,
-    asset: await resolve(source.asset, req),
+    amount,
+    // The merchant declares the instrument; the spec's `asset` is only a
+    // symbol, so the full `{admin, id}` travels where a payer can read it.
+    asset: assetSymbol(instrument.instrumentId),
+    extra: { instrumentId: instrument.instrumentId },
     payTo: await resolve(source.payTo, req),
     resource: source.resource ? await resolve(source.resource, req) : absoluteUrl(req),
     description: source.description ? await resolve(source.description, req) : `Access to ${req.path}`,
@@ -263,14 +268,17 @@ function validateEchoedRequirements(
   // Bind the payment to THIS resource: without it, a payment minted for path A
   // (matching price/payTo/asset) could be replayed against path B.
   if (echoed.resource !== policy.resource) return "policy_resource";
-  if (echoed.asset.instrumentId.id !== policy.asset.instrumentId.id) return "policy_asset";
-  if (echoed.asset.instrumentId.admin !== policy.asset.instrumentId.admin) return "policy_asset";
+  // The instrument, not the symbol: `asset` alone cannot say which registry
+  // issued it, so comparing symbols would admit a look-alike from another.
+  if (echoed.extra.instrumentId.id !== policy.extra.instrumentId.id) return "policy_asset";
+  if (echoed.extra.instrumentId.admin !== policy.extra.instrumentId.admin) return "policy_asset";
+  if (echoed.asset !== policy.asset) return "policy_asset";
   // Validate the amount's FORMAT before comparing: Number("abc") is NaN and
   // Number("Infinity") is Infinity, and both make the "<" test false — so a
   // malformed amount would otherwise slip past the underpricing check.
-  if (!isValidAmount(echoed.maxAmountRequired)) return "policy_amount_invalid";
+  if (!isValidAmount(echoed.amount)) return "policy_amount_invalid";
   // The merchant priced this request; an echoed requirement must not undercut it.
-  if (Number(echoed.maxAmountRequired) < Number(policy.maxAmountRequired)) return "policy_underpriced";
+  if (Number(echoed.amount) < Number(policy.amount)) return "policy_underpriced";
   if (Date.parse(echoed.validBefore) <= Date.now()) return "requirements_expired";
   return null;
 }

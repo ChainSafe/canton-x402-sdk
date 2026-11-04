@@ -24,8 +24,9 @@ const inner: CantonPaymentInner = {
 const requirements: CantonPaymentRequirements = {
   scheme: "exact",
   network: "canton:devnet",
-  maxAmountRequired: "0.01",
-  asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+  amount: "0.01",
+  asset: "CC",
+  extra: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
   resource: "/api/resource",
   nonce: "550e8400-e29b-41d4-a716-446655440000",
@@ -64,7 +65,7 @@ describe("schema-first guards + parsers", () => {
 
   it("rejects wrong field types", () => {
     expect(isCantonPaymentInner({ ...inner, payer: 42 })).toBe(false);
-    expect(isCantonPaymentRequirements({ ...requirements, asset: { instrumentId: { id: "Amulet" } } })).toBe(false);
+    expect(isCantonPaymentRequirements({ ...requirements, extra: { instrumentId: { id: "Amulet" } } })).toBe(false);
   });
 });
 
@@ -86,11 +87,11 @@ describe("generic (loose) vs concrete (canton-exact) verify request", () => {
     paymentRequirements: {
       scheme: "batch-settlement-canton",
       network: "eip155:1",
-      maxAmountRequired: "1000000",
+      amount: "1000000",
       payTo: "0xC0ffee",
       nonce: "n-bridge",
       validBefore: "2999-01-01T00:00:00.000Z",
-      asset: { chainId: 1 },
+      asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     },
   };
 

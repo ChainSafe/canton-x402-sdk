@@ -187,7 +187,7 @@ function verifyCantonExact(
  * transfer satisfies them, or a short field detail (`"sender" | "receiver" |
  * "instrument" | "amount"`) naming the first divergence — surfaced in the
  * `transfer_mismatch` response's `extensions.detail`. Overpayment is allowed
- * (`amount >= maxAmountRequired`); the amount compare is decimal-safe.
+ * (`transfer.amount >= requirements.amount`); the compare is decimal-safe.
  */
 export function findTransferMismatch(
   transfer: DecodedTransfer,
@@ -196,11 +196,13 @@ export function findTransferMismatch(
 ): "sender" | "receiver" | "instrument" | "amount" | null {
   if (transfer.sender !== payer) return "sender";
   if (transfer.receiver !== requirements.payTo) return "receiver";
-  const want = requirements.asset.instrumentId;
+  // From `extra`, not `asset`: the latter is only a symbol, which cannot say
+  // which registry issued the instrument.
+  const want = requirements.extra.instrumentId;
   if (transfer.instrumentId.id !== want.id || transfer.instrumentId.admin !== want.admin) {
     return "instrument";
   }
-  if (!amountGte(transfer.amount, requirements.maxAmountRequired)) return "amount";
+  if (!amountGte(transfer.amount, requirements.amount)) return "amount";
   return null;
 }
 

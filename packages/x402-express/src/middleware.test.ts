@@ -50,8 +50,9 @@ function paymentHeader(overrides: Record<string, unknown> = {}): string {
   const requirements = {
     scheme: "exact",
     network: "canton:x",
-    maxAmountRequired: "0.05",
-    asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+    amount: "0.05",
+    asset: "CC",
+    extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
     payTo: "merchant::x",
     resource: "https://f.example/paid",
     description: "Access",
@@ -97,7 +98,7 @@ describe("paymentRequired", () => {
     app.get("/paid", (_req, res) => res.json({ ok: true }));
     const res = await request(app).get("/paid");
     expect(res.status).toBe(402);
-    expect(res.body.accepts[0].maxAmountRequired).toBe("0.09");
+    expect(res.body.accepts[0].amount).toBe("0.09");
   });
 
   it("uses a merchant-supplied nonce generator (so it can record it)", async () => {
@@ -137,8 +138,9 @@ describe("paymentRequired", () => {
         requirements: () => ({
           scheme: "exact",
           network: "canton:x",
-          maxAmountRequired: "0.05",
-          asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+          amount: "0.05",
+          asset: "CC",
+          extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
           payTo: "merchant::x",
           resource: "/r",
           description: "d",
@@ -160,7 +162,7 @@ describe("paymentRequired", () => {
     expect(res.body.x402Version).toBe(2);
     expect(res.body.error).toBe("payment_required");
     const req0 = res.body.accepts[0];
-    expect(req0).toMatchObject({ payTo: "merchant::x", maxAmountRequired: "0.05", network: "canton:x" });
+    expect(req0).toMatchObject({ payTo: "merchant::x", amount: "0.05", network: "canton:x" });
     expect(typeof req0.nonce).toBe("string");
     expect(Date.parse(req0.validBefore)).toBeGreaterThan(Date.now());
   });
@@ -235,7 +237,7 @@ describe("paymentRequired", () => {
     stubFacilitator();
     const res = await request(makeApp())
       .get("/paid")
-      .set("X-PAYMENT", paymentHeader({ maxAmountRequired: "0.01" }));
+      .set("X-PAYMENT", paymentHeader({ amount: "0.01" }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_underpriced");
   });
@@ -247,10 +249,50 @@ describe("paymentRequired", () => {
     for (const bad of ["abc", "Infinity", "1e3", " 5 "]) {
       const res = await request(makeApp())
         .get("/paid")
-        .set("X-PAYMENT", paymentHeader({ maxAmountRequired: bad }));
+        .set("X-PAYMENT", paymentHeader({ amount: bad }));
       expect(res.status).toBe(402);
       expect(res.body.error).toBe("policy_amount_invalid");
     }
+  });
+
+  it("rejects a look-alike instrument from another registry", async () => {
+    // The symbol is not the instrument. `asset` says "CC" either way, so the
+    // admin — the registry that issued it — is what has to be compared, or a
+    // merchant is paid in a token that merely shares a name.
+    stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set(
+        "X-PAYMENT",
+        paymentHeader({ extra: { instrumentId: { id: "Amulet", admin: "DSO::impostor" } } }),
+      );
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_asset");
+  });
+
+  it("rejects an echoed instrument id that is not the priced one", async () => {
+    // Symbol and admin left alone, so only the id comparison can catch this.
+    stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set(
+        "X-PAYMENT",
+        paymentHeader({ extra: { instrumentId: { id: "USDCx", admin: "DSO::x" } } }),
+      );
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_asset");
+  });
+
+  it("rejects an echoed symbol that is not the priced one", async () => {
+    // The instrument is left alone, so only the symbol comparison catches it.
+    // A merchant quoting CC must not be paid against a quote that says USDCx,
+    // even where the instrument underneath is the one it priced.
+    stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set("X-PAYMENT", paymentHeader({ asset: "USDCx" }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_asset");
   });
 
   it("rejects a payment minted for a different resource (request↔payment binding)", async () => {
@@ -292,7 +334,7 @@ describe("paymentRequired", () => {
       const onReject = vi.fn();
       await request(makeApp({ onReject }))
         .get("/paid")
-        .set("X-PAYMENT", paymentHeader({ maxAmountRequired: "0.01" }));
+        .set("X-PAYMENT", paymentHeader({ amount: "0.01" }));
       expect(onReject.mock.calls[0][0]).toMatchObject({ status: 402, reason: "policy_underpriced" });
     });
 
