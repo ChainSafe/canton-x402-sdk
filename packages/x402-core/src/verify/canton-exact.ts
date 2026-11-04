@@ -101,6 +101,47 @@ export function signHash(hashHex: string, privateKeyBase64: string): string {
   return bytesToHex(ed25519Sign(hexToBytes(hashHex), seed));
 }
 
+// ─── payload encodings ──────────────────────────────────────────────────────
+// The payload carries `preparedTxHash` as lower-case hex and `signature` as
+// base64, which are the spec's encodings. signHash / verifySignature stay in hex
+// because the facilitator's login flow calls them with hex too. The two
+// helpers below convert at the payload boundary, so the hex side never changes.
+
+/** 32 bytes as lower-case hex: the only form `preparedTxHash` takes. */
+const PREPARED_TX_HASH = /^[0-9a-f]{64}$/;
+
+/** Standard alphabet, padded, nothing else. */
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+/**
+ * A hex Ed25519 signature (what {@link signHash} returns) in the base64 form the
+ * payload's `signature` carries.
+ */
+export function signatureToBase64(signatureHex: string): string {
+  return bytesToBase64(hexToBytes(signatureHex));
+}
+
+/**
+ * The payload's `signature` back to hex, for {@link verifySignature}. `null`
+ * unless it is canonical standard base64 of exactly 64 bytes. A hex signature
+ * is valid base64 (its 128 characters decode to 96 bytes), so the length check
+ * is what keeps it from being read as one. Canonical means the encoding
+ * {@link signatureToBase64} produces: no URL-safe alphabet, no missing padding,
+ * no non-zero padding bits.
+ */
+export function signatureFromBase64(signatureBase64: string): string | null {
+  if (!BASE64.test(signatureBase64)) return null;
+  const bytes = base64ToBytes(signatureBase64);
+  if (bytes.length !== 64 || bytesToBase64(bytes) !== signatureBase64) return null;
+  return bytesToHex(bytes);
+}
+
 // ─── canton network-id boundary guard ──────────────────────────────────────
 // NetworkId is a plain string (scheme-generic); this validates the `canton:<name>`
 // form at untrusted boundaries (env, raw input). Shape only — that the name is
@@ -168,8 +209,16 @@ function verifyCantonExact(
   if (!partySuffix || derivedFingerprint.toLowerCase() !== partySuffix.toLowerCase()) {
     return fail("bad_fingerprint", inner.payer);
   }
-  // 8. signature over the prepared-transaction hash
-  if (!verifySignature(inner.preparedTransactionHash, inner.partySignature, inner.publicKey)) {
+  // 8. signature over the prepared-transaction hash. A hash or signature in any
+  //    other encoding cannot be what the ledger checks at execute, so it is a
+  //    bad signature here too, even where the bytes would verify (an upper-case
+  //    hash decodes to the same bytes).
+  const signatureHex = signatureFromBase64(inner.signature);
+  if (
+    !PREPARED_TX_HASH.test(inner.preparedTxHash) ||
+    signatureHex === null ||
+    !verifySignature(inner.preparedTxHash, signatureHex, inner.publicKey)
+  ) {
     return fail("bad_signature", inner.payer);
   }
   // 9. the signed transfer must actually move what the requirements demand.

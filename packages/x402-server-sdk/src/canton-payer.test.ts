@@ -4,6 +4,7 @@ import { sha512 } from "@noble/hashes/sha2.js";
 import {
   fingerprintForPublicKey,
   requirementsHash,
+  signatureFromBase64,
   verifySignature,
   type CantonPaymentRequirements,
 } from "@chainsafe/x402-core";
@@ -77,10 +78,14 @@ describe("CantonX402Payer.authorize", () => {
     expect(inner.publicKey).toBe(publicKeyB64);
     expect(inner.requirementsHash).toBe(requirementsHash(req));
     expect(inner.preparedTransaction).toBe("cHJlcGFyZWQ=");
-    expect(inner.preparedTransactionHash).toBe(Buffer.from(preparedHashB64, "base64").toString("hex"));
+    // The hash goes out as hex and the signature as base64: the spec's encodings.
+    expect(inner.preparedTxHash).toBe(Buffer.from(preparedHashB64, "base64").toString("hex"));
     expect(inner.hashingSchemeVersion).toBe("HASHING_SCHEME_VERSION_V2");
+    expect(Buffer.from(inner.signature, "base64")).toHaveLength(64);
     // The signature verifies with the same code the facilitator runs.
-    expect(verifySignature(inner.preparedTransactionHash, inner.partySignature, publicKeyB64)).toBe(true);
+    const signatureHex = signatureFromBase64(inner.signature);
+    expect(signatureHex).not.toBeNull();
+    expect(verifySignature(inner.preparedTxHash, signatureHex as string, publicKeyB64)).toBe(true);
     // transfer built from the requirements.
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ sender: key.partyId, recipient: "merchant::y", amount: "1.5", instrumentId: "Amulet" }),

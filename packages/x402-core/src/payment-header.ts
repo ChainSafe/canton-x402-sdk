@@ -8,7 +8,7 @@
 //
 //   {
 //     "payment":      { "x402Version": 2, "scheme": "exact", "network": "canton:devnet",
-//                       "payload": { "payer": "…", "partySignature": "…", "requirementsHash": "…" } },
+//                       "payload": { "payer": "…", "signature": "…", "requirementsHash": "…" } },
 //     "requirements": { "scheme": "exact", "nonce": "…", "validBefore": "…", … }
 //   }
 //

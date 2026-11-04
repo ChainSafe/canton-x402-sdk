@@ -42,8 +42,8 @@ describe("x402-core wire types", () => {
       payload: {
         payer: "alice::1220beef",
         preparedTransaction: "cHJlcGFyZWQ=",
-        preparedTransactionHash: "deadbeef",
-        partySignature: "cafe",
+        preparedTxHash: "deadbeef",
+        signature: "cafe",
         requirementsHash: "0f1e2d",
         publicKey: "cHVibGljS2V5",
         hashingSchemeVersion: HashingSchemeVersion.V2,

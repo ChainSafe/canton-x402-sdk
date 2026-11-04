@@ -95,8 +95,8 @@ guarantee.
     "payload": {
       "payer": "buyer::1220…",
       "preparedTransaction": "<base64 blob from interactive-submission/prepare>",
-      "preparedTransactionHash": "<hex of the hash that was signed>",
-      "partySignature": "<hex Ed25519 signature over preparedTransactionHash>",
+      "preparedTxHash": "<lower-case hex of the 32-byte hash that was signed>",
+      "signature": "<base64 Ed25519 signature over preparedTxHash>",
       "requirementsHash": "<sha256 of the canonical paymentRequirements>",
       "publicKey": "<base64 32-byte Ed25519 public key>",
       "hashingSchemeVersion": "HASHING_SCHEME_VERSION_V2"
@@ -126,7 +126,7 @@ guarantee.
 | Field                                       | Rule                                                                                                                                                                                                                                                                           |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `x402Version`                               | Must be exactly `2`, at the top level and inside `paymentPayload`.                                                                                                                                                                                                             |
-| `paymentPayload.payload`                    | The seven fields above, all required. `publicKey` replaced the older `keyFingerprint` — the facilitator derives the fingerprint from the key and matches it against the payer party's `::` suffix.                                                                             |
+| `paymentPayload.payload`                    | The seven fields above, all required except `hashingSchemeVersion`, which means `HASHING_SCHEME_VERSION_V2` when absent. `signature` is canonical base64 of the 64-byte signature and `preparedTxHash` is 64 lower-case hex digits; any other encoding is `bad_signature`. `publicKey` replaced the older `keyFingerprint` — the facilitator derives the fingerprint from the key and matches it against the payer party's `::` suffix. |
 | `requirementsHash`                          | SHA-256 of the RFC 8785 canonicalization of `paymentRequirements`; it must match the requirements sent alongside it. The signature itself covers the prepared transaction, whose sender, receiver, instrument and amount the facilitator checks against `paymentRequirements`. |
 | `amount`                                    | Integer string of atomic units — 1 CC = 1e10, so `"500000000"` is 0.05 CC. **Exact**, not a floor: the transfer must move this amount, and an overpayment is rejected.                                                                                                       |
 | `payTo`                                     | Must be a party your API key owns. Otherwise verify answers `transfer_mismatch` and settle answers `unauthorized`.                                                                                                                                                             |
@@ -181,8 +181,8 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
     "payload": {
       "payer": "buyer::1220…",
       "preparedTransaction": "…",
-      "preparedTransactionHash": "…",
-      "partySignature": "…",
+      "preparedTxHash": "…",
+      "signature": "…",
       "requirementsHash": "…",
       "publicKey": "…",
       "hashingSchemeVersion": "HASHING_SCHEME_VERSION_V2"
@@ -238,8 +238,8 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
     "payload": {
       "payer": "buyer::1220…",
       "preparedTransaction": "<base64 blob from interactive-submission/prepare>",
-      "preparedTransactionHash": "<hex of the hash that was signed>",
-      "partySignature": "<hex Ed25519 signature over preparedTransactionHash>",
+      "preparedTxHash": "<lower-case hex of the 32-byte hash that was signed>",
+      "signature": "<base64 Ed25519 signature over preparedTxHash>",
       "requirementsHash": "<sha256 of the canonical paymentRequirements>",
       "publicKey": "<base64 32-byte Ed25519 public key>",
       "hashingSchemeVersion": "HASHING_SCHEME_VERSION_V2"
