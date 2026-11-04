@@ -5,8 +5,10 @@ import {
   atomicToLedger,
   createCantonExactVerifier,
   createVerifierRegistry,
+  decodePreparedTransaction,
   EXACT_SCHEME_ID,
   fingerprintForPublicKey,
+  gzipPreparedTransaction,
   signatureToBase64,
   signHash,
 } from "./index";
@@ -49,14 +51,16 @@ function buildSignedFixture() {
   const signatureHex = signHash(preparedTxHash, toB64(seed));
 
   // A prepared-transaction blob whose TransferFactory_Transfer matches the
-  // requirements (payer → payTo, the required Amulet, the required amount).
-  // The transfer carries an on-ledger Decimal; the quote is in atomic units.
-  const preparedTransaction = encodePreparedTransaction({
+  // requirements (payer → payTo, the required Amulet, the required amount),
+  // gzipped as the payload carries it. The transfer carries an on-ledger
+  // Decimal; the quote is in atomic units.
+  const protobuf = encodePreparedTransaction({
     sender: payer,
     receiver: requirements.payTo,
     amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
     instrumentId: requirements.extra.instrumentId,
   });
+  const preparedTransaction = gzipPreparedTransaction(Uint8Array.from(atob(protobuf), (c) => c.charCodeAt(0)));
 
   const payload: CantonPaymentPayload = {
     x402Version: 2,
@@ -73,7 +77,7 @@ function buildSignedFixture() {
     },
   };
 
-  return { requirements, payload, payer, signatureHex, seedB64: toB64(seed) };
+  return { requirements, payload, payer, signatureHex, seedB64: toB64(seed), protobuf };
 }
 
 const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -260,6 +264,30 @@ describe("cantonExactVerifier", () => {
       expect(verifier.verify(p, requirements)).toMatchObject({
         isValid: false,
         invalidReason: "internal_error",
+      });
+    }
+  });
+
+  it("reads preparedTransaction only as one gzip member within the caps", () => {
+    const { payload, requirements, protobuf } = buildSignedFixture();
+    const bytes = Buffer.from(protobuf, "base64");
+    // The same transfer padded past the 64 KiB decompressed cap with an unknown
+    // field (15, length-delimited), which the decoder skips. It decodes to the
+    // matching transfer, so only the cap can refuse it; about 100 bytes gzipped.
+    const pad = 70_000;
+    const padded = Buffer.concat([bytes, Buffer.from([(15 << 3) | 2, 0x80 | (pad & 0x7f), 0x80 | ((pad >> 7) & 0x7f), pad >> 14]), Buffer.alloc(pad)]);
+    expect(decodePreparedTransaction(padded.toString("base64"))).not.toBeNull();
+    const overCap = gzipPreparedTransaction(padded);
+    // One gzip member and then a byte: refused by the single-member rule.
+    const trailing = Buffer.concat([Buffer.from(payload.payload.preparedTransaction, "base64"), Buffer.from([0])]).toString("base64");
+    // The protobuf without gzip is what a payer built before this sends.
+    for (const preparedTransaction of [protobuf, overCap, trailing]) {
+      const p = { ...payload, payload: { ...payload.payload, preparedTransaction } };
+      expect(verifier.verify(p, requirements)).toEqual({
+        isValid: false,
+        invalidReason: "transfer_mismatch",
+        payer: payload.payload.payer,
+        extensions: { detail: "undecodable" },
       });
     }
   });

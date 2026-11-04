@@ -6,6 +6,7 @@ import {
   requirementsHash,
   signHash,
   signatureToBase64,
+  gzipPreparedTransaction,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
   type InstrumentId,
@@ -114,7 +115,9 @@ export class CantonX402Payer implements X402Payer {
       network: requirements.network,
       payload: {
         payer: key.partyId,
-        preparedTransaction: response.preparedTransaction,
+        // prepare hands back the protobuf as base64; the payload carries it
+        // gzipped, as the spec defines, which also keeps the header small.
+        preparedTransaction: gzipPreparedTransaction(Buffer.from(response.preparedTransaction, "base64")),
         preparedTxHash,
         signature,
         requirementsHash: requirementsHash(requirements),

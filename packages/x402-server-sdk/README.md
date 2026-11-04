@@ -117,8 +117,8 @@ interface X402Payer {
 - Ed25519-signs the hash with the party key (`x402-core`'s `signHash`, then
   `signatureToBase64`, since the payload carries `signature` as base64 and
   `preparedTxHash` as hex);
-- assembles the payload (`requirementsHash`, required `publicKey`, and the
-  `hashingSchemeVersion` prepare used)
+- assembles the payload (the prepared transaction gzipped with `gzipPreparedTransaction`,
+  `requirementsHash`, required `publicKey`, and the `hashingSchemeVersion` prepare used)
   **without executing** — facilitator derives fingerprint from `publicKey` (`fingerprintForPublicKey`; no `keyFingerprint` on the wire).
 
 `CantonX402Payer` is stateless: double-settle is prevented by the facilitator (it

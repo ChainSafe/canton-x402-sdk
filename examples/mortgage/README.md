@@ -118,9 +118,10 @@ lending policy (`APPROVE_MIN_SCORE`, `MAX_LOAN`, `MAX_LTV`).
 
 ## Notes / gotchas (learned running this on LocalNet)
 
-- **Large `X-PAYMENT` header.** The Canton payment payload (prepared-tx blob + disclosed
-  contracts) is tens of KB, well past Node's default 16 KB header limit — so a merchant
-  server **must** raise `maxHeaderSize` or it rejects the paid request with **431**. The
+- **Large `X-PAYMENT` header.** The Canton payment payload (the gzipped prepared tx with its
+  disclosed contracts) makes the header about 10 KB, much of Node's default 16 KB limit for
+  all headers together — so a merchant server should raise `maxHeaderSize` or a paid request
+  with a few more headers is rejected with **431**. The
   bureau does this via `http.createServer({ maxHeaderSize })` (see `credit-bureau/src/server.ts`).
 - **x402-core version alignment.** The payer and the facilitator must speak the same
   `x402-core` payload contract. A facilitator built against an older `x402-core` rejects a

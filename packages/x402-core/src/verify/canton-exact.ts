@@ -27,6 +27,7 @@ import {
   WIRE_DECIMALS,
 } from "./common";
 import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
+import { gunzipPreparedTransaction } from "./prepared-tx-codec";
 
 // @noble/ed25519 v3 needs sha512 wired (same as the facilitator's wallet.ts).
 ed25519Hashes.sha512 = sha512;
@@ -236,7 +237,10 @@ function verifyCantonExact(
   //    only decoding the prepared transaction proves it *satisfies* them —
   //    binding sender/receiver/instrument/amount so a valid signature over a
   //    divergent transfer (e.g. to another party, or a smaller amount) is rejected.
-  const transfer = decodePreparedTransaction(inner.preparedTransaction);
+  //    The payload carries it gzipped; a member that is malformed or over
+  //    either bound is as undecodable as a bad protobuf.
+  const prepared = gunzipPreparedTransaction(inner.preparedTransaction);
+  const transfer = prepared && decodePreparedTransaction(bytesToBase64(prepared));
   if (!transfer) {
     return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: "undecodable" } };
   }

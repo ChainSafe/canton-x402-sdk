@@ -43,7 +43,7 @@ server (step 4).
    `publicKey`, `requirementsHash`, `hashingSchemeVersion` —
    plus the requirements it was built against are JSON-encoded, base64'd into
    an `X-PAYMENT` header, and the request is retried. That header carries the
-   prepared transaction and its disclosed contracts.
+   prepared transaction, gzipped, with its disclosed contracts.
 
 5. **Merchant verifies, then settles**
 
@@ -66,8 +66,9 @@ server (step 4).
    runs with the verified payer on `req.x402`.
 
 ::: danger Raise your server's max header size
-The `X-PAYMENT` header from step 4 runs to tens of KB — past Node's ~16 KB
-default — so a Node/Express merchant server must set `maxHeaderSize` (e.g.
+The `X-PAYMENT` header from step 4 runs to about 10 KB for a typical transfer —
+much of Node's ~16 KB default, which covers all of a request's headers together
+— so a Node/Express merchant server should set `maxHeaderSize` (e.g.
 `--max-http-header-size`) or the paid retry dies with
 `431 Request Header Fields Too Large` before your handler ever runs. Step 6 of
 [Getting started](/getting-started#wire-up-your-server) shows where it goes.

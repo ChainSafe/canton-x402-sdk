@@ -23,7 +23,11 @@ export type HashingSchemeVersion =
 export const CantonPaymentInnerSchema = v.object({
   /** Paying Canton party ID. */
   payer: v.string(),
-  /** Base64-encoded opaque blob from /v2/interactive-submission/prepare. */
+  /**
+   * The prepared transaction from /v2/interactive-submission/prepare, as base64
+   * of exactly one gzip member ({@link gzipPreparedTransaction}): at most 8 KiB
+   * compressed and 64 KiB decompressed.
+   */
   preparedTransaction: v.string(),
   /**
    * The hash the payer signed: 32 bytes as lower-case hex, no multihash prefix.

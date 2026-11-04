@@ -3,6 +3,7 @@ import { getPublicKey, hashes } from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha2.js";
 import {
   fingerprintForPublicKey,
+  gunzipPreparedTransaction,
   requirementsHash,
   signatureFromBase64,
   verifySignature,
@@ -77,7 +78,11 @@ describe("CantonX402Payer.authorize", () => {
     expect(inner.payer).toBe(key.partyId);
     expect(inner.publicKey).toBe(publicKeyB64);
     expect(inner.requirementsHash).toBe(requirementsHash(req));
-    expect(inner.preparedTransaction).toBe("cHJlcGFyZWQ=");
+    // prepare's protobuf goes out gzipped, and gunzips back to the same bytes.
+    expect(Buffer.from(inner.preparedTransaction, "base64").subarray(0, 2)).toEqual(Buffer.from([0x1f, 0x8b]));
+    expect(gunzipPreparedTransaction(inner.preparedTransaction)).toEqual(
+      new Uint8Array(Buffer.from("cHJlcGFyZWQ=", "base64")),
+    );
     // The hash goes out as hex and the signature as base64: the spec's encodings.
     expect(inner.preparedTxHash).toBe(Buffer.from(preparedHashB64, "base64").toString("hex"));
     expect(inner.hashingSchemeVersion).toBe("HASHING_SCHEME_VERSION_V2");
