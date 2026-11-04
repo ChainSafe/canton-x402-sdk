@@ -7,9 +7,11 @@
 // base64→Uint8Array decode. Only the narrow field path we need is walked; every
 // other field is skipped, so we don't vendor the full Canton proto closure.
 // Every message on that path must be canonically encoded (`assertCanonical`,
-// `assertSingleField`), the wire format is read as strictly as protobuf-java
-// reads it (`StrictReader`), and only the node tree under the roots is read, so
-// this walker and Canton read the same transaction.
+// `assertSingleField`), the wire format is framed the way protobuf-java frames
+// it (`StrictReader`), and only the node tree under the roots is read. So
+// whenever Canton accepts the bytes, this walker reads the same transaction
+// from them. (It may still accept some malformed bytes Canton refuses; those
+// fail at settlement.)
 //
 // Envelope (see canton interactive_submission_service.proto + _data.proto):
 //   PreparedTransaction{1: transaction}
@@ -50,6 +52,9 @@ const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
  * with) wherever the two would otherwise read the same bytes differently:
  * - a tag or length is a varint of at most 5 bytes. protobufjs skips a fixed
  *   10 bytes for a longer one, Java reads on to its terminator.
+ * - a skipped varint value ends within 10 bytes. protobufjs reads on to the
+ *   terminator however far it is, while protobuf-java 4.34+ ends a 64-bit
+ *   varint at its 10th byte even when that byte asks for more.
  * - a string is valid UTF-8, BOM included. protobufjs drops stray bytes.
  * - groups (deprecated, never emitted by Canton) are refused. protobufjs ends
  *   one at any end-group tag, Java only at the matching one.
@@ -68,6 +73,15 @@ class StrictReader extends Reader {
 
   override string(): string {
     return UTF8.decode(this.bytes());
+  }
+
+  override skip(length?: number): Reader {
+    if (length !== undefined) return super.skip(length);
+    for (let i = 0; i < 10; i++) {
+      if (this.pos >= this.len) throw new Error("truncated varint");
+      if (this.buf[this.pos++] < 0x80) return this;
+    }
+    throw new Error("varint longer than 10 bytes");
   }
 
   override skipType(wireType: number): Reader {

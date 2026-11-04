@@ -97,6 +97,9 @@ describe("decodePreparedTransaction on a non-canonical encoding", () => {
     ["a length written as a 6-byte varint", [0xa2, 0x06, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00, 0, 0, 0, 0]],
     // Field 100 as a group: protobufjs ends it at any end-group tag.
     ["a group", [0xa3, 0x06, 0xa4, 0x06]],
+    // Exercise.consuming as a varint whose 10th byte keeps its continuation
+    // bit: protobufjs reads on to the 11th, protobuf-java 4.34+ stops at the 10th.
+    ["a varint value that runs past 10 bytes", [0x58, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x81, 0x00]],
   ];
 
   it.each(wireCases)("returns null for %s", (_, bytes) => {
