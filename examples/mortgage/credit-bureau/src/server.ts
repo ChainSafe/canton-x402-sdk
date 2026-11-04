@@ -22,6 +22,7 @@ import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "@chainsafe/x402-express";
 import {
   amuletAsset,
+  ledgerToAtomic,
   DEVNET_DSO_PARTY,
   DEVNET_NETWORK,
   LOCALNET_NETWORK,
@@ -43,7 +44,13 @@ const def = networkDefaults();
 const NETWORK_ID = process.env.NETWORK_ID?.trim() || def.networkId;
 const DSO_PARTY = process.env.DSO_PARTY?.trim() || def.dso;
 const BUREAU_PARTY = process.env.BUREAU_PARTY;
+// Priced in CC, because that is what a human sets. The middleware wants atomic
+// units (1 CC = 1e10), so converting is this app's job, not the SDK's.
 const PRICE_CC = process.env.PRICE_CC ?? "0.05";
+const PRICE_ATOMIC = ledgerToAtomic(PRICE_CC);
+if (PRICE_ATOMIC === null) {
+  throw new Error(`credit-bureau: PRICE_CC "${PRICE_CC}" is not a decimal amount (≤10 places).`);
+}
 const PORT = Number(process.env.BUREAU_PORT ?? 4001);
 const FACILITATOR_URL = process.env.FACILITATOR_URL;
 const FACILITATOR_API_KEY = process.env.FACILITATOR_API_KEY;
@@ -105,7 +112,7 @@ app.use(
       network: NETWORK_ID,
       payTo: BUREAU_PARTY,
       asset: amuletAsset(DSO_PARTY),
-      amount: PRICE_CC,
+      amount: PRICE_ATOMIC.toString(),
       description: "Credit-score pull",
     },
   }),

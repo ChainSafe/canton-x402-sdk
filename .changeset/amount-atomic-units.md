@@ -21,10 +21,16 @@ specifically — Daml's `Decimal` is `Numeric 10`, a fixed ten decimal places.
 scheme's distinguishing property, and a payer who signs for more than was quoted
 loses the difference with no refund path.
 
-**The merchant keeps pricing in whole tokens.** A route still declares
-`amount: "0.05"` meaning 0.05 CC; the middleware converts. Getting these two the
-wrong way round misprices by 1e10, so the option is documented as whole tokens
-and the conversion has its own test.
+**One unit everywhere, including the merchant's own options.** A route now
+declares `amount: "500000000"` rather than `"0.05"`, and the middleware does not
+convert.
+
+The alternative — keeping merchants in CC and converting — was rejected because
+`paymentRequired` takes either a declarative spec or a
+`(req) => CantonPaymentRequirements` builder under the **same** key, and both
+type `amount` as a string. A merchant moving from one to the other would carry
+`"0.05"` across and silently underquote by 1e10. With one unit there is nothing
+to carry wrong, and a decimal is now refused rather than misread.
 
 New in `@chainsafe/x402-core`:
 

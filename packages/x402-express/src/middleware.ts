@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import {
   assetSymbol,
   isValidAmount,
-  ledgerToAtomic,
   decodePaymentHeader,
   type AssetSpec,
   type CantonPaymentPayload,
@@ -29,10 +28,10 @@ export interface RequirementsSpec {
   /** Network id — on Canton a `canton:<name>` from x402-core's networks. */
   network: Resolvable<string>;
   /**
-   * Price in WHOLE TOKENS as a decimal string (`"0.05"` is 0.05 CC), at most
-   * ten places. Not atomic units — the middleware converts, because the wire's
-   * `amount` is atomic and getting the two the wrong way round misprices by
-   * 1e10.
+   * Price in **atomic units**, as an integer string: 1 CC = 1e10, so
+   * `"500000000"` is 0.05 CC. The same unit the wire carries — the middleware
+   * does not convert, so a quote means the same thing here as in a
+   * {@link RequirementsBuilder} or in an echoed requirement.
    */
   amount: Resolvable<string>;
   /** Scheme id. Default `exact`. */
@@ -143,7 +142,7 @@ class PaymentRejection extends Error {
  *     network: "canton:devnet",
  *     payTo: "merchant::1220…",
  *     asset: { instrumentId: { id: "Amulet", admin: "DSO::1220…" } },
- *     amount: "0.05", // whole tokens — converted to atomic units on the wire
+ *     amount: "500000000", // atomic units — 1 CC = 1e10, so this is 0.05 CC
  *   },
  * }));
  */
@@ -234,13 +233,11 @@ async function buildRequirements(
   const source = options.requirements;
   if (typeof source === "function") return source(req);
 
-  const priced = await resolve(source.amount, req);
+  const amount = await resolve(source.amount, req);
   const instrument = await resolve(source.asset, req);
-  // The merchant prices in whole tokens; the wire carries atomic units.
-  const amount = ledgerToAtomic(priced);
-  if (amount === null) {
+  if (!isValidAmount(amount)) {
     throw new Error(
-      `paymentRequired: amount "${priced}" is not a valid decimal amount (≤10 places)`,
+      `paymentRequired: amount "${amount}" is not an integer string of atomic units`,
     );
   }
   const validForSeconds = source.validForSeconds
@@ -249,7 +246,7 @@ async function buildRequirements(
   return {
     scheme: await resolve(source.scheme ?? DEFAULT_SCHEME, req),
     network: await resolve(source.network, req),
-    amount: amount.toString(),
+    amount,
     // The merchant declares the instrument; the spec's `asset` is only a
     // symbol, so the full `{admin, id}` travels where a payer can read it.
     asset: assetSymbol(instrument.instrumentId),

@@ -36,11 +36,12 @@ app.use(
   paymentRequired({
     facilitator,
     settle: true, // capture the payment after a valid verify (default: false)
+    // Any field below can also be a (req) => value resolver.
     requirements: {
       network: "canton:devnet",
       payTo: "merchant::1220…",
       asset: { instrumentId: { id: "Amulet", admin: "DSO::1220…" } },
-      amount: "0.05", // whole tokens, NOT atomic units; any field can be a (req) => value
+      amount: "500000000", // atomic units: 1 CC = 1e10, so this is 0.05 CC
     },
   }),
 );
@@ -72,7 +73,8 @@ const { paymentRequired } = require("@chainsafe/x402-express");
 Verification uses the **client-signed** requirements (echoed in `X-PAYMENT`), not
 freshly-rebuilt ones, so the payload's `requirementsHash` binds correctly. The
 echoed set is validated against merchant policy (scheme, network, `payTo`, asset,
-and not under the priced amount, not expired) before use.
+and not under the priced amount, not expired) before use. Amounts are atomic
+units throughout — the same unit the wire carries.
 
 ## Options
 

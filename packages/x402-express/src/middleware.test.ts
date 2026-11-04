@@ -15,7 +15,7 @@ const baseOptions: PaymentRequiredOptions = {
     network: "canton:x",
     payTo: "merchant::x",
     asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
-    amount: "0.05",
+    amount: "500000000",
     // Fixed resource so the rebuilt policy matches the echoed header deterministically
     // (default is absoluteUrl(req), whose host/port vary per test run).
     resource: "https://f.example/paid",
@@ -91,24 +91,65 @@ describe("paymentRequired", () => {
           network: "canton:x",
           payTo: "merchant::x",
           asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
-          amount: (req) => (req.method === "GET" ? "0.09" : "0.01"),
+          amount: (req) => (req.method === "GET" ? "900000000" : "100000000"),
         },
       }),
     );
     app.get("/paid", (_req, res) => res.json({ ok: true }));
     const res = await request(app).get("/paid");
     expect(res.status).toBe(402);
-    // The resolver returns the merchant's price in CC; the wire carries atomic.
     expect(res.body.accepts[0].amount).toBe("900000000");
   });
 
-  it("converts the merchant's price to atomic units on the wire", async () => {
-    // The merchant keeps pricing in whole tokens. Getting this backwards
-    // misprices by 1e10, so it is pinned on its own rather than incidentally.
+  it("catches an underpayment above Number.MAX_SAFE_INTEGER", async () => {
+    // Atomic units are 1e10 larger than the price, so a realistic CC amount can
+    // exceed what a double represents. 2^53+1 and 2^53 are distinct atomic
+    // amounts that collapse to the same double, so a Number compare reads the
+    // underpayment as equal and lets it through. ~900,719.93 CC.
+    const policy = "9007199254740993";
+    const echoed = "9007199254740992";
     stubFacilitator();
-    const res = await request(makeApp()).get("/paid");
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::x",
+          asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+          amount: policy,
+          resource: "https://f.example/paid",
+        },
+      }),
+    );
+    app.get("/paid", (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get("/paid").set("X-PAYMENT", paymentHeader({ amount: echoed }));
     expect(res.status).toBe(402);
-    expect(res.body.accepts[0].amount).toBe("500000000"); // 0.05 CC
+    expect(res.body.error).toBe("policy_underpriced");
+  });
+
+  it("rejects a decimal amount rather than quietly misreading it", async () => {
+    // One unit everywhere: a merchant who writes "0.05" meaning 0.05 CC is
+    // 1e10 out. The spec's unit is atomic, so the mistake is refused loudly
+    // instead of quoting 5e-12 CC.
+    stubFacilitator();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::x",
+          asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+          amount: "0.05", // CC, where atomic units are expected
+        },
+      }),
+    );
+    app.get("/paid", (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(500);
   });
 
   it("uses a merchant-supplied nonce generator (so it can record it)", async () => {
@@ -123,7 +164,7 @@ describe("paymentRequired", () => {
           network: "canton:x",
           payTo: "merchant::x",
           asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
-          amount: "0.05",
+          amount: "500000000",
           nonce: () => {
             const n = `merchant-nonce-${seen.length}`;
             seen.push(n);
