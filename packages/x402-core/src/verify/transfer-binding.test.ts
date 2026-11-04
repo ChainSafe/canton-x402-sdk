@@ -1,71 +1,67 @@
 import { describe, it, expect } from "vitest";
-import { amountMatches, atomicToLedger, ledgerToAtomic } from "./common";
+import { atomicToLedger, ledgerToAtomic, WIRE_DECIMALS } from "./common";
 import { findTransferMismatch } from "./canton-exact";
 import type { DecodedTransfer } from "./prepared-tx";
 import type { CantonPaymentRequirements } from "../types/requirements";
 
+const CC = WIRE_DECIMALS;
+
 describe("atomic ↔ ledger conversion", () => {
   it("converts a ledger Decimal to atomic units", () => {
-    expect(ledgerToAtomic("1")).toBe(10_000_000_000n);
-    expect(ledgerToAtomic("0.05")).toBe(500_000_000n);
-    expect(ledgerToAtomic("0.0000000001")).toBe(1n); // one atomic unit
-    expect(ledgerToAtomic("0")).toBe(0n);
+    expect(ledgerToAtomic("1", CC)).toBe(10_000_000_000n);
+    expect(ledgerToAtomic("0.05", CC)).toBe(500_000_000n);
+    expect(ledgerToAtomic("0.0000000001", CC)).toBe(1n); // one atomic unit
+    expect(ledgerToAtomic("0", CC)).toBe(0n);
   });
 
   it("treats trailing zeros as the same amount", () => {
-    expect(ledgerToAtomic("0.30")).toBe(ledgerToAtomic("0.3"));
-    expect(ledgerToAtomic("1.0000000000")).toBe(ledgerToAtomic("1"));
+    expect(ledgerToAtomic("0.30", CC)).toBe(ledgerToAtomic("0.3", CC));
+    expect(ledgerToAtomic("1.0000000000", CC)).toBe(ledgerToAtomic("1", CC));
   });
 
   it("round-trips", () => {
     for (const atomic of ["0", "1", "500000000", "10000000000", "123456789012345"]) {
-      expect(ledgerToAtomic(atomicToLedger(atomic) as string)?.toString()).toBe(atomic);
+      expect(ledgerToAtomic(atomicToLedger(atomic, CC) as string, CC)?.toString()).toBe(atomic);
     }
   });
 
   it("trims trailing zeros going back to Decimal", () => {
-    expect(atomicToLedger("10000000000")).toBe("1");
-    expect(atomicToLedger("500000000")).toBe("0.05");
-    expect(atomicToLedger("1")).toBe("0.0000000001");
-    expect(atomicToLedger("0")).toBe("0");
+    expect(atomicToLedger("10000000000", CC)).toBe("1");
+    expect(atomicToLedger("500000000", CC)).toBe("0.05");
+    expect(atomicToLedger("1", CC)).toBe("0.0000000001");
+    expect(atomicToLedger("0", CC)).toBe("0");
+  });
+
+  it("refuses more precision than the instrument has", () => {
+    // Six-place instrument, seven-place amount: converting would silently drop
+    // a digit, so it is refused instead.
+    expect(ledgerToAtomic("1.1234567", 6)).toBeNull();
+    expect(ledgerToAtomic("1.123456", 6)).toBe(1_123_456n);
+  });
+
+  it("uses one scale for every instrument on the wire", () => {
+    // USDC is six decimals on EVM and ten here: the unit follows the Daml
+    // Decimal representation, not the token's native denomination.
+    expect(WIRE_DECIMALS).toBe(10);
+    expect(ledgerToAtomic("1", WIRE_DECIMALS)).toBe(10_000_000_000n);
+  });
+
+  it("scales by the decimals it is given", () => {
+    expect(ledgerToAtomic("1", 6)).toBe(1_000_000n);
+    expect(ledgerToAtomic("1", 10)).toBe(10_000_000_000n);
+    expect(atomicToLedger("1000000", 6)).toBe("1");
+    expect(atomicToLedger("1000000", 10)).toBe("0.0001");
   });
 
   it("returns null rather than a wrong number on malformed input", () => {
     // Never throw and never coerce — a bad value that parsed as 0 would read as
     // a free payment.
     for (const bad of ["abc", "-1", "1e3", " 5 ", "0.30000000000", ""]) {
-      expect(ledgerToAtomic(bad)).toBeNull();
+      expect(ledgerToAtomic(bad, CC)).toBeNull();
     }
     for (const bad of ["abc", "-1", "1.5", "1e3", ""]) {
-      expect(atomicToLedger(bad)).toBeNull();
+      expect(atomicToLedger(bad, CC)).toBeNull();
     }
-  });
-});
-
-describe("amountMatches — EQUAL, across the unit boundary", () => {
-  it("matches a ledger Decimal against the quoted atomic amount", () => {
-    expect(amountMatches("0.05", "500000000")).toBe(true);
-    expect(amountMatches("0.050", "500000000")).toBe(true); // trailing zero
-    expect(amountMatches("1", "10000000000")).toBe(true);
-  });
-
-  it("refuses an overpayment — `exact` means exact (Rule 4)", () => {
-    // The old behaviour accepted this. A payer who signs for more than was
-    // quoted loses the difference with no refund path.
-    expect(amountMatches("0.06", "500000000")).toBe(false);
-    expect(amountMatches("0.0500000001", "500000000")).toBe(false);
-  });
-
-  it("refuses an underpayment", () => {
-    expect(amountMatches("0.04", "500000000")).toBe(false);
-    expect(amountMatches("0.0499999999", "500000000")).toBe(false);
-  });
-
-  it("refuses a malformed amount on either side", () => {
-    expect(amountMatches("abc", "500000000")).toBe(false);
-    expect(amountMatches("0.05", "abc")).toBe(false);
-    expect(amountMatches("0.05", "0.05")).toBe(false); // a Decimal where atomic was expected
-    expect(amountMatches("Infinity", "0")).toBe(false);
   });
 });
 
@@ -105,6 +101,19 @@ describe("findTransferMismatch", () => {
     expect(findTransferMismatch({ ...ok, instrumentId: { id: "USDC", admin: "DSO::1220be58c29e" } }, requirements, PAYER)).toBe("instrument");
     expect(findTransferMismatch({ ...ok, instrumentId: { id: "Amulet", admin: "evil::1220" } }, requirements, PAYER)).toBe("instrument");
     expect(findTransferMismatch({ ...ok, amount: "0.009" }, requirements, PAYER)).toBe("amount");
+  });
+
+  it("rejects a malformed transfer amount rather than reading it as zero", () => {
+    for (const bad of ["abc", "-1", "1e3", "0.30000000000", ""]) {
+      expect(findTransferMismatch({ ...ok, amount: bad }, requirements, PAYER)).toBe("amount");
+    }
+  });
+
+  it("rejects a quote that is not in atomic units", () => {
+    // "0.01" is a valid ledger Decimal but not a valid quote. Reading it as a
+    // quote would compare 1e8 atomic against 0.01 and never match.
+    const decimalQuote = { ...requirements, amount: "0.01" };
+    expect(findTransferMismatch(ok, decimalQuote, PAYER)).toBe("amount");
   });
 
   it("checks sender against the payload payer, not the transfer's own claim", () => {

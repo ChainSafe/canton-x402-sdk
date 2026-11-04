@@ -52,7 +52,7 @@ function buildSignedFixture() {
   const preparedTransaction = encodePreparedTransaction({
     sender: payer,
     receiver: requirements.payTo,
-    amount: atomicToLedger(requirements.amount) as string,
+    amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
     instrumentId: requirements.extra.instrumentId,
   });
 

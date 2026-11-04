@@ -1,6 +1,7 @@
 import {
   EXACT_SCHEME_ID,
   isExpired,
+  WIRE_DECIMALS,
   atomicToLedger,
   requirementsHash,
   signHash,
@@ -76,7 +77,7 @@ export class CantonX402Payer implements X402Payer {
 
     // Per-request validity — not a capability, so checked here rather than in supports().
     // Quoted in atomic units; the wallet SDK builds the transfer in Decimal.
-    const ledgerAmount = atomicToLedger(requirements.amount);
+    const ledgerAmount = atomicToLedger(requirements.amount, WIRE_DECIMALS);
     if (ledgerAmount === null) {
       throw new Error(`x402: invalid amount "${requirements.amount}" (expected atomic units)`);
     }
