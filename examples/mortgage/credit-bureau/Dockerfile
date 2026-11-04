@@ -2,8 +2,10 @@
 # depends on the workspace @chainsafe/x402-* packages, so we install the workspace and
 # build those packages, then run the bureau with tsx. (Once the packages are published
 # to npm, this could install them directly instead of building from source.)
-FROM node:20-slim
-RUN corepack enable
+FROM node:26-slim
+# Node 25+ no longer ships corepack, so pnpm comes from npm, pinned to
+# package.json's "packageManager".
+RUN npm install -g pnpm@10.32.0
 WORKDIR /repo
 
 COPY . .

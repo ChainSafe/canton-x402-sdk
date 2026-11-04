@@ -132,6 +132,35 @@ jobs:
             gh api --method POST "repos/$REPO/issues/$PR/comments" -F body=@coverage/summary.md >/dev/null
           fi
 
+  # `verify` runs on the `.nvmrc` version. The packages promise less than that
+  # (`engines` is >=22.2, the first 22 with `zlib.crc32`), so build and test on
+  # the oldest Node they promise too, or the floor is never exercised.
+  minimum-node:
+    name: build · test on the minimum Node
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.2.0"
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
   changeset:
     name: changeset present
     # Every PR that touches packages/** must carry a changeset (use
