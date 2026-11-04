@@ -20,7 +20,7 @@ export interface AuthDefaults {
  * network id (for `X402Payer`) + the ledger endpoint + auth defaults.
  */
 export interface CantonNetworkConfig {
-  /** Network id — one of `canton:mainnet|testnet|devnet`. */
+  /** Network id — a `canton:<name>` from x402-core's networks. */
   network: NetworkId;
   /** JSON Ledger API base URL (`SDK.create({ ledgerClientUrl })`). */
   ledgerClientUrl: string;

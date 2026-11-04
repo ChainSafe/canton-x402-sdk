@@ -24,7 +24,7 @@ export interface RequirementsSpec {
   payTo: Resolvable<string>;
   /** Asset to charge in. */
   asset: Resolvable<AssetSpec>;
-  /** Network id — on Canton one of `canton:mainnet|testnet|devnet`. */
+  /** Network id — on Canton a `canton:<name>` from x402-core's networks. */
   network: Resolvable<string>;
   /** Price (decimal string). */
   amount: Resolvable<string>;

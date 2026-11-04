@@ -150,8 +150,8 @@ re-readable — a value like a string, JSON, `Buffer`, or `URLSearchParams`, not
 ## Config presets
 
 `localnetConfig` / `devnetConfig` / `mainnetConfig` return `{ network, ledgerClientUrl, auth }`
-to feed `SDK.create`. LocalNet defaults the localhost ledger URL (network id is
-per-instance, so pass it); DevNet/MainNet fill the network id from `x402-core` and
+to feed `SDK.create`. LocalNet needs no arguments — it defaults the localhost ledger
+URL and `canton:localnet`; DevNet/MainNet fill the network id from `x402-core` and
 take your participant's ledger URL. Every field is overridable. **Registries are not
 here** — they're asset-specific (Amulet vs USDCx), so you pass them to `CantonX402Payer`.
 

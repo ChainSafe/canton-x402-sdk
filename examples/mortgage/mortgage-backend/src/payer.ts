@@ -95,7 +95,8 @@ function authConfig(net: CantonNetworkConfig): TokenProviderConfig {
 
 /** DSO party (Amulet asset admin) — defaulted per network; LocalNet passes it. */
 function dsoParty(): string {
-  if (process.env.DSO_PARTY) return process.env.DSO_PARTY;
+  const fromEnv = process.env.DSO_PARTY?.trim();
+  if (fromEnv) return fromEnv;
   if (NETWORK === "devnet") return DEVNET_DSO_PARTY;
   if (NETWORK === "mainnet") return MAINNET_DSO_PARTY;
   return req(undefined, "DSO_PARTY");

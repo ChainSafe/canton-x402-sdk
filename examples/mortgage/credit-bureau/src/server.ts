@@ -40,8 +40,8 @@ function networkDefaults(): { networkId: string; dso?: string } {
   return { networkId: LOCALNET_NETWORK };
 }
 const def = networkDefaults();
-const NETWORK_ID = process.env.NETWORK_ID ?? def.networkId;
-const DSO_PARTY = process.env.DSO_PARTY ?? def.dso;
+const NETWORK_ID = process.env.NETWORK_ID?.trim() || def.networkId;
+const DSO_PARTY = process.env.DSO_PARTY?.trim() || def.dso;
 const BUREAU_PARTY = process.env.BUREAU_PARTY;
 const PRICE_CC = process.env.PRICE_CC ?? "0.05";
 const PORT = Number(process.env.BUREAU_PORT ?? 4001);

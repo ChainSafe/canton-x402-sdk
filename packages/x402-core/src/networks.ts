@@ -36,8 +36,9 @@ const MAINNET_SYNCHRONIZER_FP =
 export const MAINNET_SYNCHRONIZER_ID = `${SYNCHRONIZER_HINT}::${MAINNET_SYNCHRONIZER_FP}`;
 export const MAINNET_DSO_PARTY = `DSO::${MAINNET_SYNCHRONIZER_FP}`;
 
-// No TestNet or LocalNet constants: we run neither, and LocalNet allocates its
-// DSO at runtime.
+// No TestNet or LocalNet fingerprint: we run neither, and a LocalNet instance
+// allocates its DSO at runtime. Their network ids are above — a name needs no
+// fingerprint, which is the point of the split.
 
 /** Amulet (Canton Coin) instrument for a given DSO admin party. */
 export function amuletAsset(dsoParty: string): AssetSpec {

@@ -205,9 +205,9 @@ export function findTransferMismatch(
 }
 
 /**
- * Build an canton-exact {@link SchemeVerifier} bound to one Canton network (a
- * registered `canton:mainnet|testnet|devnet` name — see ../networks). The
- * registry dispatches on `(schemeId, networkId)`.
+ * Build a canton-exact {@link SchemeVerifier} bound to one Canton network (a
+ * `canton:<name>` — see ../networks). The registry dispatches on
+ * `(schemeId, networkId)`.
  *
  * Accepts that scheme id and that network id only; there is no alias set.
  */

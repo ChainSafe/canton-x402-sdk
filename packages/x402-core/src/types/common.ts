@@ -18,8 +18,8 @@ export type X402Version = 2;
 
 /**
  * Network identifier carried in the (scheme-generic) envelope. Its concrete
- * format is scheme-dependent — on Canton it is one of the registered names
- * `canton:mainnet|testnet|devnet`, while other schemes (e.g. an EVM bridge) use
+ * format is scheme-dependent — on Canton it is a `canton:<name>` (see
+ * ../networks), while other schemes (e.g. an EVM bridge) use
  * their own CAIP-2 id (`eip155:<chainId>`) — so the shared type stays a plain
  * string. The `canton:` shape is validated at runtime by the canton-exact verify
  * path (#5), not enforced here.
