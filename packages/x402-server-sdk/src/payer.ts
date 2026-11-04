@@ -3,7 +3,7 @@ import type { CantonPaymentPayload, CantonPaymentRequirements } from "@chainsafe
 /**
  * Scheme-agnostic payer contract. The auto-pay fetch wrapper depends on this, not
  * on a specific implementation, so a future scheme's payer drops in without
- * touching it. `CantonX402Payer` (canton-payer.ts) is the exact-canton implementation.
+ * touching it. `CantonX402Payer` (canton-payer.ts) is the canton-exact implementation.
  */
 export interface X402Payer {
   /** Whether this payer can satisfy a requirement (scheme + network + asset). */

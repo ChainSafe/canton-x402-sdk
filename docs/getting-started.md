@@ -53,7 +53,7 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
 
 4. **Find your network and asset**
 
-   Call `GET $FACILITATOR_URL/v2/supported` once — the `exact-canton` entry
+   Call `GET $FACILITATOR_URL/v2/supported` once — the `exact` entry
    in its `kinds` array carries the `network` id this facilitator settles on
    and `extra.asset.instrumentId.admin`, the DSO party that admins Amulet. You
    pass both to the middleware below. The integration panel already has them,

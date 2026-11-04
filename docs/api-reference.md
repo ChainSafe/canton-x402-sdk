@@ -32,8 +32,8 @@ None required. There is no request body.
   "kinds": [
     {
       "x402Version": 2,
-      "scheme": "exact-canton",
-      "network": "canton:1220be58c2…",
+      "scheme": "exact",
+      "network": "canton:devnet",
       "extra": {
         "asset": {
           "instrumentId": {
@@ -52,8 +52,8 @@ None required. There is no request body.
 | Field                      | Meaning                                                                                                                                                                                    |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `kinds[]`                  | One entry per (scheme, network) pair the deployment settles. A deployment on one Canton network returns exactly one.                                                                       |
-| `scheme`                   | `exact-canton` for Canton Coin. Copy into `paymentRequirements.scheme`.                                                                                                                    |
-| `network`                  | `canton:` plus the synchronizer id's namespace, the part after `::` (`global-domain::1220…` becomes `canton:1220…`). Copy into `paymentRequirements.network`.                              |
+| `scheme`                   | `exact` — the scheme id defined by the registered Canton scheme spec. Copy into `paymentRequirements.scheme`.                                                                              |
+| `network`                  | A network name: `canton:mainnet`, `canton:testnet`, `canton:devnet` or `canton:localnet`. It does not carry the synchronizer id — read it from here rather than deriving it.              |
 | `extra.asset.instrumentId` | The asset to price in — `{ id, admin }`. `admin` is the network's DSO party: it admins Amulet, and the facilitator checks payments against it, so configure from here rather than by hand. |
 
 ### curl
@@ -90,8 +90,8 @@ guarantee.
   "x402Version": 2,
   "paymentPayload": {
     "x402Version": 2,
-    "scheme": "exact-canton",
-    "network": "canton:1220be58c2…",
+    "scheme": "exact",
+    "network": "canton:devnet",
     "payload": {
       "payer": "buyer::1220…",
       "preparedTransaction": "<base64 blob from interactive-submission/prepare>",
@@ -103,8 +103,8 @@ guarantee.
     }
   },
   "paymentRequirements": {
-    "scheme": "exact-canton",
-    "network": "canton:1220be58c2…",
+    "scheme": "exact",
+    "network": "canton:devnet",
     "maxAmountRequired": "0.05",
     "asset": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
     "payTo": "merchant::1220…",
@@ -167,8 +167,8 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
   "x402Version": 2,
   "paymentPayload": {
     "x402Version": 2,
-    "scheme": "exact-canton",
-    "network": "canton:1220be58c2…",
+    "scheme": "exact",
+    "network": "canton:devnet",
     "payload": {
       "payer": "buyer::1220…",
       "preparedTransaction": "…",
@@ -180,8 +180,8 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
     }
   },
   "paymentRequirements": {
-    "scheme": "exact-canton",
-    "network": "canton:1220be58c2…",
+    "scheme": "exact",
+    "network": "canton:devnet",
     "maxAmountRequired": "0.05",
     "asset": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
     "payTo": "merchant::1220…",
@@ -219,8 +219,8 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
   "x402Version": 2,
   "paymentPayload": {
     "x402Version": 2,
-    "scheme": "exact-canton",
-    "network": "canton:1220be58c2…",
+    "scheme": "exact",
+    "network": "canton:devnet",
     "payload": {
       "payer": "buyer::1220…",
       "preparedTransaction": "<base64 blob from interactive-submission/prepare>",
@@ -232,8 +232,8 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
     }
   },
   "paymentRequirements": {
-    "scheme": "exact-canton",
-    "network": "canton:1220be58c2…",
+    "scheme": "exact",
+    "network": "canton:devnet",
     "maxAmountRequired": "0.05",
     "asset": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
     "payTo": "merchant::1220…",
@@ -252,7 +252,7 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
 ```json
 {
   "success": true,
-  "network": "canton:1220be58c2…",
+  "network": "canton:devnet",
   "transaction": "1220a3f…",
   "completionOffset": "42",
   "payer": "buyer::1220…",

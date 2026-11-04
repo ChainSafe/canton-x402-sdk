@@ -8,7 +8,7 @@ import { createX402Fetch, type FetchLike } from "./fetch";
 import type { X402Payer } from "./payer";
 
 const requirements = {
-  scheme: "exact-canton",
+  scheme: "exact",
   network: "canton:x",
   maxAmountRequired: "0.05",
   asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
@@ -20,7 +20,7 @@ const requirements = {
 
 const payload = {
   x402Version: 2,
-  scheme: "exact-canton",
+  scheme: "exact",
   network: "canton:x",
   payload: {
     payer: "alice::x",
@@ -91,7 +91,7 @@ describe("createX402Fetch", () => {
     const f = createX402Fetch(payer, {
       fetch: fetchMock,
       select: (accepts, payers) => {
-        const match = accepts.find((r) => r.scheme === "exact-canton");
+        const match = accepts.find((r) => r.scheme === "exact");
         return match ? { payer: payers[0], requirements: match } : undefined;
       },
     });
@@ -105,10 +105,10 @@ describe("createX402Fetch", () => {
       authorize: vi.fn(async () => payload),
     } satisfies X402Payer;
     const cantonPayer = {
-      supports: (r) => r.scheme === "exact-canton",
+      supports: (r) => r.scheme === "exact",
       authorize: vi.fn(async () => payload),
     } satisfies X402Payer;
-    // Server offers exact-canton (`requirements`); only the Canton payer supports it.
+    // Server offers canton-exact (`requirements`); only the Canton payer supports it.
     const fetchMock = makeFetch();
     await createX402Fetch([evmPayer, cantonPayer], { fetch: fetchMock })("https://api.example/x");
     expect(evmPayer.authorize).not.toHaveBeenCalled();

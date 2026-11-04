@@ -24,11 +24,11 @@ export interface RequirementsSpec {
   payTo: Resolvable<string>;
   /** Asset to charge in. */
   asset: Resolvable<AssetSpec>;
-  /** scheme+network id, e.g. `canton:1220…`. */
+  /** Network id — on Canton a `canton:<name>` from x402-core's networks. */
   network: Resolvable<string>;
   /** Price (decimal string). */
   amount: Resolvable<string>;
-  /** Scheme id. Default `exact-canton`. */
+  /** Scheme id. Default `exact`. */
   scheme?: Resolvable<string>;
   /** Resource URL. Default: the request's absolute URL. */
   resource?: Resolvable<string>;
@@ -103,7 +103,7 @@ declare global {
   }
 }
 
-const DEFAULT_SCHEME = "exact-canton";
+const DEFAULT_SCHEME = "exact";
 const DEFAULT_VALIDITY_SECONDS = 300;
 
 /** Internal control-flow signal: reject the request with a 402, echoing `requirements`. */
@@ -133,7 +133,7 @@ class PaymentRejection extends Error {
  *   facilitator,
  *   settle: true,
  *   requirements: {
- *     network: "canton:1220…",
+ *     network: "canton:devnet",
  *     payTo: "merchant::1220…",
  *     asset: { instrumentId: { id: "Amulet", admin: "DSO::1220…" } },
  *     amount: "0.05", // or a per-request (req) => "0.05"

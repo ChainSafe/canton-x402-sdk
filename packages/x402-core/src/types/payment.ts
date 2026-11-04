@@ -61,7 +61,7 @@ export interface X402PaymentPayload<TInner = CantonPaymentInner> {
   payload: TInner;
 }
 
-/** exact-canton payload: the X-PAYMENT envelope carrying a {@link CantonPaymentInner}. */
+/** canton-exact payload: the X-PAYMENT envelope carrying a {@link CantonPaymentInner}. */
 export const CantonPaymentPayloadSchema = v.object({
   x402Version: v.literal(2),
   scheme: v.string(),
@@ -75,7 +75,7 @@ export type CantonPaymentPayload = v.InferOutput<typeof CantonPaymentPayloadSche
  * (the per-scheme verifier validates the inner `payload`), a network, and a
  * `payload` object. `looseObject` so extra envelope keys (e.g. the echoed
  * `paymentRequirements` the X-PAYMENT header carries) pass through. Scheme-agnostic
- * — use {@link isCantonPaymentInner} for the exact-canton inner.
+ * — use {@link isCantonPaymentInner} for the canton-exact inner.
  */
 export const X402PaymentEnvelopeSchema = v.looseObject({
   x402Version: v.literal(2),
@@ -88,7 +88,7 @@ export function isX402PaymentPayload(x: unknown): x is X402PaymentPayload<unknow
   return v.is(X402PaymentEnvelopeSchema, x);
 }
 
-/** exact-canton inner-payload guard + parser (schema-derived). */
+/** canton-exact inner-payload guard + parser (schema-derived). */
 export function isCantonPaymentInner(x: unknown): x is CantonPaymentInner {
   return v.is(CantonPaymentInnerSchema, x);
 }
@@ -96,7 +96,7 @@ export function parseCantonPaymentInner(input: unknown): CantonPaymentInner {
   return v.parse(CantonPaymentInnerSchema, input);
 }
 
-/** exact-canton payload guard + parser — the full envelope incl. the inner (schema-derived). */
+/** canton-exact payload guard + parser — the full envelope incl. the inner (schema-derived). */
 export function isCantonPaymentPayload(x: unknown): x is CantonPaymentPayload {
   return v.is(CantonPaymentPayloadSchema, x);
 }

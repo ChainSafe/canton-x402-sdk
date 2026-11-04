@@ -11,7 +11,7 @@ import type { X402PaymentRequirements } from "./requirements";
 /**
  * Generic request body for POST /v2/verify and /v2/settle — payload + requirements,
  * parameterized by the same scheme seams. Generic → type-only; the concrete
- * exact-canton request below is schema-first.
+ * canton-exact request below is schema-first.
  */
 export interface X402Request<
   TInner = CantonPaymentInner,
@@ -23,7 +23,7 @@ export interface X402Request<
   paymentRequirements: X402PaymentRequirements<TAsset, TExtra>;
 }
 
-/** exact-canton verify/settle request. Settle takes the identical envelope. */
+/** canton-exact verify/settle request. Settle takes the identical envelope. */
 export const VerifyRequestSchema = v.object({
   x402Version: v.literal(2),
   paymentPayload: CantonPaymentPayloadSchema,
@@ -32,7 +32,7 @@ export const VerifyRequestSchema = v.object({
 export type VerifyRequest = v.InferOutput<typeof VerifyRequestSchema>;
 export type SettleRequest = VerifyRequest;
 
-/** exact-canton verify/settle request guard + parser (schema-derived, concrete). */
+/** canton-exact verify/settle request guard + parser (schema-derived, concrete). */
 export function isCantonVerifyRequest(x: unknown): x is VerifyRequest {
   return v.is(VerifyRequestSchema, x);
 }
@@ -45,7 +45,7 @@ export function parseCantonVerifyRequest(input: unknown): VerifyRequest {
  * only — x402 v2, a payment envelope, and the requirements fields shared by every
  * scheme. Scheme-agnostic: a multi-scheme dispatcher validates/parses the envelope
  * with this, then the per-scheme verifier checks the concrete inner (use
- * {@link isCantonVerifyRequest} for exact-canton).
+ * {@link isCantonVerifyRequest} for canton-exact).
  */
 const X402RequestEnvelopeSchema = v.looseObject({
   x402Version: v.literal(2),
@@ -69,7 +69,7 @@ export function parseX402Request(input: unknown): X402Request<unknown> {
  */
 export interface SchemeVerifier {
   readonly schemeId: string;
-  /** The concrete network this verifier is bound to, e.g. `canton:<synchronizer>`. */
+  /** The concrete network this verifier is bound to, e.g. `canton:devnet`. */
   readonly networkId: NetworkId;
   verify(
     payload: X402PaymentPayload<unknown>,

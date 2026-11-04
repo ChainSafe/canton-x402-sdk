@@ -1,8 +1,9 @@
-// The `exact-canton` scheme verifier + its Canton-specific primitives. Composes
-// the scheme-agnostic checks in ./common with Ed25519 signature verification, the
-// Canton key-fingerprint derivation, and the canton-id / canton-payload shape
-// guards. Pure and stateless — the stateful guards (nonce replay) and on-chain
-// execution stay in the facilitator, which composes this verifier's result.
+// The canton-exact scheme verifier + its Canton-specific primitives — that is,
+// scheme `exact` on a `canton:*` network. Composes the scheme-agnostic checks in
+// ./common with Ed25519 signature verification, the Canton key-fingerprint
+// derivation, and the canton-id / canton-payload shape guards. Pure and
+// stateless — the stateful guards (nonce replay) and on-chain execution stay in
+// the facilitator, which composes this verifier's result.
 
 import { sign as ed25519Sign, verify as ed25519Verify, hashes as ed25519Hashes } from "@noble/ed25519";
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
@@ -25,12 +26,11 @@ import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 ed25519Hashes.sha512 = sha512;
 
 /**
- * The scheme id this module verifies. Module-private for now — export it when a
- * consumer needs the canonical constant (e.g. the facilitator adopting core, or a
- * client-side scheme-id → verifier factory map) rather than the `"exact-canton"`
- * literal.
+ * The scheme identifier on the wire, defined by the registered Canton scheme spec
+ * (`specs/schemes/exact/scheme_exact_canton.md`). Exported so the facilitator
+ * reads it from here rather than repeating the literal.
  */
-const EXACT_CANTON_SCHEME_ID = "exact-canton";
+export const EXACT_SCHEME_ID = "exact";
 
 /** Canton hash-purpose tag for key fingerprints. */
 const HASH_PURPOSE_FINGERPRINT = Uint8Array.of(0x00, 0x00, 0x00, 0x0c);
@@ -96,8 +96,9 @@ export function signHash(hashHex: string, privateKeyBase64: string): string {
 }
 
 // ─── canton network-id boundary guard ──────────────────────────────────────
-// NetworkId is a plain string (scheme-generic); this validates the exact-canton
-// `canton:<synchronizer-id>` form at untrusted boundaries (env, raw input).
+// NetworkId is a plain string (scheme-generic); this validates the `canton:<name>`
+// form at untrusted boundaries (env, raw input). Shape only — that the name is
+// one this deployment settles is the verifier's network check, not this guard's.
 
 export function isCantonNetworkId(x: unknown): x is NetworkId {
   return typeof x === "string" && /^canton:.+/.test(x);
@@ -113,18 +114,18 @@ function fail(reason: VerifyInvalidReason, payer?: string): VerifyResponseInvali
 }
 
 /**
- * The pure exact-canton verification, factored out of the facilitator's
+ * The pure canton-exact verification, factored out of the facilitator's
  * `V2CantonExact.verify`. Runs the stateless checks in order; the facilitator's
  * stateful checks (nonce replay, min-amount FX policy) and the on-chain execute
  * compose on top of a successful result here.
  */
-function verifyExactCanton(
+function verifyCantonExact(
   networkId: NetworkId,
   payload: X402PaymentPayload<unknown>,
   requirements: X402PaymentRequirements<unknown>,
 ): VerifyResponse {
-  // 1. scheme
-  if (payload.scheme !== EXACT_CANTON_SCHEME_ID || requirements.scheme !== EXACT_CANTON_SCHEME_ID) {
+  // 1. scheme — both sides must name the one id the spec defines.
+  if (payload.scheme !== EXACT_SCHEME_ID || requirements.scheme !== EXACT_SCHEME_ID) {
     return fail("scheme_mismatch");
   }
   // 2. network — payload, requirements, and this verifier's binding must agree
@@ -204,14 +205,16 @@ export function findTransferMismatch(
 }
 
 /**
- * Build an exact-canton {@link SchemeVerifier} bound to a specific Canton network
- * (`canton:<synchronizer-id>`) — mirroring how the facilitator reads its network
- * from the chain provider. The registry dispatches on `(schemeId, networkId)`.
+ * Build a canton-exact {@link SchemeVerifier} bound to one Canton network (a
+ * `canton:<name>` — see ../networks). The registry dispatches on
+ * `(schemeId, networkId)`.
+ *
+ * Accepts that scheme id and that network id only; there is no alias set.
  */
-export function createExactCantonVerifier(networkId: NetworkId): SchemeVerifier {
+export function createCantonExactVerifier(networkId: NetworkId): SchemeVerifier {
   return {
-    schemeId: EXACT_CANTON_SCHEME_ID,
+    schemeId: EXACT_SCHEME_ID,
     networkId,
-    verify: (payload, requirements) => verifyExactCanton(networkId, payload, requirements),
+    verify: (payload, requirements) => verifyCantonExact(networkId, payload, requirements),
   };
 }

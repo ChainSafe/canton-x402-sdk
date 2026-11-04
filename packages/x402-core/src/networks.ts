@@ -4,24 +4,28 @@ import type { AssetSpec, NetworkId } from "./types/common";
 // (ledger URLs, OAuth creds, scan-proxy) is runtime and lives in the server-sdk,
 // not here.
 
-// Default synchronizer hint, prefixed onto a fingerprint for the canonical
-// `<hint>::<fingerprint>` synchronizer id. Derivation detail — the concrete
-// synchronizer id is what consumers actually use.
+// Prefixed onto a fingerprint for the canonical `<hint>::<fingerprint>` form
+// the ledger APIs want (e.g. interactive-submission prepare).
 const SYNCHRONIZER_HINT = "global-domain";
 
-// For a given network the network id, synchronizer id, and DSO party all share
-// the synchronizer namespace fingerprint, so each set derives from one fp.
-// (Localnet's DSO is allocated at runtime, so no localnet constants here.)
+// Network ids, carried as `network` on a payload, on requirements, and in
+// `/supported`. A name, not a synchronizer fingerprint; which synchronizer a
+// name points at is deployment config.
 //
-// `canton:<fp>` is the wire-format network id (no hint); `<hint>::<fp>` is the
-// canonical synchronizer id that ledger APIs (e.g. interactive-submission
-// prepare) expect; `DSO::<fp>` is the Amulet instrument admin.
+// The first three are the ones the registered Canton scheme spec names
+// (specs/schemes/exact/scheme_exact_canton.md). Its table is not a closed set —
+// Rule 1 requires only a network the facilitator is configured for — so
+// LocalNet gets its own id rather than borrowing DevNet's, which would leave a
+// local and a real DevNet facilitator indistinguishable on the wire.
+export const MAINNET_NETWORK: NetworkId = "canton:mainnet";
+export const TESTNET_NETWORK: NetworkId = "canton:testnet";
+export const DEVNET_NETWORK: NetworkId = "canton:devnet";
+export const LOCALNET_NETWORK: NetworkId = "canton:localnet";
 
 // ChainSafe Canton DevNet.
 const DEVNET_SYNCHRONIZER_FP =
   "1220be58c29e65de40bf273be1dc2b266d43a9a002ea5b18955aeef7aac881bb471a";
 
-export const DEVNET_NETWORK: NetworkId = `canton:${DEVNET_SYNCHRONIZER_FP}`;
 export const DEVNET_SYNCHRONIZER_ID = `${SYNCHRONIZER_HINT}::${DEVNET_SYNCHRONIZER_FP}`;
 export const DEVNET_DSO_PARTY = `DSO::${DEVNET_SYNCHRONIZER_FP}`;
 
@@ -29,9 +33,12 @@ export const DEVNET_DSO_PARTY = `DSO::${DEVNET_SYNCHRONIZER_FP}`;
 const MAINNET_SYNCHRONIZER_FP =
   "1220b1431ef217342db44d516bb9befde802be7d8899637d290895fa58880f19accc";
 
-export const MAINNET_NETWORK: NetworkId = `canton:${MAINNET_SYNCHRONIZER_FP}`;
 export const MAINNET_SYNCHRONIZER_ID = `${SYNCHRONIZER_HINT}::${MAINNET_SYNCHRONIZER_FP}`;
 export const MAINNET_DSO_PARTY = `DSO::${MAINNET_SYNCHRONIZER_FP}`;
+
+// No TestNet or LocalNet fingerprint: we run neither, and a LocalNet instance
+// allocates its DSO at runtime. Their network ids are above — a name needs no
+// fingerprint, which is the point of the split.
 
 /** Amulet (Canton Coin) instrument for a given DSO admin party. */
 export function amuletAsset(dsoParty: string): AssetSpec {

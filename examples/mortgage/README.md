@@ -73,7 +73,9 @@ curl -XPOST localhost:4002/apply -H 'content-type: application/json' \
 
 > **LocalNet provisioning** is what `bootstrap-localnet.mjs` handles: it discovers the
 > synchronizer/DSO, onboards a funded payer external party + a receivable bureau party via
-> the validator admin API (unsafe self-signed auth), and writes the `.env`. On **DevNet** you
+> the validator admin API (unsafe self-signed auth), and writes the `.env`. It does not
+> write `NETWORK_ID` — the network id is the fixed name `canton:localnet`, which both apps
+> default to; only the DSO party is per-instance. On **DevNet** you
 > instead bring your own funded party (its exported key + participant URL + OAuth) and copy
 > `.env.example` → `.env` by hand.
 

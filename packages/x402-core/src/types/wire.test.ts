@@ -21,10 +21,10 @@ import type {
 // changes incompatibly, the build fails here. The runtime assertions just give
 // vitest something to run and pin the enum values.
 describe("x402-core wire types", () => {
-  it("accepts a well-formed exact-canton request envelope", () => {
+  it("accepts a well-formed canton-exact request envelope", () => {
     const requirements: CantonPaymentRequirements = {
-      scheme: "exact-canton",
-      network: "canton:1220be58c29e",
+      scheme: "exact",
+      network: "canton:devnet",
       maxAmountRequired: "0.01",
       asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
       payTo: "merchant::1220dead",
@@ -35,7 +35,7 @@ describe("x402-core wire types", () => {
 
     const payload: CantonPaymentPayload = {
       x402Version: 2,
-      scheme: "exact-canton",
+      scheme: "exact",
       network: requirements.network,
       payload: {
         payer: "alice::1220beef",
@@ -57,7 +57,7 @@ describe("x402-core wire types", () => {
     const settleReq: SettleRequest = verifyReq;
 
     const supported: SupportedResponse = {
-      kinds: [{ x402Version: 2, scheme: "exact-canton", network: requirements.network }],
+      kinds: [{ x402Version: 2, scheme: "exact", network: requirements.network }],
     };
 
     const paymentRequired: CantonPaymentRequiredResponse = {
@@ -132,8 +132,8 @@ describe("x402-core wire types", () => {
     type BridgeRequirements = X402PaymentRequirements<{ chainId: number }, { cantonRecipient: string }>;
 
     const canton: CantonPaymentRequirements = {
-      scheme: "exact-canton",
-      network: "canton:1220be58c29e",
+      scheme: "exact",
+      network: "canton:devnet",
       maxAmountRequired: "0.01",
       asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
       payTo: "merchant::1220dead",
@@ -161,7 +161,7 @@ describe("x402-core wire types", () => {
 
     expect(offer.accepts).toHaveLength(2);
     // Fields shared by every scheme are reachable on the union without a cast.
-    expect(offer.accepts.map((a) => a.scheme)).toEqual(["exact-canton", "batch-settlement-canton"]);
+    expect(offer.accepts.map((a) => a.scheme)).toEqual(["exact", "batch-settlement-canton"]);
     expect(offer.accepts.every((a) => a.payTo.length > 0)).toBe(true);
     // (Reaching a scheme-specific `asset`/`extra` needs a proper discriminant on
     // `scheme` — a literal union — which is the separate `Scheme`-open-union item.)
@@ -176,7 +176,7 @@ describe("x402-core wire types", () => {
 
     const settleOk: SettleResponse = {
       success: true,
-      network: "canton:1220be58c29e",
+      network: "canton:devnet",
       transaction: "1220update",
       payer: "alice::1220beef",
     };

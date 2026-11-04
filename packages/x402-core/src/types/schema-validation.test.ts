@@ -22,8 +22,8 @@ const inner: CantonPaymentInner = {
 };
 
 const requirements: CantonPaymentRequirements = {
-  scheme: "exact-canton",
-  network: "canton:1220be58c29e",
+  scheme: "exact",
+  network: "canton:devnet",
   maxAmountRequired: "0.01",
   asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
@@ -68,10 +68,10 @@ describe("schema-first guards + parsers", () => {
   });
 });
 
-describe("generic (loose) vs concrete (exact-canton) verify request", () => {
+describe("generic (loose) vs concrete (canton-exact) verify request", () => {
   const cantonReq = {
     x402Version: 2,
-    paymentPayload: { x402Version: 2, scheme: "exact-canton", network: requirements.network, payload: inner },
+    paymentPayload: { x402Version: 2, scheme: "exact", network: requirements.network, payload: inner },
     paymentRequirements: requirements,
   };
   // A different scheme: valid universal envelope, but the inner is NOT a CantonPaymentInner.
@@ -99,7 +99,7 @@ describe("generic (loose) vs concrete (exact-canton) verify request", () => {
     expect(isX402Request(bridgeReq)).toBe(true);
   });
 
-  it("isCantonVerifyRequest accepts exact-canton but rejects another scheme's inner", () => {
+  it("isCantonVerifyRequest accepts canton-exact but rejects another scheme's inner", () => {
     expect(isCantonVerifyRequest(cantonReq)).toBe(true);
     expect(isCantonVerifyRequest(bridgeReq)).toBe(false);
   });

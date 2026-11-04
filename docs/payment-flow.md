@@ -4,7 +4,7 @@ description: Every paid request, from the 402 to the on-ledger update id — and
 
 # The payment flow
 
-A paid request end to end under `exact-canton` — from the `402` your route
+A paid request end to end under `exact` on Canton — from the `402` your route
 returns to the on-ledger update id it settles with. This is what runs
 underneath the route you gated in [Getting started](/getting-started), and
 [The facilitator](/facilitator) then zooms in on steps 5 and 6. You write

@@ -4,8 +4,8 @@ import type { CantonPaymentPayload, CantonPaymentRequirements } from "./index";
 
 const payload: CantonPaymentPayload = {
   x402Version: 2,
-  scheme: "exact-canton",
-  network: "canton:1220x",
+  scheme: "exact",
+  network: "canton:devnet",
   payload: {
     payer: "alice::1220x",
     preparedTransaction: "b",
@@ -18,8 +18,8 @@ const payload: CantonPaymentPayload = {
 };
 
 const requirements: CantonPaymentRequirements = {
-  scheme: "exact-canton",
-  network: "canton:1220x",
+  scheme: "exact",
+  network: "canton:devnet",
   maxAmountRequired: "0.05",
   asset: { instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   payTo: "merchant::1220x",
@@ -37,7 +37,7 @@ describe("X-PAYMENT codec", () => {
 
   it("decodes any scheme's envelope — concrete inner/asset validation is the verifier's job", () => {
     // Option A: decode validates the envelope (x402 shape + universal requirements),
-    // NOT the exact-canton inner. A well-formed envelope carrying another scheme's
+    // NOT the canton-exact inner. A well-formed envelope carrying another scheme's
     // inner + asset must decode; the per-scheme verifier rejects it downstream.
     const foreign = {
       payment: {
@@ -85,7 +85,7 @@ describe("X-PAYMENT codec", () => {
     );
     expect(() =>
       decodePaymentHeader(
-        btoa(JSON.stringify({ payment: payload, requirements: { scheme: "exact-canton" } })),
+        btoa(JSON.stringify({ payment: payload, requirements: { scheme: "exact" } })),
       ),
     ).toThrow(/`requirements` slot/);
   });
