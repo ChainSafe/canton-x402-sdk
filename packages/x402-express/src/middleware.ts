@@ -306,9 +306,9 @@ function validateEchoedRequirements(
   if (echoed.extra.instrumentId.id !== policy.extra.instrumentId.id) return "policy_asset";
   if (echoed.extra.instrumentId.admin !== policy.extra.instrumentId.admin) return "policy_asset";
   if (echoed.asset !== policy.asset) return "policy_asset";
-  // Validate the FORMAT before comparing, or a malformed amount slips past the
-  // "<" test — Number("abc") is NaN and Number("Infinity") is Infinity, and
-  // both compare false.
+  // Validate the FORMAT before comparing. BigInt throws on "abc" — a 500 where
+  // a 402 belongs — and happily reads "0x10" as 16 and "" as 0, so a value the
+  // merchant never quoted would compare as a number.
   if (!isValidAmount(echoed.amount)) return "policy_amount_invalid";
   // BigInt, not Number: atomic units are 1e10 larger than the token amount, so
   // anything over ~900k CC exceeds Number.MAX_SAFE_INTEGER and two different

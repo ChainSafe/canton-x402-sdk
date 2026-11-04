@@ -362,16 +362,30 @@ describe("paymentRequired", () => {
   });
 
   it("rejects a malformed echoed amount that would slip past the '<' check", async () => {
-    // Number("abc") is NaN and Number("Infinity") is Infinity — both make the
-    // underpricing comparison false, so the format must be validated first.
+    // BigInt throws on "abc", "Infinity" and "1e3" — a 500 where a 402 belongs.
+    // It also parses what it should not: "0x10" is 16, "0b11" is 3, " 5 " is 5
+    // and "" is 0, so an amount the merchant never quoted would compare as a
+    // number. The format check is what keeps all of it a 402.
     stubFacilitator();
-    for (const bad of ["abc", "Infinity", "1e3", " 5 "]) {
+    for (const bad of ["abc", "Infinity", "1e3", " 5 ", "0x10", "0b11", "0o17"]) {
       const res = await request(makeApp())
         .get("/paid")
         .set("X-PAYMENT", paymentHeader({ amount: bad }));
       expect(res.status).toBe(402);
       expect(res.body.error).toBe("policy_amount_invalid");
     }
+  });
+
+  it("rejects an EMPTY echoed amount at decode, before policy", async () => {
+    // BigInt("") is 0, so this one matters — but the envelope's nonEmptyString
+    // catches it first, which is why the code is bad_payload and not
+    // policy_amount_invalid. Asserted so the earlier guard cannot quietly go.
+    stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set("X-PAYMENT", paymentHeader({ amount: "" }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("bad_payload");
   });
 
   it("rejects a look-alike instrument from another registry", async () => {
