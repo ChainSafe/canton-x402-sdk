@@ -26,6 +26,10 @@ hashes.sha512 = sha512;
 const NETWORK = DEVNET_NETWORK;
 const toB64 = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes));
 
+/** A protobuf blob in the gzipped base64 form the payload carries it in. */
+const gzipped = (protobufB64: string): string =>
+  gzipPreparedTransaction(Buffer.from(protobufB64, "base64"));
+
 // A deterministic payer keypair + a well-formed, correctly-signed payload for it.
 function buildSignedFixture() {
   const seed = new Uint8Array(32).fill(3);
@@ -60,7 +64,7 @@ function buildSignedFixture() {
     amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
     instrumentId: requirements.extra.instrumentId,
   });
-  const preparedTransaction = gzipPreparedTransaction(Uint8Array.from(atob(protobuf), (c) => c.charCodeAt(0)));
+  const preparedTransaction = gzipped(protobuf);
 
   const payload: CantonPaymentPayload = {
     x402Version: 2,
@@ -182,7 +186,7 @@ describe("cantonExactVerifier", () => {
       },
       { extra: { node: wrap(1, new Uint8Array()) } },
     );
-    const p = { ...payload, payload: { ...payload.payload, preparedTransaction } };
+    const p = { ...payload, payload: { ...payload.payload, preparedTransaction: gzipped(preparedTransaction) } };
     expect(verifier.verify(p, requirements)).toMatchObject({
       isValid: false,
       invalidReason: "transfer_mismatch",
@@ -202,7 +206,7 @@ describe("cantonExactVerifier", () => {
       },
       { nodes: [encodeNode("0", wrap(1, new Uint8Array()))] },
     );
-    const p = { ...payload, payload: { ...payload.payload, preparedTransaction } };
+    const p = { ...payload, payload: { ...payload.payload, preparedTransaction: gzipped(preparedTransaction) } };
     expect(verifier.verify(p, requirements)).toMatchObject({
       isValid: false,
       invalidReason: "transfer_mismatch",
