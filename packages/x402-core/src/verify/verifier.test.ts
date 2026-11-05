@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { getPublicKey, hashes } from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha2.js";
 import {
+  atomicToLedger,
   createCantonExactVerifier,
   createVerifierRegistry,
   EXACT_SCHEME_ID,
@@ -33,7 +34,7 @@ function buildSignedFixture() {
   const requirements: CantonPaymentRequirements = {
     scheme: "exact",
     network: NETWORK,
-    amount: "0.01",
+    amount: "100000000",
     asset: "CC",
     extra: { instrumentId: { id: "Amulet", admin: "DSO::1220dso" } },
     payTo: "merchant::1220merch",
@@ -47,10 +48,11 @@ function buildSignedFixture() {
 
   // A prepared-transaction blob whose TransferFactory_Transfer matches the
   // requirements (payer → payTo, the required Amulet, the required amount).
+  // The transfer carries an on-ledger Decimal; the quote is in atomic units.
   const preparedTransaction = encodePreparedTransaction({
     sender: payer,
     receiver: requirements.payTo,
-    amount: requirements.amount,
+    amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
     instrumentId: requirements.extra.instrumentId,
   });
 

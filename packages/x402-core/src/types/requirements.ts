@@ -14,8 +14,8 @@ export interface X402PaymentRequirements<TExtra = Record<string, unknown>> {
   scheme: Scheme;
   network: NetworkId;
   /**
-   * Maximum amount to charge, as a decimal string denominated in `asset`.
-   * Precision is scheme-defined.
+   * Exact amount to charge, as an integer string in `asset`'s atomic units —
+   * on Canton one atomic unit is 1e-10 of the token.
    */
   amount: string;
   /** Asset identifier. A symbol here (`"CC"`); a token address on EVM. */
@@ -61,6 +61,7 @@ export const CantonPaymentRequirementsSchema = v.object({
   // isCantonPaymentRequirements and failed isX402PaymentRequirements.
   scheme: nonEmptyString,
   network: nonEmptyString,
+  /** Atomic units as an integer string: 1 token = 1e10, so `"500000000"` is 0.05. */
   amount: nonEmptyString,
   /** A symbol: `"CC"`, or a registry token's own. The instrument is in `extra`. */
   asset: nonEmptyString,

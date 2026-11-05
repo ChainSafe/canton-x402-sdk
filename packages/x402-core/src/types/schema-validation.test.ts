@@ -25,7 +25,7 @@ const inner: CantonPaymentInner = {
 const requirements: CantonPaymentRequirements = {
   scheme: "exact",
   network: "canton:devnet",
-  amount: "0.01",
+  amount: "100000000",
   asset: "CC",
   extra: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",

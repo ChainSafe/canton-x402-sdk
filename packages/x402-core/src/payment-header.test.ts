@@ -20,7 +20,7 @@ const payload: CantonPaymentPayload = {
 const requirements: CantonPaymentRequirements = {
   scheme: "exact",
   network: "canton:devnet",
-  amount: "0.05",
+  amount: "500000000",
   asset: "CC",
   extra: { instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   payTo: "merchant::1220x",

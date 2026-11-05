@@ -105,7 +105,7 @@ guarantee.
   "paymentRequirements": {
     "scheme": "exact",
     "network": "canton:devnet",
-    "amount": "0.05",
+    "amount": "500000000",
     "asset": "CC",
     "extra": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
     "payTo": "merchant::1220…",
@@ -124,7 +124,7 @@ guarantee.
 | `x402Version`                               | Must be exactly `2`, at the top level and inside `paymentPayload`.                                                                                                                                                                                                             |
 | `paymentPayload.payload`                    | The seven fields above, all required. `publicKey` replaced the older `keyFingerprint` — the facilitator derives the fingerprint from the key and matches it against the payer party's `::` suffix.                                                                             |
 | `requirementsHash`                          | SHA-256 of the RFC 8785 canonicalization of `paymentRequirements`; it must match the requirements sent alongside it. The signature itself covers the prepared transaction, whose sender, receiver, instrument and amount the facilitator checks against `paymentRequirements`. |
-| `amount`                                    | Decimal string with at most 10 decimal places, and a floor rather than an exact amount — an overpayment settles and reports what actually moved.                                                                                                                               |
+| `amount`                                    | Integer string of atomic units — 1 CC = 1e10, so `"500000000"` is 0.05 CC. **Exact**, not a floor: the transfer must move this amount, and an overpayment is rejected.                                                                                                       |
 | `payTo`                                     | Must be a party your API key owns. Otherwise verify answers `transfer_mismatch` and settle answers `unauthorized`.                                                                                                                                                             |
 | `resource`                                  | Required — the URL being paid for.                                                                                                                                                                                                                                             |
 | `nonce`, `validBefore`                      | Required and non-empty; `validBefore` is ISO 8601 and settle refuses a quote past it.                                                                                                                                                                                          |
@@ -185,7 +185,7 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
   "paymentRequirements": {
     "scheme": "exact",
     "network": "canton:devnet",
-    "amount": "0.05",
+    "amount": "500000000",
     "asset": "CC",
     "extra": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
     "payTo": "merchant::1220…",
@@ -238,7 +238,7 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
   "paymentRequirements": {
     "scheme": "exact",
     "network": "canton:devnet",
-    "amount": "0.05",
+    "amount": "500000000",
     "asset": "CC",
     "extra": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
     "payTo": "merchant::1220…",

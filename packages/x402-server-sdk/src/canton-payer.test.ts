@@ -44,7 +44,7 @@ function makeRequirements(over: Partial<CantonPaymentRequirements> = {}): Canton
   return {
     scheme: "exact",
     network: NETWORK,
-    amount: "1.5",
+    amount: "15000000000",
     asset: "CC",
     extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
     payTo: "merchant::y",
