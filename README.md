@@ -18,7 +18,7 @@ Monorepo for the `@chainsafe/x402-*` packages — x402 payments on the Canton Ne
 
 ## Development
 
-Requires Node ≥ 20 and pnpm (see `.nvmrc` / `packageManager`).
+Requires Node ≥ 22.2 and pnpm. `.nvmrc` pins the version CI uses, and `packageManager` the pnpm.
 
 ```bash
 pnpm install
