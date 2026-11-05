@@ -22,6 +22,8 @@ import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "@chainsafe/x402-express";
 import {
   amuletAsset,
+  ledgerToAtomic,
+  WIRE_DECIMALS,
   DEVNET_DSO_PARTY,
   DEVNET_NETWORK,
   LOCALNET_NETWORK,
@@ -43,6 +45,8 @@ const def = networkDefaults();
 const NETWORK_ID = process.env.NETWORK_ID?.trim() || def.networkId;
 const DSO_PARTY = process.env.DSO_PARTY?.trim() || def.dso;
 const BUREAU_PARTY = process.env.BUREAU_PARTY;
+// Priced in CC, because that is what a human sets. The wire is atomic units,
+// so this app converts before quoting.
 const PRICE_CC = process.env.PRICE_CC ?? "0.05";
 const PORT = Number(process.env.BUREAU_PORT ?? 4001);
 const FACILITATOR_URL = process.env.FACILITATOR_URL;
@@ -54,6 +58,12 @@ if (!DSO_PARTY || !BUREAU_PARTY || !FACILITATOR_URL) {
     "credit-bureau: set DSO_PARTY, BUREAU_PARTY and FACILITATOR_URL " +
       "(see examples/mortgage/.env.example).",
   );
+}
+
+const ASSET = amuletAsset(DSO_PARTY);
+const PRICE_ATOMIC = ledgerToAtomic(PRICE_CC, WIRE_DECIMALS);
+if (PRICE_ATOMIC === null) {
+  throw new Error(`credit-bureau: PRICE_CC "${PRICE_CC}" is not a decimal amount (≤10 places).`);
 }
 
 const facilitator = new FacilitatorClient(
@@ -104,8 +114,8 @@ app.use(
     requirements: {
       network: NETWORK_ID,
       payTo: BUREAU_PARTY,
-      asset: amuletAsset(DSO_PARTY),
-      amount: PRICE_CC,
+      asset: ASSET,
+      amount: PRICE_ATOMIC.toString(),
       description: "Credit-score pull",
     },
   }),

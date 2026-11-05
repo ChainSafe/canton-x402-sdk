@@ -8,7 +8,9 @@ import {
   MAINNET_SYNCHRONIZER_ID,
   MAINNET_DSO_PARTY,
   TESTNET_NETWORK,
+  AMULET_INSTRUMENT_ID,
   amuletAsset,
+  assetSymbol,
 } from "./networks";
 
 describe("network ids", () => {
@@ -55,5 +57,23 @@ describe("synchronizer identity", () => {
     expect(amuletAsset(DEVNET_DSO_PARTY)).toEqual({
       instrumentId: { id: "Amulet", admin: DEVNET_DSO_PARTY },
     });
+  });
+});
+
+describe("assetSymbol", () => {
+  it("maps Canton Coin's instrument to its symbol", () => {
+    // The one case where the two differ, and the reason the function exists.
+    expect(AMULET_INSTRUMENT_ID).toBe("Amulet");
+    expect(assetSymbol({ id: AMULET_INSTRUMENT_ID, admin: DEVNET_DSO_PARTY })).toBe("CC");
+  });
+
+  it("passes a registry token's id through as its symbol", () => {
+    expect(assetSymbol({ id: "USDCx", admin: "USDC::1220reg" })).toBe("USDCx");
+  });
+
+  it("keys off the instrument id, not the admin", () => {
+    // Any DSO's Amulet is CC; the admin says which registry issued it, which is
+    // what `extra.instrumentId` carries and `asset` cannot.
+    expect(assetSymbol({ id: "Amulet", admin: "DSO::other" })).toBe("CC");
   });
 });

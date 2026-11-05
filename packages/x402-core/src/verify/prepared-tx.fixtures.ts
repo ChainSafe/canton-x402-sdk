@@ -32,6 +32,8 @@ const text = (s: string) => scalarValue(8, s);
 interface Field {
   label: string;
   value: Uint8Array;
+  /** Raw bytes appended to this `RecordField` after its label and value. */
+  extra?: Uint8Array;
 }
 
 /** A Daml `Value` holding a record. `positional` omits labels (order-only). */
@@ -41,29 +43,54 @@ function recordValue(fields: Field[], positional: boolean): Uint8Array {
     const rf = Writer.create();
     if (!positional) rf.uint32(tag(1, WIRE_LEN)).string(f.label);
     rf.uint32(tag(2, WIRE_LEN)).bytes(f.value);
-    record.uint32(tag(2, WIRE_LEN)).bytes(rf.finish()); // Record.fields (repeated)
+    record.uint32(tag(2, WIRE_LEN)).bytes(concat(rf.finish(), f.extra)); // Record.fields (repeated)
   }
   return Writer.create().uint32(tag(14, WIRE_LEN)).bytes(record.finish()).finish();
 }
 
 /** Wrap `inner` bytes as a single length-delimited field. */
-function wrap(field: number, inner: Uint8Array): Uint8Array {
+export function wrap(field: number, inner: Uint8Array): Uint8Array {
   return Writer.create().uint32(tag(field, WIRE_LEN)).bytes(inner).finish();
 }
+
+function concat(bytes: Uint8Array, extra?: Uint8Array): Uint8Array {
+  if (!extra) return bytes;
+  const out = new Uint8Array(bytes.length + extra.length);
+  out.set(bytes);
+  out.set(extra, bytes.length);
+  return out;
+}
+
+/**
+ * The layers the decoder reads, outermost first. `extra` appends raw bytes to
+ * one of them, after its honest content, to build non-canonical encodings.
+ */
+export type EncodeLayer = "prepared" | "damlNode" | "node" | "exercise" | "receiverField" | "receiver";
 
 export interface EncodeOptions {
   /** Encode records without labels (order-only) to exercise the positional path. */
   positional?: boolean;
   /** Override the choice id (defaults to TransferFactory_Transfer). */
   choiceId?: string;
+  /** Raw bytes appended to a layer, e.g. `{ node: wrap(1, new Uint8Array()) }`. */
+  extra?: Partial<Record<EncodeLayer, Uint8Array>>;
+  /** The transfer node's id (defaults to "0"). */
+  nodeId?: string;
+  /** `DamlTransaction.roots` (defaults to the transfer node alone). */
+  roots?: string[];
+  /** Further `DamlTransaction.nodes` (see `encodeNode`), listed after the transfer node. */
+  nodes?: Uint8Array[];
 }
 
-/**
- * Encode a `PreparedTransaction` base64 blob whose sole exercise is a
- * TransferFactory_Transfer for `transfer`. Field layout mirrors the decoder.
- */
-export function encodePreparedTransaction(transfer: DecodedTransfer, opts: EncodeOptions = {}): string {
+/** A `DamlTransaction.Node{1: node_id, 1000: v1}` around a v1 `Node` body. */
+export function encodeNode(nodeId: string, v1: Uint8Array): Uint8Array {
+  return Writer.create().uint32(tag(1, WIRE_LEN)).string(nodeId).uint32(tag(1000, WIRE_LEN)).bytes(v1).finish();
+}
+
+/** The TransferFactory_Transfer argument for `transfer`, as the exercise's `chosen_value`. */
+export function encodeChoiceArgument(transfer: DecodedTransfer, opts: EncodeOptions = {}): Uint8Array {
   const positional = opts.positional ?? false;
+  const extra = opts.extra ?? {};
 
   const instrument = recordValue(
     [
@@ -75,31 +102,49 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
   const transferRecord = recordValue(
     [
       { label: "sender", value: party(transfer.sender) },
-      { label: "receiver", value: party(transfer.receiver) },
+      {
+        label: "receiver",
+        value: concat(party(transfer.receiver), extra.receiver),
+        extra: extra.receiverField,
+      },
       { label: "amount", value: numeric(transfer.amount) },
       { label: "instrumentId", value: instrument },
     ],
     positional,
   );
-  const choiceArg = recordValue(
+  return recordValue(
     [
       { label: "expectedAdmin", value: party(transfer.instrumentId.admin) },
       { label: "transfer", value: transferRecord },
     ],
     positional,
   );
+}
+
+/**
+ * Encode a `PreparedTransaction` base64 blob whose sole exercise is a
+ * TransferFactory_Transfer for `transfer`. Field layout mirrors the decoder.
+ */
+export function encodePreparedTransaction(transfer: DecodedTransfer, opts: EncodeOptions = {}): string {
+  const extra = opts.extra ?? {};
 
   // Exercise{9: choice_id, 10: chosen_value}
   const exercise = Writer.create()
     .uint32(tag(9, WIRE_LEN))
     .string(opts.choiceId ?? "TransferFactory_Transfer")
     .uint32(tag(10, WIRE_LEN))
-    .bytes(choiceArg)
+    .bytes(encodeChoiceArgument(transfer, opts))
     .finish();
 
-  const v1Node = wrap(3, exercise); // Node{3: exercise}
-  const damlNode = wrap(1000, v1Node); // DamlTransaction.Node{1000: v1}
-  const damlTxn = wrap(3, damlNode); // DamlTransaction{3: nodes[]}
-  const prepared = wrap(1, damlTxn); // PreparedTransaction{1: transaction}
+  const nodeId = opts.nodeId ?? "0";
+  const v1Node = concat(wrap(3, concat(exercise, extra.exercise)), extra.node); // Node{3: exercise}
+  const damlNode = concat(encodeNode(nodeId, v1Node), extra.damlNode); // DamlTransaction.Node{1: node_id, 1000: v1}
+
+  // DamlTransaction{2: roots[], 3: nodes[]}
+  const damlTxn = Writer.create();
+  for (const root of opts.roots ?? [nodeId]) damlTxn.uint32(tag(2, WIRE_LEN)).string(root);
+  for (const node of [damlNode, ...(opts.nodes ?? [])]) damlTxn.uint32(tag(3, WIRE_LEN)).bytes(node);
+
+  const prepared = concat(wrap(1, damlTxn.finish()), extra.prepared); // PreparedTransaction{1: transaction}
   return bytesToBase64(prepared);
 }

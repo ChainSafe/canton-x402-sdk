@@ -32,7 +32,7 @@ app.use(
       network: NETWORK,
       payTo: PAY_TO,
       asset: amuletAsset(DSO_PARTY),
-      amount: "0.05",
+      amount: "500000000", // atomic units: 1 CC = 1e10, so this is 0.05 CC
       description: "Access to /paid",
     },
   }),

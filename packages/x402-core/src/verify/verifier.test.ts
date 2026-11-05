@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { getPublicKey, hashes } from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha2.js";
 import {
+  atomicToLedger,
   createCantonExactVerifier,
   createVerifierRegistry,
   EXACT_SCHEME_ID,
@@ -9,7 +10,7 @@ import {
   signHash,
 } from "./index";
 import { requirementsHash } from "../hashing";
-import { encodePreparedTransaction } from "./prepared-tx.fixtures";
+import { encodeNode, encodePreparedTransaction, wrap } from "./prepared-tx.fixtures";
 import type {
   CantonPaymentPayload,
   CantonPaymentRequirements,
@@ -33,8 +34,9 @@ function buildSignedFixture() {
   const requirements: CantonPaymentRequirements = {
     scheme: "exact",
     network: NETWORK,
-    maxAmountRequired: "0.01",
-    asset: { instrumentId: { id: "Amulet", admin: "DSO::1220dso" } },
+    amount: "100000000",
+    asset: "CC",
+    extra: { instrumentId: { id: "Amulet", admin: "DSO::1220dso" } },
     payTo: "merchant::1220merch",
     resource: "/api/resource",
     nonce: "550e8400-e29b-41d4-a716-446655440000",
@@ -46,11 +48,12 @@ function buildSignedFixture() {
 
   // A prepared-transaction blob whose TransferFactory_Transfer matches the
   // requirements (payer → payTo, the required Amulet, the required amount).
+  // The transfer carries an on-ledger Decimal; the quote is in atomic units.
   const preparedTransaction = encodePreparedTransaction({
     sender: payer,
     receiver: requirements.payTo,
-    amount: requirements.maxAmountRequired,
-    instrumentId: requirements.asset.instrumentId,
+    amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
+    instrumentId: requirements.extra.instrumentId,
   });
 
   const payload: CantonPaymentPayload = {
@@ -141,6 +144,47 @@ describe("cantonExactVerifier", () => {
     expect(verifier.verify(p, requirements)).toMatchObject({
       isValid: false,
       invalidReason: "bad_signature",
+    });
+  });
+
+  it("rejects a prepared transaction whose transfer node is also encoded as another node type", () => {
+    // Correctly signed and the transfer matches, but protobuf keeps the last
+    // member of a oneof, so Canton would read this node as a create.
+    const { payload, requirements, payer } = buildSignedFixture();
+    const preparedTransaction = encodePreparedTransaction(
+      {
+        sender: payer,
+        receiver: requirements.payTo,
+        amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
+        instrumentId: requirements.extra.instrumentId,
+      },
+      { extra: { node: wrap(1, new Uint8Array()) } },
+    );
+    const p = { ...payload, payload: { ...payload.payload, preparedTransaction } };
+    expect(verifier.verify(p, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      extensions: { detail: "undecodable" },
+    });
+  });
+
+  it("rejects a prepared transaction that lists a second node under the transfer node's id", () => {
+    // Canton keeps the last node of a repeated id, so it would run the create.
+    const { payload, requirements, payer } = buildSignedFixture();
+    const preparedTransaction = encodePreparedTransaction(
+      {
+        sender: payer,
+        receiver: requirements.payTo,
+        amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
+        instrumentId: requirements.extra.instrumentId,
+      },
+      { nodes: [encodeNode("0", wrap(1, new Uint8Array()))] },
+    );
+    const p = { ...payload, payload: { ...payload.payload, preparedTransaction } };
+    expect(verifier.verify(p, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      extensions: { detail: "undecodable" },
     });
   });
 

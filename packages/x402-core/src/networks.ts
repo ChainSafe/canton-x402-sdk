@@ -1,4 +1,4 @@
-import type { AssetSpec, NetworkId } from "./types/common";
+import type { AssetSpec, InstrumentId, NetworkId } from "./types/common";
 
 // Network-identity constants (public, non-secret). Connection/auth config
 // (ledger URLs, OAuth creds, scan-proxy) is runtime and lives in the server-sdk,
@@ -40,7 +40,23 @@ export const MAINNET_DSO_PARTY = `DSO::${MAINNET_SYNCHRONIZER_FP}`;
 // allocates its DSO at runtime. Their network ids are above — a name needs no
 // fingerprint, which is the point of the split.
 
+/** The instrument id Canton Coin is registered under. */
+export const AMULET_INSTRUMENT_ID = "Amulet";
+
 /** Amulet (Canton Coin) instrument for a given DSO admin party. */
 export function amuletAsset(dsoParty: string): AssetSpec {
-  return { instrumentId: { id: "Amulet", admin: dsoParty } };
+  return { instrumentId: { id: AMULET_INSTRUMENT_ID, admin: dsoParty } };
+}
+
+/**
+ * The spec's `asset` for an instrument: a symbol, not a descriptor.
+ * `PaymentRequirements.asset` is `"CC"` for Canton Coin, or a registry token's
+ * own symbol — the full `{admin, id}` travels in `extra.instrumentId`, because
+ * a symbol alone cannot say which registry issued it.
+ *
+ * Canton Coin is the one case where the two differ: its instrument is `Amulet`
+ * and its symbol is `CC`.
+ */
+export function assetSymbol(instrumentId: InstrumentId): string {
+  return instrumentId.id === AMULET_INSTRUMENT_ID ? "CC" : instrumentId.id;
 }
