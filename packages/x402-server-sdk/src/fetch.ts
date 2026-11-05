@@ -40,7 +40,10 @@ export interface X402FetchOptions {
  * const f = createX402Fetch([cantonPayer, evmPayer]); // several
  * const res = await f("https://api.example/paid");
  */
-export function createX402Fetch(payers: X402Payer | X402Payer[], opts: X402FetchOptions = {}): FetchLike {
+export function createX402Fetch(
+  payers: X402Payer | X402Payer[],
+  opts: X402FetchOptions = {},
+): FetchLike {
   const list = Array.isArray(payers) ? payers : [payers];
   const doFetch = opts.fetch ?? fetch;
   const select = opts.select ?? defaultSelect;
@@ -56,7 +59,13 @@ export function createX402Fetch(payers: X402Payer | X402Payer[], opts: X402Fetch
     if (!selection) return res; // no payer can satisfy any advertised requirement
 
     const payload = await selection.payer.authorize(selection.requirements);
-    const headers = new Headers(init?.headers);
+    const headers = new Headers(
+      init?.headers !== undefined
+        ? init.headers
+        : input instanceof Request
+          ? input.headers
+          : undefined,
+    );
     headers.set("X-PAYMENT", encodePaymentHeader(payload, selection.requirements));
     return doFetch(input, { ...init, headers });
   };
