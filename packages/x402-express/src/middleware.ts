@@ -1,5 +1,4 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
-import { randomUUID } from "node:crypto";
 import {
   ASSET_TRANSFER_METHOD,
   assetSymbol,
@@ -19,9 +18,8 @@ import { FacilitatorError, type FacilitatorClient } from "@chainsafe/x402-client
 export type Resolvable<T> = T | ((req: Request) => T | Promise<T>);
 
 /**
- * Declarative requirements: the middleware fills in `validBefore` (and `nonce`,
- * unless you supply a generator) and applies defaults. Fields may be a fixed value
- * or a per-request resolver.
+ * Declarative requirements: the middleware applies the defaults. Fields may be a
+ * fixed value or a per-request resolver.
  */
 export interface RequirementsSpec {
   /** Merchant party receiving payment. */
@@ -43,26 +41,35 @@ export interface RequirementsSpec {
   resource?: Resolvable<string>;
   /** Human description. Default: `Access to <path>`. */
   description?: Resolvable<string>;
-  /** Validity window in seconds for the built `validBefore`. Default 300. */
-  validForSeconds?: Resolvable<number>;
   /**
-   * Seconds the client has to complete payment. Default 60. Distinct from
-   * `validForSeconds`, which says how long this quote stays settleable.
+   * Seconds the client has to complete payment. Default 60. Advisory: nothing
+   * refuses a payment for exceeding it.
    */
   maxTimeoutSeconds?: Resolvable<number>;
   /**
-   * Generate (and, if you want, persist) the challenge nonce for this request —
-   * e.g. record it merchant-side for reconciliation. Called once per challenge, so
-   * it MUST return a fresh, unique value each time. Omit to let the middleware
-   * generate a random UUID. (Function-only by design: a static value would reuse
-   * one nonce across challenges.)
+   * Seconds of life the payer gives the transfer it signs. Default 120. Unlike
+   * `maxTimeoutSeconds` this one reaches the ledger, as the transfer's
+   * `executeBefore`, and the verifier refuses a transfer already inside its
+   * last few seconds. It is the only deadline left in the protocol.
    */
-  nonce?: (req: Request) => string | Promise<string>;
+  executeBeforeSeconds?: Resolvable<number>;
+  /**
+   * Generate (and, if you want, persist) the merchant reference for this
+   * challenge — an order or payment id to reconcile against. Called once per
+   * challenge, so it SHOULD return a value that identifies this one. Quoting a
+   * memo BINDS it: the payer must sign the identical value or verification
+   * refuses the payment, which is what makes it usable as a reconciliation key
+   * and as a replay key. UTF-8, at most 256 bytes. Omit it to quote none.
+   *
+   * (Function-only by design: a static value would tag every payment alike,
+   * which is the one thing reference data must not do.)
+   */
+  memo?: (req: Request) => string | Promise<string>;
 }
 
 /**
- * Full control: build the entire `PaymentRequirements` per request (you own
- * `nonce` + `validBefore`).
+ * Full control: build the entire `PaymentRequirements` per request, `extra`
+ * included.
  */
 export type RequirementsBuilder = (
   req: Request,
@@ -118,8 +125,8 @@ declare global {
 }
 
 const DEFAULT_SCHEME = "exact";
-const DEFAULT_VALIDITY_SECONDS = 300;
 const DEFAULT_MAX_TIMEOUT_SECONDS = 60;
+const DEFAULT_EXECUTE_BEFORE_SECONDS = 120;
 
 /** Internal control-flow signal: reject the request with a 402, echoing `requirements`. */
 class PaymentRejection extends Error {
@@ -171,9 +178,10 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       const header = req.header("X-PAYMENT");
       if (!header) throw new PaymentRejection("payment_required", fresh);
 
-      // The X-PAYMENT envelope carries the requirements the payload was signed
-      // against; verify against those (their requirementsHash binds to a specific
-      // nonce + validBefore), after checking them against merchant policy.
+      // The X-PAYMENT envelope carries the requirements the payload referenced;
+      // verify against those, after checking them against merchant policy. The
+      // requirementsHash binds the payload to this exact object, so a client
+      // cannot pay one quote and present another.
       let payload: CantonPaymentPayload;
       let requirements: CantonPaymentRequirements;
       try {
@@ -185,10 +193,10 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       const policyError = validateEchoedRequirements(requirements, fresh);
       if (policyError) throw new PaymentRejection(policyError, fresh);
 
-      // On any rejection, advertise `fresh` (this request's current terms) — never
-      // the client's echoed requirements. The echoed copy differs from `fresh` in
-      // nonce + validBefore, so returning it would hand a retrying agent back a
-      // dead challenge (a replayed/expired nonce) and trap it in a loop.
+      // On any rejection, advertise `fresh` (this request's current terms) —
+      // never the client's echoed requirements. Those are what the client just
+      // failed on, and a merchant that issues a memo per challenge would be
+      // handing a retrying agent back a reference it has already used.
       const verify = await facilitator.verify(payload, requirements);
       if (!verify.isValid) {
         const detail = verify.extensions?.detail;
@@ -247,9 +255,6 @@ async function buildRequirements(
 
   const amount = await resolve(source.amount, req);
   const instrument = await resolve(source.asset, req);
-  const validForSeconds = source.validForSeconds
-    ? await resolve(source.validForSeconds, req)
-    : DEFAULT_VALIDITY_SECONDS;
   return assertAtomicAmount({
     scheme: await resolve(source.scheme ?? DEFAULT_SCHEME, req),
     network: await resolve(source.network, req),
@@ -257,12 +262,17 @@ async function buildRequirements(
     // The merchant declares the instrument; the spec's `asset` is only a
     // symbol, so the full `{admin, id}` travels where a payer can read it.
     asset: assetSymbol(instrument.instrumentId),
-    extra: { assetTransferMethod: ASSET_TRANSFER_METHOD, instrumentId: instrument.instrumentId },
+    extra: {
+      assetTransferMethod: ASSET_TRANSFER_METHOD,
+      instrumentId: instrument.instrumentId,
+      executeBeforeSeconds: source.executeBeforeSeconds
+        ? await resolve(source.executeBeforeSeconds, req)
+        : DEFAULT_EXECUTE_BEFORE_SECONDS,
+      ...(source.memo ? { memo: await source.memo(req) } : {}),
+    },
     payTo: await resolve(source.payTo, req),
     resource: source.resource ? await resolve(source.resource, req) : absoluteUrl(req),
     description: source.description ? await resolve(source.description, req) : `Access to ${req.path}`,
-    nonce: source.nonce ? await source.nonce(req) : randomUUID(),
-    validBefore: new Date(Date.now() + validForSeconds * 1000).toISOString(),
     maxTimeoutSeconds: source.maxTimeoutSeconds
       ? await resolve(source.maxTimeoutSeconds, req)
       : DEFAULT_MAX_TIMEOUT_SECONDS,
@@ -324,7 +334,6 @@ function validateEchoedRequirements(
   // anything over ~900k CC exceeds Number.MAX_SAFE_INTEGER and two different
   // prices start comparing equal.
   if (BigInt(echoed.amount) < BigInt(policy.amount)) return "policy_underpriced";
-  if (Date.parse(echoed.validBefore) <= Date.now()) return "requirements_expired";
   return null;
 }
 

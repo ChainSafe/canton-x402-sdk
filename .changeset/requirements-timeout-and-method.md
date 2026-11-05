@@ -33,8 +33,8 @@ the previous release fixed for the string fields.
 
 The express middleware fills both in, so a merchant that states neither keeps
 working. `maxTimeoutSeconds` is a new option, per request like the others, and
-defaults to 60 — the value both specs use in their examples. It stays separate
-from `validForSeconds`, which says how long the quote remains settleable.
+defaults to 60 — the value both specs use in their examples. It is advisory:
+nothing refuses a payment for exceeding it.
 
 The golden canonicalization vector moves, since the hash covers every value.
 Regenerated from the facilitator's own canonicalizer and checked against it:

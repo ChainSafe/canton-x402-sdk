@@ -76,7 +76,6 @@ export interface SchemeVerifier {
 export const VerifyInvalidReasonSchema = v.picklist([
   "scheme_mismatch",
   "network_mismatch",
-  "requirements_expired",
   "requirements_hash_mismatch",
   "bad_fingerprint",
   "bad_signature",
@@ -84,6 +83,13 @@ export const VerifyInvalidReasonSchema = v.picklist([
   "missing_public_key",
   /** The signed prepared transaction does not transfer what the requirements demand. */
   "transfer_mismatch",
+  /**
+   * The signed transfer's own `executeBefore` has passed, is about to, or is
+   * missing — so it cannot settle, and the client should prepare another. The
+   * only expiry left: a quote no longer goes stale on its own, because the
+   * deadline that decides is the one inside what the payer signed.
+   */
+  "transfer_expired",
   "internal_error",
 ]);
 export type VerifyInvalidReason = v.InferOutput<typeof VerifyInvalidReasonSchema>;
@@ -118,7 +124,6 @@ export const SettleErrorReasonSchema = v.picklist([
   "unauthorized",
   "scheme_mismatch",
   "network_mismatch",
-  "requirements_expired",
   "requirements_hash_mismatch",
   "bad_fingerprint",
   "bad_signature",

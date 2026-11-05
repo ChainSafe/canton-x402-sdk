@@ -62,7 +62,7 @@ const { paymentRequired } = require("@chainsafe/x402-express");
 
 1. **Unpaid request** (no/invalid `X-PAYMENT`) → `402` with
    `{ x402Version: 2, accepts: [requirements] }`. Requirements are built from your
-   options with a generated `nonce` and a `validBefore` TTL.
+   options, with the defaults filled in.
 2. **Paid request** → the `X-PAYMENT` header is decoded to a payment payload (plus
    the requirements it was signed against). Those echoed requirements are checked
    against your policy, then sent to the facilitator's `/v2/verify`.
@@ -88,9 +88,9 @@ units throughout — the same unit the wire carries.
 
 ### `requirements`
 
-Either a **declarative spec** — `{ payTo, asset, network, amount, scheme?, resource?, description?, validForSeconds?, maxTimeoutSeconds?, nonce? }`, where the middleware fills in `validBefore` (from `validForSeconds`, default 300), `maxTimeoutSeconds` (default 60) and `extra.assetTransferMethod`, and every field may be a fixed value **or** a `(req) => value` resolver — or a **builder** `(req) => CantonPaymentRequirements` for full control (you own `nonce`, `validBefore`, `maxTimeoutSeconds` and `extra`).
+Either a **declarative spec** — `{ payTo, asset, network, amount, scheme?, resource?, description?, maxTimeoutSeconds?, executeBeforeSeconds?, memo? }`, where the middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120), and every field may be a fixed value **or** a `(req) => value` resolver — or a **builder** `(req) => CantonPaymentRequirements` for full control (you own `maxTimeoutSeconds` and the whole of `extra`).
 
-`nonce` is special: it's a **function only** (`(req) => string | Promise<string>`), called once per challenge, so a merchant can generate *and record* it (e.g. persist for reconciliation). Omit it to let the middleware generate a random UUID.
+`memo` is special: it's a **function only** (`(req) => string | Promise<string>`), called once per challenge, so a merchant can generate *and record* it (e.g. an order id persisted for reconciliation). Omit it to quote none. Quoting one **binds** it — the payer must sign the identical value into the transfer, which is what makes it usable as a reconciliation key.
 
 ## `req.x402`
 

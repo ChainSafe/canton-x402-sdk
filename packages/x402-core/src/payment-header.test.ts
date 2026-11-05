@@ -22,11 +22,9 @@ const requirements: CantonPaymentRequirements = {
   network: "canton:devnet",
   amount: "500000000",
   asset: "CC",
-  extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
+  extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   payTo: "merchant::1220x",
   resource: "/r",
-  nonce: "n",
-  validBefore: "2999-01-01T00:00:00.000Z",
   maxTimeoutSeconds: 60,
 };
 
@@ -53,8 +51,6 @@ describe("X-PAYMENT codec", () => {
         network: "eip155:1",
         amount: "1000000",
         payTo: "0xC0ffee",
-        nonce: "n-bridge",
-        validBefore: "2999-01-01T00:00:00.000Z",
         maxTimeoutSeconds: 60,
         asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       },

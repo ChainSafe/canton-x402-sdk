@@ -23,8 +23,15 @@ const key: CantonPartyKey = {
 
 const preparedHashB64 = Buffer.from(new Uint8Array(32).fill(9)).toString("base64");
 
+/** The fields of the wallet SDK's transfer params these tests read back. */
+interface TransferCall {
+  expirationDate?: Date;
+  meta?: { values: Record<string, string> };
+  [key: string]: unknown;
+}
+
 function mockSdk() {
-  const create = vi.fn(async () => [
+  const create = vi.fn(async (_params: TransferCall) => [
     { ExerciseCommand: { templateId: "#pkg:Mod:Factory", contractId: "00factory" } },
     [{ templateId: "pkg:Mod:Ent", contractId: "00disc", createdEventBlob: "blob", synchronizerId: "sync::x" }],
   ]);
@@ -40,17 +47,21 @@ function mockSdk() {
   return { sdk, create, prepare };
 }
 
+const EXTRA = {
+  assetTransferMethod: "transfer-factory",
+  executeBeforeSeconds: 120,
+  instrumentId: { id: "Amulet", admin: "DSO::x" },
+} as const;
+
 function makeRequirements(over: Partial<CantonPaymentRequirements> = {}): CantonPaymentRequirements {
   return {
     scheme: "exact",
     network: NETWORK,
     amount: "15000000000",
     asset: "CC",
-    extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::x" } },
+    extra: EXTRA,
     payTo: "merchant::y",
     resource: "https://api.example/report",
-    nonce: "nonce-1",
-    validBefore: "2999-01-01T00:00:00.000Z",
     maxTimeoutSeconds: 60,
     ...over,
   };
@@ -87,6 +98,32 @@ describe("CantonX402Payer.authorize", () => {
     );
   });
 
+  it("gives the transfer the quoted deadline, not the wallet SDK's default", async () => {
+    // Left unset the SDK picks 24 hours, which would make the merchant's
+    // horizon decorative and Rule 10 pass on every payment regardless.
+    const { sdk, create } = mockSdk();
+    const before = Date.now();
+    await makePayer(sdk).authorize(makeRequirements({ extra: { ...EXTRA, executeBeforeSeconds: 300 } }));
+    const { expirationDate } = create.mock.calls[0][0];
+    if (!expirationDate) throw new Error("no expirationDate passed to the transfer");
+    expect(expirationDate.getTime()).toBeGreaterThanOrEqual(before + 300_000);
+    expect(expirationDate.getTime()).toBeLessThanOrEqual(Date.now() + 300_000);
+  });
+
+  it("writes a quoted memo under the scheme's own metadata key", async () => {
+    // The SDK's own `memo` parameter writes a different key
+    // (splice.lfdecentralizedtrust.org/reason), which Rule 12 does not read.
+    const { sdk, create } = mockSdk();
+    await makePayer(sdk).authorize(makeRequirements({ extra: { ...EXTRA, memo: "invoice-2024-001" } }));
+    expect(create.mock.calls[0][0].meta).toEqual({ values: { "x402.memo": "invoice-2024-001" } });
+  });
+
+  it("sends no metadata when the merchant quoted no memo", async () => {
+    const { sdk, create } = mockSdk();
+    await makePayer(sdk).authorize(makeRequirements());
+    expect(create.mock.calls[0][0].meta).toBeUndefined();
+  });
+
   it("rejects an invalid amount before preparing", async () => {
     const { sdk, prepare } = mockSdk();
     await expect(makePayer(sdk).authorize(makeRequirements({ amount: "abc" }))).rejects.toThrow(/invalid amount/);
@@ -98,13 +135,6 @@ describe("CantonX402Payer.authorize", () => {
     await expect(makePayer(sdk).authorize(makeRequirements({ network: "canton:other" }))).rejects.toThrow(/network/);
   });
 
-  it("rejects an expired requirement", async () => {
-    const { sdk } = mockSdk();
-    await expect(
-      makePayer(sdk).authorize(makeRequirements({ validBefore: "2000-01-01T00:00:00.000Z" })),
-    ).rejects.toThrow(/expired/);
-  });
-
   it("supports() gates on scheme, network, and a configured asset", () => {
     const payer = makePayer(mockSdk().sdk);
     expect(payer.supports(makeRequirements())).toBe(true);
@@ -112,14 +142,14 @@ describe("CantonX402Payer.authorize", () => {
     expect(payer.supports(makeRequirements({ network: "canton:other" }))).toBe(false);
     // Unsupported asset (no registry configured for it).
     expect(
-      payer.supports(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
+      payer.supports(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).toBe(false);
   });
 
   it("rejects an asset with no configured registry", async () => {
     const { sdk, prepare } = mockSdk();
     await expect(
-      makePayer(sdk).authorize(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
+      makePayer(sdk).authorize(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).rejects.toThrow(/unsupported requirement/);
     expect(prepare).not.toHaveBeenCalled();
   });

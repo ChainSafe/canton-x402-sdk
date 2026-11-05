@@ -29,6 +29,31 @@ const party = (s: string) => scalarValue(7, s);
 const numeric = (s: string) => scalarValue(6, s);
 const text = (s: string) => scalarValue(8, s);
 
+/** A Daml `Value` holding a `Time`: field 5, SFIXED64, eight little-endian bytes. */
+function timestamp(micros: bigint): Uint8Array {
+  const out = new Uint8Array(9);
+  out[0] = (5 << 3) | 1; // wire type 1, not 2 — a Time is not length-delimited
+  let v = BigInt.asUintN(64, micros);
+  for (let i = 1; i <= 8; i++) {
+    out[i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
+  return out;
+}
+
+/** A Daml `Value` holding an empty `List`. */
+const emptyList = Writer.create().uint32(tag(11, WIRE_LEN)).bytes(new Uint8Array()).finish();
+
+/** A Daml `Value` holding a `TextMap{1: repeated Entry{1: key, 2: value}}`. */
+function textMap(entries: [string, Uint8Array][]): Uint8Array {
+  const map = Writer.create();
+  for (const [key, value] of entries) {
+    const entry = Writer.create().uint32(tag(1, WIRE_LEN)).string(key).uint32(tag(2, WIRE_LEN)).bytes(value);
+    map.uint32(tag(1, WIRE_LEN)).bytes(entry.finish());
+  }
+  return Writer.create().uint32(tag(12, WIRE_LEN)).bytes(map.finish()).finish();
+}
+
 interface Field {
   label: string;
   value: Uint8Array;
@@ -80,6 +105,12 @@ export interface EncodeOptions {
   roots?: string[];
   /** Further `DamlTransaction.nodes` (see `encodeNode`), listed after the transfer node. */
   nodes?: Uint8Array[];
+  /**
+   * `meta.values` entries verbatim, in place of the single `x402.memo` the
+   * transfer's `memo` produces — for a repeated key, a non-text value, or
+   * neighbouring keys the reader must ignore.
+   */
+  memoEntries?: [string, Uint8Array][];
 }
 
 /** A `DamlTransaction.Node{1: node_id, 1000: v1}` around a v1 `Node` body. */
@@ -99,6 +130,13 @@ export function encodeChoiceArgument(transfer: DecodedTransfer, opts: EncodeOpti
     ],
     positional,
   );
+  // The real transfer always carries the trailing fields; fixtures opt in so
+  // the ones written before them still encode byte-identically.
+  const trailing =
+    transfer.executeBeforeMicros !== undefined || transfer.memo !== undefined || opts.memoEntries !== undefined;
+  const memoEntries: [string, Uint8Array][] =
+    opts.memoEntries ?? (transfer.memo === undefined ? [] : [["x402.memo", text(transfer.memo)]]);
+
   const transferRecord = recordValue(
     [
       { label: "sender", value: party(transfer.sender) },
@@ -109,6 +147,22 @@ export function encodeChoiceArgument(transfer: DecodedTransfer, opts: EncodeOpti
       },
       { label: "amount", value: numeric(transfer.amount) },
       { label: "instrumentId", value: instrument },
+      // Declaration order continues: requestedAt, executeBefore,
+      // inputHoldingCids, meta. All four or none — a positional record is read
+      // by index, so emitting `meta` without the two before it would put it
+      // where `executeBefore` belongs. A fixture that asks for neither gets
+      // neither, which is what every pre-existing one does.
+      ...(trailing
+        ? [
+            { label: "requestedAt", value: timestamp(0n) },
+            { label: "executeBefore", value: timestamp(transfer.executeBeforeMicros ?? 0n) },
+            { label: "inputHoldingCids", value: emptyList },
+            {
+              label: "meta",
+              value: recordValue([{ label: "values", value: textMap(memoEntries) }], positional),
+            },
+          ]
+        : []),
     ],
     positional,
   );

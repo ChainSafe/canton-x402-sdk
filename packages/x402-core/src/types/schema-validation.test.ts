@@ -27,11 +27,9 @@ const requirements: CantonPaymentRequirements = {
   network: "canton:devnet",
   amount: "100000000",
   asset: "CC",
-  extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+  extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
   resource: "/api/resource",
-  nonce: "550e8400-e29b-41d4-a716-446655440000",
-  validBefore: "2999-01-01T00:00:00.000Z",
   maxTimeoutSeconds: 60,
 };
 
@@ -67,14 +65,14 @@ describe("schema-first guards + parsers", () => {
 
   it("rejects wrong field types", () => {
     expect(isCantonPaymentInner({ ...inner, payer: 42 })).toBe(false);
-    expect(isCantonPaymentRequirements({ ...requirements, extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet" } } })).toBe(false);
+    expect(isCantonPaymentRequirements({ ...requirements, extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet" } } })).toBe(false);
   });
 
   it("rejects an empty string in any required field", () => {
     // Present but empty is not valid. `asset: ""` names no symbol, `payTo: ""`
     // no party. Each is checked on its own so one field's rule cannot stand in
     // for another's.
-    for (const key of ["scheme", "network", "amount", "asset", "payTo", "resource", "nonce", "validBefore"] as const) {
+    for (const key of ["scheme", "network", "amount", "asset", "payTo", "resource"] as const) {
       expect(isCantonPaymentRequirements({ ...requirements, [key]: "" })).toBe(false);
     }
   });
@@ -103,10 +101,34 @@ describe("schema-first guards + parsers", () => {
     }
   });
 
+  it("requires extra.executeBeforeSeconds, as a duration", () => {
+    const { executeBeforeSeconds: _omitted, ...withoutHorizon } = requirements.extra;
+    expect(isCantonPaymentRequirements({ ...requirements, extra: withoutHorizon })).toBe(false);
+    for (const bad of [0, -1, 1.5, Infinity, NaN, "120"]) {
+      const extra = { ...requirements.extra, executeBeforeSeconds: bad };
+      expect(isCantonPaymentRequirements({ ...requirements, extra })).toBe(false);
+    }
+  });
+
+  it("takes extra.memo as optional, and bounds it in BYTES", () => {
+    const withMemo = (memo: unknown) => ({ ...requirements, extra: { ...requirements.extra, memo } });
+    expect(isCantonPaymentRequirements(requirements)).toBe(true); // absent is fine
+    expect(isCantonPaymentRequirements(withMemo("invoice-2024-001"))).toBe(true);
+    // The spec's limit is 256 bytes of UTF-8, and an emoji is four of them — so
+    // a character count would admit a memo four times over the limit.
+    expect(isCantonPaymentRequirements(withMemo("a".repeat(256)))).toBe(true);
+    expect(isCantonPaymentRequirements(withMemo("a".repeat(257)))).toBe(false);
+    expect(isCantonPaymentRequirements(withMemo("\u{1F600}".repeat(64)))).toBe(true);
+    expect(isCantonPaymentRequirements(withMemo("\u{1F600}".repeat(65)))).toBe(false);
+    // Present but empty is a key with nothing under it.
+    expect(isCantonPaymentRequirements(withMemo(""))).toBe(false);
+    expect(isCantonPaymentRequirements(withMemo(42))).toBe(false);
+  });
+
   it("is at least as strict as the envelope it narrows", () => {
     // The concrete schema was LOOSER than the loose one: these all passed
     // isCantonPaymentRequirements while failing isX402PaymentRequirements.
-    for (const key of ["scheme", "network", "amount", "asset", "payTo", "nonce", "validBefore"] as const) {
+    for (const key of ["scheme", "network", "amount", "asset", "payTo"] as const) {
       const bad = { ...requirements, [key]: "" };
       if (isX402PaymentRequirements(bad)) continue; // envelope rejects it...
       expect(isCantonPaymentRequirements(bad)).toBe(false); // ...so must this
@@ -139,8 +161,6 @@ describe("generic (loose) vs concrete (canton-exact) verify request", () => {
       network: "eip155:1",
       amount: "1000000",
       payTo: "0xC0ffee",
-      nonce: "n-bridge",
-      validBefore: "2999-01-01T00:00:00.000Z",
       maxTimeoutSeconds: 60,
       asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     },

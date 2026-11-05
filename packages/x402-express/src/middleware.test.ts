@@ -4,6 +4,7 @@ import express, { type Express } from "express";
 import request from "supertest";
 import {
   encodePaymentHeader,
+  isCantonPaymentRequirements,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
 } from "@chainsafe/x402-core";
@@ -46,6 +47,12 @@ function makeApp(opts: Partial<PaymentRequiredOptions> = {}): Express {
   return app;
 }
 
+const ECHOED_EXTRA = {
+  assetTransferMethod: "transfer-factory",
+  executeBeforeSeconds: 120,
+  instrumentId: { id: "Amulet", admin: "DSO::x" },
+};
+
 /** Build an `X-PAYMENT` header echoing acceptable requirements. */
 function paymentHeader(overrides: Record<string, unknown> = {}): string {
   const requirements = {
@@ -53,12 +60,10 @@ function paymentHeader(overrides: Record<string, unknown> = {}): string {
     network: "canton:x",
     amount: "500000000",
     asset: "CC",
-    extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::x" } },
+    extra: ECHOED_EXTRA,
     payTo: "merchant::x",
     resource: "https://f.example/paid",
     description: "Access",
-    nonce: "nonce-1",
-    validBefore: new Date(Date.now() + 300_000).toISOString(),
     maxTimeoutSeconds: 60,
     ...overrides,
   } as unknown as CantonPaymentRequirements;
@@ -166,11 +171,9 @@ describe("paymentRequired", () => {
             network: "canton:x",
             amount: "0.05", // CC where atomic units are required
             asset: "CC",
-            extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::x" } },
+            extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
             payTo: "merchant::x",
             resource: "https://f.example/paid",
-            nonce: "n",
-            validBefore: new Date(Date.now() + 300_000).toISOString(),
             maxTimeoutSeconds: 60,
           }) as unknown as CantonPaymentRequirements,
       }),
@@ -222,33 +225,6 @@ describe("paymentRequired", () => {
     expect(res.status).toBe(500);
   });
 
-  it("uses a merchant-supplied nonce generator (so it can record it)", async () => {
-    stubFacilitator();
-    const seen: string[] = [];
-    const app = express();
-    app.use(
-      "/paid",
-      paymentRequired({
-        ...baseOptions,
-        requirements: {
-          network: "canton:x",
-          payTo: "merchant::x",
-          asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
-          amount: "500000000",
-          nonce: () => {
-            const n = `merchant-nonce-${seen.length}`;
-            seen.push(n);
-            return n;
-          },
-        },
-      }),
-    );
-    app.get("/paid", (_req, res) => res.json({ ok: true }));
-    const res = await request(app).get("/paid");
-    expect(res.body.accepts[0].nonce).toBe("merchant-nonce-0");
-    expect(seen).toEqual(["merchant-nonce-0"]); // merchant observed/recorded it
-  });
-
   it("advertises the reserved assetTransferMethod and a maxTimeoutSeconds", async () => {
     // Both are required of the 402 now, and a merchant states neither — the
     // method has one legal value and the timeout has a default.
@@ -284,6 +260,51 @@ describe("paymentRequired", () => {
     expect((await request(app).get("/paid/fast")).body.accepts[0].maxTimeoutSeconds).toBe(30);
   });
 
+  it("quotes an executeBeforeSeconds, and a memo only when the merchant sets one", async () => {
+    stubFacilitator();
+    const app = express();
+    app.use("/paid", paymentRequired(baseOptions));
+    app.get("/paid", (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.body.accepts[0].extra.executeBeforeSeconds).toBe(120);
+    // Quoting a memo BINDS it (Rule 12), so one is never invented on the
+    // merchant's behalf — an unasked-for memo would refuse honest payments.
+    expect(res.body.accepts[0].extra).not.toHaveProperty("memo");
+  });
+
+  it("asks the merchant for a memo per challenge, and records what it issued", async () => {
+    // Quoting a memo binds it (Rule 12), so it is the merchant's reconciliation
+    // key: generated AND recorded merchant-side, one call per challenge.
+    stubFacilitator();
+    const seen: string[] = [];
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::1220y",
+          asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+          amount: "500000000",
+          executeBeforeSeconds: 300,
+          memo: (req) => {
+            const m = `invoice-${seen.length}${req.path}`;
+            seen.push(m);
+            return m;
+          },
+        },
+      }),
+    );
+    app.get("/a", (_req, res) => res.json({ ok: true }));
+    const first = await request(app).get("/paid/a");
+    const second = await request(app).get("/paid/a");
+    expect(first.body.accepts[0].extra.executeBeforeSeconds).toBe(300);
+    expect(first.body.accepts[0].extra.memo).toBe("invoice-0/a");
+    expect(second.body.accepts[0].extra.memo).toBe("invoice-1/a");
+    expect(seen).toEqual(["invoice-0/a", "invoice-1/a"]); // merchant observed both
+  });
+
   it("supports a full requirements builder function", async () => {
     stubFacilitator();
     const app = express();
@@ -296,12 +317,10 @@ describe("paymentRequired", () => {
           network: "canton:x",
           amount: "500000000",
           asset: "CC",
-          extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::x" } },
+          extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
           payTo: "merchant::x",
           resource: "/r",
           description: "d",
-          nonce: "custom-nonce",
-          validBefore: new Date(Date.now() + 300_000).toISOString(),
           maxTimeoutSeconds: 60,
         }),
       }),
@@ -309,7 +328,8 @@ describe("paymentRequired", () => {
     app.get("/paid", (_req, res) => res.json({ ok: true }));
     const res = await request(app).get("/paid");
     expect(res.status).toBe(402);
-    expect(res.body.accepts[0].nonce).toBe("custom-nonce");
+    // The builder owns the whole object: nothing is defaulted over it.
+    expect(res.body.accepts[0]).toMatchObject({ resource: "/r", description: "d" });
   });
 
   it("responds 402 with well-formed requirements when there is no X-PAYMENT", async () => {
@@ -320,8 +340,9 @@ describe("paymentRequired", () => {
     expect(res.body.error).toBe("payment_required");
     const req0 = res.body.accepts[0];
     expect(req0).toMatchObject({ payTo: "merchant::x", amount: "500000000", network: "canton:x" });
-    expect(typeof req0.nonce).toBe("string");
-    expect(Date.parse(req0.validBefore)).toBeGreaterThan(Date.now());
+    // Not a field list: the guard is what a payer runs, so a required field the
+    // middleware forgets to fill in fails here rather than at someone's client.
+    expect(isCantonPaymentRequirements(req0)).toBe(true);
   });
 
   it("verifies and lets a paid request through (verify-only by default, no settle)", async () => {
@@ -364,14 +385,21 @@ describe("paymentRequired", () => {
 
   it("hands back a FRESH challenge (not the dead echoed one) on nonce_replayed", async () => {
     stubFacilitator({ verify: { isValid: false, invalidReason: "nonce_replayed" } });
-    const res = await request(makeApp())
+    // The memo is what carries per-challenge identity now, so quoting one is
+    // what makes "fresh" observably different from "echoed".
+    let issued = 0;
+    const app = makeApp({
+      requirements: { ...(baseOptions.requirements as object), memo: () => `challenge-${++issued}` } as never,
+    });
+    const res = await request(app)
       .get("/paid")
-      .set("X-PAYMENT", paymentHeader({ nonce: "dead-nonce" }));
+      .set("X-PAYMENT", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "spent-memo" } }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("nonce_replayed");
-    // The echoed nonce is spent; accepts[] must advertise a new one so a retrying
-    // agent isn't looped on the dead challenge.
-    expect(res.body.accepts[0].nonce).not.toBe("dead-nonce");
+    // The echoed reference is spent; accepts[] must advertise a new one so a
+    // retrying agent isn't looped on the dead challenge.
+    expect(res.body.accepts[0].extra.memo).toBe("challenge-1");
+    expect(res.body.accepts[0].extra.memo).not.toBe("spent-memo");
   });
 
   it("settles when settle mode is enabled and sets X-PAYMENT-RESPONSE", async () => {
@@ -435,7 +463,7 @@ describe("paymentRequired", () => {
       .get("/paid")
       .set(
         "X-PAYMENT",
-        paymentHeader({ extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::impostor" } } }),
+        paymentHeader({ extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::impostor" } } }),
       );
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_asset");
@@ -448,7 +476,7 @@ describe("paymentRequired", () => {
       .get("/paid")
       .set(
         "X-PAYMENT",
-        paymentHeader({ extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "USDCx", admin: "DSO::x" } } }),
+        paymentHeader({ extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "DSO::x" } } }),
       );
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_asset");
