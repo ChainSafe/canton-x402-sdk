@@ -155,8 +155,8 @@ describe("cantonExactVerifier", () => {
       {
         sender: payer,
         receiver: requirements.payTo,
-        amount: requirements.maxAmountRequired,
-        instrumentId: requirements.asset.instrumentId,
+        amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
+        instrumentId: requirements.extra.instrumentId,
       },
       { extra: { node: wrap(1, new Uint8Array()) } },
     );
@@ -175,8 +175,8 @@ describe("cantonExactVerifier", () => {
       {
         sender: payer,
         receiver: requirements.payTo,
-        amount: requirements.maxAmountRequired,
-        instrumentId: requirements.asset.instrumentId,
+        amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
+        instrumentId: requirements.extra.instrumentId,
       },
       { nodes: [encodeNode("0", wrap(1, new Uint8Array()))] },
     );
