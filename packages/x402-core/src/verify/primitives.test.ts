@@ -117,12 +117,13 @@ describe("shape guards + scheme/network match", () => {
   const requirements = {
     scheme: "exact",
     network: "canton:devnet",
-    maxAmountRequired: "0.01",
+    amount: "0.01",
     payTo: "merchant::1220x",
     resource: "/r",
     nonce: "n",
     validBefore: "2026-01-01T00:00:00.000Z",
-    asset: { instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
+    asset: "CC",
+    extra: { instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   } as CantonPaymentRequirements;
   const inner = {
     payer: "alice::1220x",

@@ -4,6 +4,7 @@ import {
   isCantonPaymentInner,
   parseCantonPaymentInner,
   isCantonPaymentRequirements,
+  isX402PaymentRequirements,
   parseCantonPaymentRequirements,
   isCantonVerifyRequest,
   isX402Request,
@@ -24,8 +25,9 @@ const inner: CantonPaymentInner = {
 const requirements: CantonPaymentRequirements = {
   scheme: "exact",
   network: "canton:devnet",
-  maxAmountRequired: "0.01",
-  asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+  amount: "0.01",
+  asset: "CC",
+  extra: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
   resource: "/api/resource",
   nonce: "550e8400-e29b-41d4-a716-446655440000",
@@ -64,7 +66,26 @@ describe("schema-first guards + parsers", () => {
 
   it("rejects wrong field types", () => {
     expect(isCantonPaymentInner({ ...inner, payer: 42 })).toBe(false);
-    expect(isCantonPaymentRequirements({ ...requirements, asset: { instrumentId: { id: "Amulet" } } })).toBe(false);
+    expect(isCantonPaymentRequirements({ ...requirements, extra: { instrumentId: { id: "Amulet" } } })).toBe(false);
+  });
+
+  it("rejects an empty string in any required field", () => {
+    // Present but empty is not valid. `asset: ""` names no symbol, `payTo: ""`
+    // no party. Each is checked on its own so one field's rule cannot stand in
+    // for another's.
+    for (const key of ["scheme", "network", "amount", "asset", "payTo", "resource", "nonce", "validBefore"] as const) {
+      expect(isCantonPaymentRequirements({ ...requirements, [key]: "" })).toBe(false);
+    }
+  });
+
+  it("is at least as strict as the envelope it narrows", () => {
+    // The concrete schema was LOOSER than the loose one: these all passed
+    // isCantonPaymentRequirements while failing isX402PaymentRequirements.
+    for (const key of ["scheme", "network", "amount", "asset", "payTo", "nonce", "validBefore"] as const) {
+      const bad = { ...requirements, [key]: "" };
+      if (isX402PaymentRequirements(bad)) continue; // envelope rejects it...
+      expect(isCantonPaymentRequirements(bad)).toBe(false); // ...so must this
+    }
   });
 });
 
@@ -86,11 +107,11 @@ describe("generic (loose) vs concrete (canton-exact) verify request", () => {
     paymentRequirements: {
       scheme: "batch-settlement-canton",
       network: "eip155:1",
-      maxAmountRequired: "1000000",
+      amount: "1000000",
       payTo: "0xC0ffee",
       nonce: "n-bridge",
       validBefore: "2999-01-01T00:00:00.000Z",
-      asset: { chainId: 1 },
+      asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     },
   };
 

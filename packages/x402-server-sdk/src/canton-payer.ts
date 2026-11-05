@@ -52,7 +52,7 @@ export class CantonX402Payer implements X402Payer {
     return (
       requirements.scheme === EXACT_SCHEME_ID &&
       requirements.network === this.opts.network &&
-      this.registryFor(requirements.asset.instrumentId) !== undefined
+      this.registryFor(requirements.extra.instrumentId) !== undefined
     );
   }
 
@@ -66,17 +66,17 @@ export class CantonX402Payer implements X402Payer {
 
   async authorize(requirements: CantonPaymentRequirements): Promise<CantonPaymentPayload> {
     // Capability gate — supports() covers scheme + network + a configured registry.
-    const registryUrl = this.registryFor(requirements.asset.instrumentId);
+    const registryUrl = this.registryFor(requirements.extra.instrumentId);
     if (!this.supports(requirements) || !registryUrl) {
-      const { id, admin } = requirements.asset.instrumentId;
+      const { id, admin } = requirements.extra.instrumentId;
       throw new Error(
         `x402: unsupported requirement (scheme "${requirements.scheme}", network "${requirements.network}", asset "${id}" admin "${admin}")`,
       );
     }
 
     // Per-request validity — not a capability, so checked here rather than in supports().
-    if (!isValidAmount(requirements.maxAmountRequired)) {
-      throw new Error(`x402: invalid amount "${requirements.maxAmountRequired}"`);
+    if (!isValidAmount(requirements.amount)) {
+      throw new Error(`x402: invalid amount "${requirements.amount}"`);
     }
     if (isExpired(requirements.validBefore)) {
       throw new Error(`x402: requirements expired at ${requirements.validBefore}`);
@@ -88,8 +88,8 @@ export class CantonX402Payer implements X402Payer {
     const [command, disclosed] = await sdk.token.transfer.create({
       sender: key.partyId,
       recipient: requirements.payTo,
-      amount: requirements.maxAmountRequired,
-      instrumentId: requirements.asset.instrumentId.id,
+      amount: requirements.amount,
+      instrumentId: requirements.extra.instrumentId.id,
       registryUrl,
     });
 

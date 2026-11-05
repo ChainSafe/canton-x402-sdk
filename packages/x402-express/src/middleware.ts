@@ -1,11 +1,14 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { randomUUID } from "node:crypto";
 import {
+  assetSymbol,
+  isCantonPaymentRequirements,
   isValidAmount,
   decodePaymentHeader,
   type AssetSpec,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
+  type X402PaymentRequirements,
   type SettleResponse,
   type VerifyResponse,
 } from "@chainsafe/x402-core";
@@ -228,6 +231,7 @@ async function buildRequirements(
   if (typeof source === "function") return source(req);
 
   const amount = await resolve(source.amount, req);
+  const instrument = await resolve(source.asset, req);
   if (!isValidAmount(amount)) {
     throw new Error(`paymentRequired: amount "${amount}" is not a valid decimal amount`);
   }
@@ -237,8 +241,11 @@ async function buildRequirements(
   return {
     scheme: await resolve(source.scheme ?? DEFAULT_SCHEME, req),
     network: await resolve(source.network, req),
-    maxAmountRequired: amount,
-    asset: await resolve(source.asset, req),
+    amount,
+    // The merchant declares the instrument; the spec's `asset` is only a
+    // symbol, so the full `{admin, id}` travels where a payer can read it.
+    asset: assetSymbol(instrument.instrumentId),
+    extra: { instrumentId: instrument.instrumentId },
     payTo: await resolve(source.payTo, req),
     resource: source.resource ? await resolve(source.resource, req) : absoluteUrl(req),
     description: source.description ? await resolve(source.description, req) : `Access to ${req.path}`,
@@ -254,23 +261,34 @@ async function resolve<T>(value: Resolvable<T>, req: Request): Promise<T> {
 
 /** Ensure client-echoed requirements are acceptable per merchant policy. */
 function validateEchoedRequirements(
-  echoed: CantonPaymentRequirements,
+  echoed: X402PaymentRequirements<unknown>,
   policy: CantonPaymentRequirements,
 ): string | null {
+  // The header is only ENVELOPE-validated on decode, and the envelope is a
+  // looseObject that does not require `extra`. decodePaymentHeader types the
+  // result optimistically as canton-exact; nothing has checked it. Narrow
+  // before reading a field, or a header without `extra` throws a TypeError and
+  // answers 500 instead of 402 — attacker-controlled input choosing our status
+  // code. This is also why the parameter is the envelope type, not the
+  // concrete one: the old signature asserted a shape no one had verified.
+  if (!isCantonPaymentRequirements(echoed)) return "policy_requirements_invalid";
   if (echoed.scheme !== policy.scheme) return "policy_scheme";
   if (echoed.network !== policy.network) return "policy_network";
   if (echoed.payTo !== policy.payTo) return "policy_payTo";
   // Bind the payment to THIS resource: without it, a payment minted for path A
   // (matching price/payTo/asset) could be replayed against path B.
   if (echoed.resource !== policy.resource) return "policy_resource";
-  if (echoed.asset.instrumentId.id !== policy.asset.instrumentId.id) return "policy_asset";
-  if (echoed.asset.instrumentId.admin !== policy.asset.instrumentId.admin) return "policy_asset";
+  // The instrument, not the symbol: `asset` alone cannot say which registry
+  // issued it, so comparing symbols would admit a look-alike from another.
+  if (echoed.extra.instrumentId.id !== policy.extra.instrumentId.id) return "policy_asset";
+  if (echoed.extra.instrumentId.admin !== policy.extra.instrumentId.admin) return "policy_asset";
+  if (echoed.asset !== policy.asset) return "policy_asset";
   // Validate the amount's FORMAT before comparing: Number("abc") is NaN and
   // Number("Infinity") is Infinity, and both make the "<" test false — so a
   // malformed amount would otherwise slip past the underpricing check.
-  if (!isValidAmount(echoed.maxAmountRequired)) return "policy_amount_invalid";
+  if (!isValidAmount(echoed.amount)) return "policy_amount_invalid";
   // The merchant priced this request; an echoed requirement must not undercut it.
-  if (Number(echoed.maxAmountRequired) < Number(policy.maxAmountRequired)) return "policy_underpriced";
+  if (Number(echoed.amount) < Number(policy.amount)) return "policy_underpriced";
   if (Date.parse(echoed.validBefore) <= Date.now()) return "requirements_expired";
   return null;
 }

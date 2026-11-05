@@ -28,8 +28,9 @@ describe("findTransferMismatch", () => {
   const requirements: CantonPaymentRequirements = {
     scheme: "exact",
     network: "canton:devnet",
-    maxAmountRequired: "0.01",
-    asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+    amount: "0.01",
+    asset: "CC",
+    extra: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
     payTo: "merchant::1220dead",
     resource: "/api/resource",
     nonce: "n-1",

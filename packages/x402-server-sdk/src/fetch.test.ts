@@ -10,8 +10,9 @@ import type { X402Payer } from "./payer";
 const requirements = {
   scheme: "exact",
   network: "canton:x",
-  maxAmountRequired: "0.05",
-  asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+  amount: "0.05",
+  asset: "CC",
+  extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
   payTo: "merchant::x",
   resource: "https://api.example/paid",
   nonce: "n1",

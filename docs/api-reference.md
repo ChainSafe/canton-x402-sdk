@@ -105,8 +105,9 @@ guarantee.
   "paymentRequirements": {
     "scheme": "exact",
     "network": "canton:devnet",
-    "maxAmountRequired": "0.05",
-    "asset": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
+    "amount": "0.05",
+    "asset": "CC",
+    "extra": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
     "payTo": "merchant::1220…",
     "resource": "https://api.example.com/paid",
     "description": "Access to /paid",
@@ -123,11 +124,13 @@ guarantee.
 | `x402Version`                               | Must be exactly `2`, at the top level and inside `paymentPayload`.                                                                                                                                                                                                             |
 | `paymentPayload.payload`                    | The seven fields above, all required. `publicKey` replaced the older `keyFingerprint` — the facilitator derives the fingerprint from the key and matches it against the payer party's `::` suffix.                                                                             |
 | `requirementsHash`                          | SHA-256 of the RFC 8785 canonicalization of `paymentRequirements`; it must match the requirements sent alongside it. The signature itself covers the prepared transaction, whose sender, receiver, instrument and amount the facilitator checks against `paymentRequirements`. |
-| `maxAmountRequired`                         | Decimal string with at most 10 decimal places, and a floor rather than an exact amount — an overpayment settles and reports what actually moved.                                                                                                                               |
+| `amount`                                    | Decimal string with at most 10 decimal places, and a floor rather than an exact amount — an overpayment settles and reports what actually moved.                                                                                                                               |
 | `payTo`                                     | Must be a party your API key owns. Otherwise verify answers `transfer_mismatch` and settle answers `unauthorized`.                                                                                                                                                             |
 | `resource`                                  | Required — the URL being paid for.                                                                                                                                                                                                                                             |
 | `nonce`, `validBefore`                      | Required and non-empty; `validBefore` is ISO 8601 and settle refuses a quote past it.                                                                                                                                                                                          |
-| `description`, `maxTimeoutSeconds`, `extra` | Optional.                                                                                                                                                                                                                                                                      |
+| `asset`                                     | A symbol — `"CC"` for Canton Coin, or a registry token's own. The instrument it names is `extra.instrumentId`.
+| `extra.instrumentId`                        | Required `{admin, id}`: `asset` alone cannot say which registry issued the instrument, and the facilitator binds the transfer against this.
+| `description`, `maxTimeoutSeconds`          | Optional.                                                                                                                                                                                                                                                                      |
 
 ### Response 200 — accepted
 
@@ -182,8 +185,9 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
   "paymentRequirements": {
     "scheme": "exact",
     "network": "canton:devnet",
-    "maxAmountRequired": "0.05",
-    "asset": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
+    "amount": "0.05",
+    "asset": "CC",
+    "extra": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
     "payTo": "merchant::1220…",
     "resource": "https://api.example.com/paid",
     "nonce": "3f1c…",
@@ -234,8 +238,9 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
   "paymentRequirements": {
     "scheme": "exact",
     "network": "canton:devnet",
-    "maxAmountRequired": "0.05",
-    "asset": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
+    "amount": "0.05",
+    "asset": "CC",
+    "extra": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
     "payTo": "merchant::1220…",
     "resource": "https://api.example.com/paid",
     "description": "Access to /paid",
