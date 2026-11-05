@@ -36,6 +36,14 @@ export type NetworkId = string;
  */
 export type Scheme = "exact" | (string & {});
 
+/**
+ * How value moves for canton-exact: the payer signs a `TransferFactory_Transfer`
+ * and the facilitator relays it. The protocol reserves the key name and leaves
+ * the vocabulary to each mechanism; this is the only value Canton's `exact`
+ * defines, so it is a literal rather than a union.
+ */
+export const ASSET_TRANSFER_METHOD = "transfer-factory";
+
 /** Splice Token Standard instrument identifier. */
 export const InstrumentIdSchema = v.object({
   /** Instrument name. For Canton Coin: "Amulet". */

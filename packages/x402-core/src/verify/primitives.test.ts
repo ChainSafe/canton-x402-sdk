@@ -152,8 +152,9 @@ describe("shape guards + scheme/network match", () => {
     resource: "/r",
     nonce: "n",
     validBefore: "2026-01-01T00:00:00.000Z",
+    maxTimeoutSeconds: 60,
     asset: "CC",
-    extra: { instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
+    extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   } as CantonPaymentRequirements;
   const inner = {
     payer: "alice::1220x",

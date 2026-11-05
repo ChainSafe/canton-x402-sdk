@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { randomUUID } from "node:crypto";
 import {
+  ASSET_TRANSFER_METHOD,
   assetSymbol,
   isCantonPaymentRequirements,
   isValidAmount,
@@ -44,6 +45,11 @@ export interface RequirementsSpec {
   description?: Resolvable<string>;
   /** Validity window in seconds for the built `validBefore`. Default 300. */
   validForSeconds?: Resolvable<number>;
+  /**
+   * Seconds the client has to complete payment. Default 60. Distinct from
+   * `validForSeconds`, which says how long this quote stays settleable.
+   */
+  maxTimeoutSeconds?: Resolvable<number>;
   /**
    * Generate (and, if you want, persist) the challenge nonce for this request —
    * e.g. record it merchant-side for reconciliation. Called once per challenge, so
@@ -113,6 +119,7 @@ declare global {
 
 const DEFAULT_SCHEME = "exact";
 const DEFAULT_VALIDITY_SECONDS = 300;
+const DEFAULT_MAX_TIMEOUT_SECONDS = 60;
 
 /** Internal control-flow signal: reject the request with a 402, echoing `requirements`. */
 class PaymentRejection extends Error {
@@ -250,12 +257,15 @@ async function buildRequirements(
     // The merchant declares the instrument; the spec's `asset` is only a
     // symbol, so the full `{admin, id}` travels where a payer can read it.
     asset: assetSymbol(instrument.instrumentId),
-    extra: { instrumentId: instrument.instrumentId },
+    extra: { assetTransferMethod: ASSET_TRANSFER_METHOD, instrumentId: instrument.instrumentId },
     payTo: await resolve(source.payTo, req),
     resource: source.resource ? await resolve(source.resource, req) : absoluteUrl(req),
     description: source.description ? await resolve(source.description, req) : `Access to ${req.path}`,
     nonce: source.nonce ? await source.nonce(req) : randomUUID(),
     validBefore: new Date(Date.now() + validForSeconds * 1000).toISOString(),
+    maxTimeoutSeconds: source.maxTimeoutSeconds
+      ? await resolve(source.maxTimeoutSeconds, req)
+      : DEFAULT_MAX_TIMEOUT_SECONDS,
   });
 }
 

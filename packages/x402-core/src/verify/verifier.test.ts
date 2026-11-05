@@ -36,11 +36,12 @@ function buildSignedFixture() {
     network: NETWORK,
     amount: "100000000",
     asset: "CC",
-    extra: { instrumentId: { id: "Amulet", admin: "DSO::1220dso" } },
+    extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220dso" } },
     payTo: "merchant::1220merch",
     resource: "/api/resource",
     nonce: "550e8400-e29b-41d4-a716-446655440000",
     validBefore: "2999-01-01T00:00:00.000Z",
+    maxTimeoutSeconds: 60,
   };
 
   const preparedTransactionHash = "aa".repeat(32); // 32-byte hex message

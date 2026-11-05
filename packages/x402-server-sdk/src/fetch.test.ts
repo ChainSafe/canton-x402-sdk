@@ -12,11 +12,12 @@ const requirements = {
   network: "canton:x",
   amount: "500000000",
   asset: "CC",
-  extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+  extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::x" } },
   payTo: "merchant::x",
   resource: "https://api.example/paid",
   nonce: "n1",
   validBefore: "2999-01-01T00:00:00.000Z",
+  maxTimeoutSeconds: 60,
 } as CantonPaymentRequirements;
 
 const payload = {
