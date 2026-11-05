@@ -4,7 +4,6 @@ import {
   isExpired,
   WIRE_DECIMALS,
   atomicToLedger,
-  requirementsHash,
   signHash,
   signatureToBase64,
   gzipPreparedTransaction,
@@ -127,7 +126,6 @@ export class CantonX402Payer implements X402Payer {
         preparedTransaction: gzipPreparedTransaction(Buffer.from(response.preparedTransaction, "base64")),
         preparedTxHash,
         signature,
-        requirementsHash: requirementsHash(requirements),
         publicKey: key.publicKey,
         // Must be exactly what prepare used — the signature is bound to a hash
         // computed with this version, so the facilitator's execute must match it.

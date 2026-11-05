@@ -172,8 +172,8 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       if (!header) throw new PaymentRejection("payment_required", fresh);
 
       // The X-PAYMENT envelope carries the requirements the payload was signed
-      // against; verify against those (their requirementsHash binds to a specific
-      // nonce + validBefore), after checking them against merchant policy.
+      // against; verify against those (they carry the nonce + validBefore the
+      // payer was quoted), after checking them against merchant policy.
       let payload: CantonPaymentPayload;
       let requirements: CantonPaymentRequirements;
       try {

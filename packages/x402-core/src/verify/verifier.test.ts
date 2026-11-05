@@ -12,7 +12,7 @@ import {
   signatureToBase64,
   signHash,
 } from "./index";
-import { requirementsHash } from "../hashing";
+import { requirementsHash as requirementsHashOf } from "../hashing";
 import { encodeNode, encodePreparedTransaction, wrap } from "./prepared-tx.fixtures";
 import type {
   CantonPaymentPayload,
@@ -76,7 +76,6 @@ function buildSignedFixture() {
       preparedTransaction,
       preparedTxHash,
       signature: signatureToBase64(signatureHex),
-      requirementsHash: requirementsHash(requirements),
       publicKey: pubB64,
       hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
     },
@@ -131,24 +130,20 @@ describe("cantonExactVerifier", () => {
   it("rejects expired requirements", () => {
     const { payload, requirements } = buildSignedFixture();
     const expired = { ...requirements, validBefore: "2000-01-01T00:00:00.000Z" };
-    // requirementsHash is bound to the requirements, so re-derive after mutating.
-    const p = {
-      ...payload,
-      payload: { ...payload.payload, requirementsHash: requirementsHash(expired) },
-    };
-    expect(verifier.verify(p, expired)).toMatchObject({
+    expect(verifier.verify(payload, expired)).toMatchObject({
       isValid: false,
       invalidReason: "requirements_expired",
     });
   });
 
-  it("rejects a requirementsHash that doesn't bind to the requirements", () => {
-    const { payload, requirements } = buildSignedFixture();
-    const p = { ...payload, payload: { ...payload.payload, requirementsHash: "deadbeef" } };
-    expect(verifier.verify(p, requirements)).toMatchObject({
-      isValid: false,
-      invalidReason: "requirements_hash_mismatch",
-    });
+  it("ignores a requirementsHash an older payer still sends, right or wrong", () => {
+    // The spec has no such field, and an unsigned hash binds nothing the decoded
+    // transfer does not: it is not checked, so a stale one does not fail the payment.
+    const { payload, requirements, payer } = buildSignedFixture();
+    for (const requirementsHash of [requirementsHashOf(requirements), "deadbeef"]) {
+      const p = { ...payload, payload: { ...payload.payload, requirementsHash } };
+      expect(verifier.verify(p, requirements)).toEqual({ isValid: true, payer });
+    }
   });
 
   it("rejects a payer whose fingerprint doesn't match the public key", () => {
@@ -390,9 +385,8 @@ describe("createVerifierRegistry", () => {
 
 describe("the ids the verifier answers to", () => {
   /**
-   * The fixture re-pointed at another scheme/network. `requirementsHash` walks
-   * the whole requirements object, so changing either re-derives it — a payload
-   * paying `exact` must be bound to requirements that say `exact`.
+   * The fixture re-pointed at another scheme/network, on both the payload and the
+   * requirements, so only the id under test differs from a valid payment.
    */
   function fixtureFor(scheme: string, network: string) {
     const { payload, requirements, payer } = buildSignedFixture();
@@ -404,7 +398,6 @@ describe("the ids the verifier answers to", () => {
         ...payload,
         scheme,
         network,
-        payload: { ...payload.payload, requirementsHash: requirementsHash(req) },
       },
     };
   }
@@ -449,8 +442,9 @@ describe("the ids the verifier answers to", () => {
   });
 
   it("refuses requirements naming another scheme, even when the payload is right", () => {
-    // Needs its own case: with only the payload side checked this reaches the
-    // hash check and reports requirements_hash_mismatch instead.
+    // Needs its own case: nothing after the scheme check reads the requirements'
+    // scheme (the transfer does not carry it), so checking only the payload side
+    // would let this verify.
     const { payload, requirements } = fixtureFor(EXACT_SCHEME_ID, NETWORK);
     expect(
       verifier.verify(payload, { ...requirements, scheme: "exact-canton" }),

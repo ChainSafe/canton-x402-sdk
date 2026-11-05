@@ -12,7 +12,6 @@ const payload: CantonPaymentPayload = {
     preparedTransaction: "b",
     preparedTxHash: "h",
     signature: "s",
-    requirementsHash: "rh",
     publicKey: "pk",
     hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
   },

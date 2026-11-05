@@ -23,7 +23,6 @@ import {
   isValidAmount,
   isExpired,
   ledgerToAtomic,
-  requirementsHashMatches,
   WIRE_DECIMALS,
 } from "./common";
 import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
@@ -203,11 +202,7 @@ function verifyCantonExact(
   const inner = raw;
   // 4. expiry
   if (isExpired(requirements.validBefore)) return fail("requirements_expired", inner.payer);
-  // 5. requirementsHash binds the signed payload to this exact PaymentRequirements
-  if (!requirementsHashMatches(requirements, inner.requirementsHash)) {
-    return fail("requirements_hash_mismatch", inner.payer);
-  }
-  // 6. public key well-formed (32-byte Ed25519). Malformed key bytes are
+  // 5. public key well-formed (32-byte Ed25519). Malformed key bytes are
   //    indistinguishable from "no usable key" here → missing_public_key.
   let derivedFingerprint: string;
   try {
@@ -215,13 +210,13 @@ function verifyCantonExact(
   } catch {
     return fail("missing_public_key", inner.payer);
   }
-  // 7. the fingerprint derived from the public key must match the payer's
+  // 6. the fingerprint derived from the public key must match the payer's
   //    `::<fingerprint>` suffix (replaces the removed wire `keyFingerprint`)
   const partySuffix = inner.payer.split("::")[1];
   if (!partySuffix || derivedFingerprint.toLowerCase() !== partySuffix.toLowerCase()) {
     return fail("bad_fingerprint", inner.payer);
   }
-  // 8. signature over the prepared-transaction hash, each in the one encoding
+  // 7. signature over the prepared-transaction hash, each in the one encoding
   //    the spec gives it. The facilitator relays `signature` to the ledger as
   //    is. `preparedTxHash` is keyed on (the facilitator's submissionId), so one
   //    hash has one spelling: an upper-case copy decodes to the same bytes and
@@ -234,11 +229,11 @@ function verifyCantonExact(
   ) {
     return fail("bad_signature", inner.payer);
   }
-  // 9. the signed transfer must actually move what the requirements demand.
-  //    requirementsHash proves the payload *references* these requirements;
-  //    only decoding the prepared transaction proves it *satisfies* them —
-  //    binding sender/receiver/instrument/amount so a valid signature over a
-  //    divergent transfer (e.g. to another party, or a smaller amount) is rejected.
+  // 8. the signed transfer must actually move what the requirements demand.
+  //    This is the payload's one binding to the requirements: the signature
+  //    covers the prepared transaction, so decoding it and checking sender/
+  //    receiver/instrument/amount rejects a valid signature over a divergent
+  //    transfer (e.g. to another party, or a smaller amount).
   //    The payload carries it gzipped; a member that is malformed or over
   //    either bound is as undecodable as a bad protobuf.
   const prepared = gunzipPreparedTransaction(inner.preparedTransaction);

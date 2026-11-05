@@ -18,7 +18,6 @@ const inner: CantonPaymentInner = {
   preparedTransaction: "cHJlcGFyZWQ=",
   preparedTxHash: "deadbeef",
   signature: "cafe",
-  requirementsHash: "0f1e2d",
   publicKey: "cHVibGljS2V5",
   hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
 };

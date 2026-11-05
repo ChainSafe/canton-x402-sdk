@@ -118,7 +118,7 @@ interface X402Payer {
   `signatureToBase64`, since the payload carries `signature` as base64 and
   `preparedTxHash` as hex);
 - assembles the payload (`assetTransferMethod: "transfer-factory"`, the prepared transaction gzipped with `gzipPreparedTransaction`,
-  `requirementsHash`, required `publicKey`, and the `hashingSchemeVersion` prepare used)
+  required `publicKey`, and the `hashingSchemeVersion` prepare used)
   **without executing** — facilitator derives fingerprint from `publicKey` (`fingerprintForPublicKey`; no `keyFingerprint` on the wire).
 
 `CantonX402Payer` is stateless: double-settle is prevented by the facilitator (it

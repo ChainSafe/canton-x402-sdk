@@ -6,8 +6,8 @@ import type { CantonPaymentRequirements } from "./index";
 
 // Golden vector generated from the FACILITATOR's actual canonicalize.ts
 // (src/facilitator/canonicalize.ts) on this exact fixture. If either side's
-// canonicalization drifts, requirementsHash diverges and every /v2/verify fails —
-// so this test pins byte-for-byte parity. Regenerate ONLY if the facilitator's
+// canonicalization drifts, the two compute different hashes for the same
+// requirements — so this test pins byte-for-byte parity. Regenerate ONLY if the facilitator's
 // algorithm intentionally changes (and update the facilitator in lockstep).
 //
 // Last regenerated when `extra.assetTransferMethod` and `maxTimeoutSeconds`

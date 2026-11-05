@@ -3,7 +3,6 @@
 // fingerprints, canton-id shape) lives in the per-scheme module; anything
 // stateful (nonce replay, on-chain proof) stays in the facilitator.
 
-import { requirementsHash } from "../hashing";
 import type { X402PaymentPayload } from "../types/payment";
 import type { X402PaymentRequirements } from "../types/requirements";
 
@@ -72,17 +71,4 @@ export function schemeNetworkMatches(
   requirements: X402PaymentRequirements<unknown>,
 ): boolean {
   return payload.scheme === requirements.scheme && payload.network === requirements.network;
-}
-
-/**
- * True iff a claimed `requirementsHash` (hex) equals the canonical hash of the
- * requirements — the binding that stops a signed payload being replayed against a
- * different (resource, amount, payTo, …). Scheme-agnostic: the canonicalizer walks
- * the requirements structurally.
- */
-export function requirementsHashMatches(
-  requirements: X402PaymentRequirements<unknown>,
-  claimedHashHex: string,
-): boolean {
-  return requirementsHash(requirements) === claimedHashHex;
 }
