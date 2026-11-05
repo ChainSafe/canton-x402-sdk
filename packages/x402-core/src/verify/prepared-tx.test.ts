@@ -133,21 +133,50 @@ describe("decodePreparedTransaction reads only the node tree under the roots", (
   const parentOf = (...children: string[]) =>
     wrap(3, concat(wrap(9, utf8("SomeOtherChoice")), repeated(12, children))); // Exercise{12: children}
 
-  it("decodes a transfer nested under another exercise", () => {
+  it("decodes a transfer that is the transaction's only root", () => {
+    expect(decodePreparedTransaction(encodePreparedTransaction(TRANSFER))).toEqual(TRANSFER);
+  });
+
+  it("decodes a transfer whose own consequence is a rollback", () => {
+    // Children the transfer's choice produces are part of the payment, so they
+    // must still decode — and their nodes must be walked, or the reachability
+    // check reports them as orphans and refuses a legitimate transaction.
+    const blob = encodePreparedTransaction(TRANSFER, {
+      extra: { exercise: wrap(12, utf8("1")) }, // Exercise{12: children} → "1"
+      nodes: [encodeNode("1", rollbackOf("2")), encodeNode("2", create)],
+    });
+    expect(decodePreparedTransaction(blob)).toEqual(TRANSFER);
+  });
+
+  it("refuses a child that names no node, even when an orphan balances the count", () => {
+    // Without the missing-node check the phantom child is skipped, the orphan
+    // makes reached.size === nodes.size, and the unreachable node rides along.
+    const blob = encodePreparedTransaction(TRANSFER, {
+      extra: { exercise: wrap(12, utf8("99")) }, // child "99" does not exist
+      nodes: [encodeNode("5", create)], // orphan, balancing the count
+    });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  it("refuses a transfer nested under another exercise", () => {
+    // The payer would be having the facilitator relay, and pay for, whatever
+    // the outer choice does — none of which the verifier looked at.
     const blob = encodePreparedTransaction(TRANSFER, {
       nodeId: "1",
       roots: ["0"],
       nodes: [encodeNode("0", parentOf("1"))],
     });
-    expect(decodePreparedTransaction(blob)).toEqual(TRANSFER);
+    expect(decodePreparedTransaction(blob)).toBeNull();
   });
 
-  it("decodes a transfer next to a rollback node", () => {
+  it("refuses a transfer next to a second root", () => {
+    // A payment is one command, so its transaction is one tree. A sibling root
+    // is another leg, whatever it happens to contain.
     const blob = encodePreparedTransaction(TRANSFER, {
       roots: ["0", "1"],
       nodes: [encodeNode("1", rollbackOf("2")), encodeNode("2", create)],
     });
-    expect(decodePreparedTransaction(blob)).toEqual(TRANSFER);
+    expect(decodePreparedTransaction(blob)).toBeNull();
   });
 
   const cases: [string, EncodeOptions][] = [
@@ -172,6 +201,13 @@ describe("decodePreparedTransaction reads only the node tree under the roots", (
       { nodeId: "1", roots: ["0"], nodes: [encodeNode("0", rollbackOf("2")), encodeNode("2", parentOf("1"))] },
     ],
     ["a transfer under a rollback node", { nodeId: "1", roots: ["0"], nodes: [encodeNode("0", rollbackOf("1"))] }],
+    // Canton runs every transfer in the tree, so reporting the first would
+    // describe a payment the caller never made.
+    ["a second transfer under a second root", { roots: ["0", "1"], nodes: [encodeNode("1", transferBody(OTHER))] }],
+    [
+      "a second transfer nested under the first",
+      { extra: { exercise: wrap(12, utf8("1")) }, nodes: [encodeNode("1", transferBody(OTHER))] },
+    ],
   ];
 
   it.each(cases)("returns null for %s", (_, opts) => {
