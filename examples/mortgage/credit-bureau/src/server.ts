@@ -130,10 +130,11 @@ app.get("/v1/credit-score", (req, res) => {
   res.json({ ...creditReport(subject), payer: req.x402?.payer, cost: `${PRICE_CC} CC` });
 });
 
-// The x402 `X-PAYMENT` header carries the whole Canton payload (prepared-tx blob +
-// disclosed contracts), which far exceeds Node's default 16 KB header limit — so
-// create the server with a generous maxHeaderSize. Merchants gating Canton x402
-// routes must do this or the request is rejected with 431.
+// The x402 `X-PAYMENT` header carries the whole Canton payload (the gzipped
+// prepared tx with its disclosed contracts), about 10 KB: much of Node's default
+// 16 KB limit, which covers all of a request's headers together. So create the
+// server with a generous maxHeaderSize, or a paid request with a few more
+// headers is rejected with 431.
 createServer({ maxHeaderSize: 4 * 1024 * 1024 }, app).listen(PORT, () => {
   console.log(`[credit-bureau] listening on :${PORT} — network=${NETWORK}, price=${PRICE_CC} CC, payTo=${BUREAU_PARTY}`);
 });
