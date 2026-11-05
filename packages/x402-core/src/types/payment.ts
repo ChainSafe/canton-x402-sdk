@@ -25,14 +25,18 @@ export const CantonPaymentInnerSchema = v.object({
   payer: v.string(),
   /** Base64-encoded opaque blob from /v2/interactive-submission/prepare. */
   preparedTransaction: v.string(),
-  /** The hash the payer signed: 32 bytes as lower-case hex, no multihash prefix. */
-  preparedTxHash: v.string(),
+  /**
+   * The hash the payer signed: 32 bytes as lower-case hex, no multihash prefix.
+   * Non-empty here; the verifier checks the encoding itself.
+   */
+  preparedTxHash: v.pipe(v.string(), v.minLength(1)),
   /**
    * The payer's Ed25519 signature over `preparedTxHash`: 64 bytes as canonical
    * standard base64. Base64, not hex — the spec's encoding, and the one the
    * ledger's `partySignatures` takes, so the facilitator relays it unchanged.
+   * Non-empty here; the verifier checks the encoding itself.
    */
-  signature: v.string(),
+  signature: v.pipe(v.string(), v.minLength(1)),
   /** SHA-256 of the canonical (RFC-8785) PaymentRequirements. */
   requirementsHash: v.string(),
   /**

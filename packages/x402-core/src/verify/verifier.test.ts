@@ -253,6 +253,17 @@ describe("cantonExactVerifier", () => {
     }
   });
 
+  it("refuses an empty hash or signature at the shape check", () => {
+    const { payload, requirements } = buildSignedFixture();
+    for (const field of ["preparedTxHash", "signature"] as const) {
+      const p = { ...payload, payload: { ...payload.payload, [field]: "" } };
+      expect(verifier.verify(p, requirements)).toMatchObject({
+        isValid: false,
+        invalidReason: "internal_error",
+      });
+    }
+  });
+
   it("does not read the pre-spec field names", () => {
     const { payload, requirements } = buildSignedFixture();
     const { preparedTxHash, signature, ...rest } = payload.payload;

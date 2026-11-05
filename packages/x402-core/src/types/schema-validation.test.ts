@@ -104,6 +104,14 @@ describe("schema-first guards + parsers", () => {
     }
   });
 
+  it("rejects an empty hash or signature in the inner payload", () => {
+    // The verifier checks their encodings, but an empty one should not get
+    // that far: present but empty is no hash and no signature.
+    for (const key of ["preparedTxHash", "signature"] as const) {
+      expect(isCantonPaymentInner({ ...inner, [key]: "" })).toBe(false);
+    }
+  });
+
   it("is at least as strict as the envelope it narrows", () => {
     // The concrete schema was LOOSER than the loose one: these all passed
     // isCantonPaymentRequirements while failing isX402PaymentRequirements.
