@@ -107,12 +107,16 @@ guarantee.
     "network": "canton:devnet",
     "amount": "500000000",
     "asset": "CC",
-    "extra": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
+    "extra": {
+      "assetTransferMethod": "transfer-factory",
+      "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" }
+    },
     "payTo": "merchant::1220…",
     "resource": "https://api.example.com/paid",
     "description": "Access to /paid",
     "nonce": "3f1c…",
-    "validBefore": "2026-08-14T13:05:00.000Z"
+    "validBefore": "2026-08-14T13:05:00.000Z",
+    "maxTimeoutSeconds": 60
   }
 }
 ```
@@ -130,7 +134,9 @@ guarantee.
 | `nonce`, `validBefore`                      | Required and non-empty; `validBefore` is ISO 8601 and settle refuses a quote past it.                                                                                                                                                                                          |
 | `asset`                                     | A symbol — `"CC"` for Canton Coin, or a registry token's own. The instrument it names is `extra.instrumentId`.
 | `extra.instrumentId`                        | Required `{admin, id}`: `asset` alone cannot say which registry issued the instrument, and the facilitator binds the transfer against this.
-| `description`, `maxTimeoutSeconds`          | Optional.                                                                                                                                                                                                                                                                      |
+| `maxTimeoutSeconds`                         | Required — seconds the client has to complete payment. A whole number of at least 1; `0`, a negative, a fraction and `Infinity` are all refused.
+| `extra.assetTransferMethod`                 | Required, and MUST be `"transfer-factory"`. A reserved protocol key, so any other value is refused rather than carried through as scheme data.
+| `description`                               | Optional.                                                                                                                                                                                                                                                                      |
 
 ### Response 200 — accepted
 
@@ -187,11 +193,15 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
     "network": "canton:devnet",
     "amount": "500000000",
     "asset": "CC",
-    "extra": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
+    "extra": {
+      "assetTransferMethod": "transfer-factory",
+      "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" }
+    },
     "payTo": "merchant::1220…",
     "resource": "https://api.example.com/paid",
     "nonce": "3f1c…",
-    "validBefore": "2026-08-14T13:05:00.000Z"
+    "validBefore": "2026-08-14T13:05:00.000Z",
+    "maxTimeoutSeconds": 60
   }
 }
 JSON
@@ -240,12 +250,16 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
     "network": "canton:devnet",
     "amount": "500000000",
     "asset": "CC",
-    "extra": { "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" } },
+    "extra": {
+      "assetTransferMethod": "transfer-factory",
+      "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" }
+    },
     "payTo": "merchant::1220…",
     "resource": "https://api.example.com/paid",
     "description": "Access to /paid",
     "nonce": "3f1c…",
-    "validBefore": "2026-08-14T13:05:00.000Z"
+    "validBefore": "2026-08-14T13:05:00.000Z",
+    "maxTimeoutSeconds": 60
   }
 }
 ```

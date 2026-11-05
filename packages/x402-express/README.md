@@ -88,7 +88,7 @@ units throughout — the same unit the wire carries.
 
 ### `requirements`
 
-Either a **declarative spec** — `{ payTo, asset, network, amount, scheme?, resource?, description?, validForSeconds?, nonce? }`, where the middleware fills in `validBefore` (from `validForSeconds`, default 300) and every field may be a fixed value **or** a `(req) => value` resolver — or a **builder** `(req) => CantonPaymentRequirements` for full control (you own `nonce`/`validBefore`).
+Either a **declarative spec** — `{ payTo, asset, network, amount, scheme?, resource?, description?, validForSeconds?, maxTimeoutSeconds?, nonce? }`, where the middleware fills in `validBefore` (from `validForSeconds`, default 300), `maxTimeoutSeconds` (default 60) and `extra.assetTransferMethod`, and every field may be a fixed value **or** a `(req) => value` resolver — or a **builder** `(req) => CantonPaymentRequirements` for full control (you own `nonce`, `validBefore`, `maxTimeoutSeconds` and `extra`).
 
 `nonce` is special: it's a **function only** (`(req) => string | Promise<string>`), called once per challenge, so a merchant can generate *and record* it (e.g. persist for reconciliation). Omit it to let the middleware generate a random UUID.
 

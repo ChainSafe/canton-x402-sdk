@@ -27,11 +27,12 @@ const requirements: CantonPaymentRequirements = {
   network: "canton:devnet",
   amount: "100000000",
   asset: "CC",
-  extra: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+  extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
   resource: "/api/resource",
   nonce: "550e8400-e29b-41d4-a716-446655440000",
   validBefore: "2999-01-01T00:00:00.000Z",
+  maxTimeoutSeconds: 60,
 };
 
 describe("schema-first guards + parsers", () => {
@@ -66,7 +67,7 @@ describe("schema-first guards + parsers", () => {
 
   it("rejects wrong field types", () => {
     expect(isCantonPaymentInner({ ...inner, payer: 42 })).toBe(false);
-    expect(isCantonPaymentRequirements({ ...requirements, extra: { instrumentId: { id: "Amulet" } } })).toBe(false);
+    expect(isCantonPaymentRequirements({ ...requirements, extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet" } } })).toBe(false);
   });
 
   it("rejects an empty string in any required field", () => {
@@ -78,6 +79,30 @@ describe("schema-first guards + parsers", () => {
     }
   });
 
+  it("requires extra.assetTransferMethod, and only the value the spec names", () => {
+    const { assetTransferMethod: _omitted, ...withoutMethod } = requirements.extra;
+    expect(isCantonPaymentRequirements({ ...requirements, extra: withoutMethod })).toBe(false);
+    // A reserved protocol key: read as the spec defines it, not passed through
+    // as opaque scheme data. Case included — the value is a wire literal.
+    for (const method of ["", "TRANSFER-FACTORY", "transfer-preapproval", "eip3009"]) {
+      const extra = { ...requirements.extra, assetTransferMethod: method };
+      expect(isCantonPaymentRequirements({ ...requirements, extra })).toBe(false);
+    }
+  });
+
+  it("reads maxTimeoutSeconds as a duration, not as any number", () => {
+    const { maxTimeoutSeconds: _omitted, ...withoutTimeout } = requirements;
+    expect(isCantonPaymentRequirements(withoutTimeout)).toBe(false);
+    for (const ok of [1, 60, 3600]) {
+      expect(isCantonPaymentRequirements({ ...requirements, maxTimeoutSeconds: ok })).toBe(true);
+    }
+    // `v.number()` alone refuses NaN but admits every one of these, and none of
+    // them is a time a client can be given.
+    for (const bad of [0, -5, 1.5, Infinity, NaN, "60", null]) {
+      expect(isCantonPaymentRequirements({ ...requirements, maxTimeoutSeconds: bad })).toBe(false);
+    }
+  });
+
   it("is at least as strict as the envelope it narrows", () => {
     // The concrete schema was LOOSER than the loose one: these all passed
     // isCantonPaymentRequirements while failing isX402PaymentRequirements.
@@ -86,6 +111,11 @@ describe("schema-first guards + parsers", () => {
       if (isX402PaymentRequirements(bad)) continue; // envelope rejects it...
       expect(isCantonPaymentRequirements(bad)).toBe(false); // ...so must this
     }
+    // maxTimeoutSeconds is required for every scheme, so it is on the envelope
+    // too — otherwise the narrowing guard would again be the stricter of the two.
+    const { maxTimeoutSeconds: _omitted, ...withoutTimeout } = requirements;
+    expect(isX402PaymentRequirements(withoutTimeout)).toBe(false);
+    expect(isCantonPaymentRequirements(withoutTimeout)).toBe(false);
   });
 });
 
@@ -111,6 +141,7 @@ describe("generic (loose) vs concrete (canton-exact) verify request", () => {
       payTo: "0xC0ffee",
       nonce: "n-bridge",
       validBefore: "2999-01-01T00:00:00.000Z",
+      maxTimeoutSeconds: 60,
       asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     },
   };

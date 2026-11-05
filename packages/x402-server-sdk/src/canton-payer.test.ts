@@ -46,11 +46,12 @@ function makeRequirements(over: Partial<CantonPaymentRequirements> = {}): Canton
     network: NETWORK,
     amount: "15000000000",
     asset: "CC",
-    extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+    extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::x" } },
     payTo: "merchant::y",
     resource: "https://api.example/report",
     nonce: "nonce-1",
     validBefore: "2999-01-01T00:00:00.000Z",
+    maxTimeoutSeconds: 60,
     ...over,
   };
 }
@@ -111,14 +112,14 @@ describe("CantonX402Payer.authorize", () => {
     expect(payer.supports(makeRequirements({ network: "canton:other" }))).toBe(false);
     // Unsupported asset (no registry configured for it).
     expect(
-      payer.supports(makeRequirements({ asset: "USDCx", extra: { instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
+      payer.supports(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).toBe(false);
   });
 
   it("rejects an asset with no configured registry", async () => {
     const { sdk, prepare } = mockSdk();
     await expect(
-      makePayer(sdk).authorize(makeRequirements({ asset: "USDCx", extra: { instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
+      makePayer(sdk).authorize(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).rejects.toThrow(/unsupported requirement/);
     expect(prepare).not.toHaveBeenCalled();
   });

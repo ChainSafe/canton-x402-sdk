@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import { InstrumentIdSchema } from "./common";
+import { ASSET_TRANSFER_METHOD, InstrumentIdSchema } from "./common";
 import type { NetworkId, Scheme, X402Version } from "./common";
 
 /**
@@ -29,13 +29,20 @@ export interface X402PaymentRequirements<TExtra = Record<string, unknown>> {
   nonce: string;
   /** ISO 8601 timestamp; facilitator rejects /settle after this. */
   validBefore: string;
-  maxTimeoutSeconds?: number;
+  /** Seconds the client has to complete payment. Required for every scheme. */
+  maxTimeoutSeconds: number;
   /** Scheme-specific extra (the `TExtra` seam), e.g. the bridge's `cantonRecipient`. */
   extra?: TExtra;
 }
 
 /** A required string field: present and not empty. */
 const nonEmptyString = v.pipe(v.string(), v.minLength(1));
+
+/**
+ * A duration, not merely a number. `v.number()` already refuses NaN but admits
+ * `Infinity`, `0` and negatives, none of which are a time a client can be given.
+ */
+const positiveSeconds = v.pipe(v.number(), v.integer(), v.minValue(1));
 
 /**
  * The canton-exact `extra`. `looseObject`, so the keys the spec defines are
@@ -47,6 +54,12 @@ const nonEmptyString = v.pipe(v.string(), v.minLength(1));
  * transfer's instrument against this.
  */
 export const CantonRequirementsExtraSchema = v.looseObject({
+  /**
+   * MUST be `transfer-factory`. A reserved protocol key, so it is read as the
+   * spec defines it rather than as an opaque scheme-private field — which is
+   * why a wrong value is refused here instead of ignored.
+   */
+  assetTransferMethod: v.literal(ASSET_TRANSFER_METHOD),
   instrumentId: InstrumentIdSchema,
 });
 export type CantonRequirementsExtra = v.InferOutput<typeof CantonRequirementsExtraSchema>;
@@ -70,7 +83,7 @@ export const CantonPaymentRequirementsSchema = v.object({
   description: v.optional(v.string()),
   nonce: nonEmptyString,
   validBefore: nonEmptyString,
-  maxTimeoutSeconds: v.optional(v.number()),
+  maxTimeoutSeconds: positiveSeconds,
   extra: CantonRequirementsExtraSchema,
 });
 export type CantonPaymentRequirements = v.InferOutput<typeof CantonPaymentRequirementsSchema>;
@@ -100,6 +113,7 @@ export const X402PaymentRequirementsEnvelopeSchema = v.looseObject({
   nonce: nonEmptyString,
   validBefore: nonEmptyString,
   asset: nonEmptyString,
+  maxTimeoutSeconds: positiveSeconds,
 });
 
 export function isX402PaymentRequirements(x: unknown): x is X402PaymentRequirements<unknown> {

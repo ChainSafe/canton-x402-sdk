@@ -20,9 +20,10 @@ server (step 4).
 
    Your route answers `402 Payment Required` with
    `{ x402Version: 2, accepts: [...] }`. Each entry carries `scheme`,
-   `network`, `amount`, `asset`, `extra.instrumentId`, `payTo` (your Canton
-   party), `resource`, a fresh `nonce`, and a `validBefore` (300 seconds out by
-   default).
+   `network`, `amount`, `asset`, `extra.assetTransferMethod`,
+   `extra.instrumentId`, `payTo` (your Canton party), `resource`, a fresh
+   `nonce`, a `validBefore` (300 seconds out by default) and a
+   `maxTimeoutSeconds` (60 by default).
 
 2. **Payer builds the transfer**
 

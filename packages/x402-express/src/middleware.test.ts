@@ -53,12 +53,13 @@ function paymentHeader(overrides: Record<string, unknown> = {}): string {
     network: "canton:x",
     amount: "500000000",
     asset: "CC",
-    extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+    extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::x" } },
     payTo: "merchant::x",
     resource: "https://f.example/paid",
     description: "Access",
     nonce: "nonce-1",
     validBefore: new Date(Date.now() + 300_000).toISOString(),
+    maxTimeoutSeconds: 60,
     ...overrides,
   } as unknown as CantonPaymentRequirements;
   const payload = {
@@ -165,11 +166,12 @@ describe("paymentRequired", () => {
             network: "canton:x",
             amount: "0.05", // CC where atomic units are required
             asset: "CC",
-            extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+            extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::x" } },
             payTo: "merchant::x",
             resource: "https://f.example/paid",
             nonce: "n",
             validBefore: new Date(Date.now() + 300_000).toISOString(),
+            maxTimeoutSeconds: 60,
           }) as unknown as CantonPaymentRequirements,
       }),
     );
@@ -247,6 +249,41 @@ describe("paymentRequired", () => {
     expect(seen).toEqual(["merchant-nonce-0"]); // merchant observed/recorded it
   });
 
+  it("advertises the reserved assetTransferMethod and a maxTimeoutSeconds", async () => {
+    // Both are required of the 402 now, and a merchant states neither — the
+    // method has one legal value and the timeout has a default.
+    stubFacilitator();
+    const app = express();
+    app.use("/paid", paymentRequired(baseOptions));
+    app.get("/paid", (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(402);
+    expect(res.body.accepts[0].extra.assetTransferMethod).toBe("transfer-factory");
+    expect(res.body.accepts[0].maxTimeoutSeconds).toBe(60);
+  });
+
+  it("takes maxTimeoutSeconds from the merchant, per request if it wants", async () => {
+    stubFacilitator();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::1220y",
+          asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+          amount: "500000000",
+          maxTimeoutSeconds: (req) => (req.path === "/slow" ? 600 : 30),
+        },
+      }),
+    );
+    app.get("/slow", (_req, res) => res.json({ ok: true }));
+    app.get("/fast", (_req, res) => res.json({ ok: true }));
+    expect((await request(app).get("/paid/slow")).body.accepts[0].maxTimeoutSeconds).toBe(600);
+    expect((await request(app).get("/paid/fast")).body.accepts[0].maxTimeoutSeconds).toBe(30);
+  });
+
   it("supports a full requirements builder function", async () => {
     stubFacilitator();
     const app = express();
@@ -259,12 +296,13 @@ describe("paymentRequired", () => {
           network: "canton:x",
           amount: "500000000",
           asset: "CC",
-          extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+          extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::x" } },
           payTo: "merchant::x",
           resource: "/r",
           description: "d",
           nonce: "custom-nonce",
           validBefore: new Date(Date.now() + 300_000).toISOString(),
+          maxTimeoutSeconds: 60,
         }),
       }),
     );
@@ -397,7 +435,7 @@ describe("paymentRequired", () => {
       .get("/paid")
       .set(
         "X-PAYMENT",
-        paymentHeader({ extra: { instrumentId: { id: "Amulet", admin: "DSO::impostor" } } }),
+        paymentHeader({ extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::impostor" } } }),
       );
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_asset");
@@ -410,7 +448,7 @@ describe("paymentRequired", () => {
       .get("/paid")
       .set(
         "X-PAYMENT",
-        paymentHeader({ extra: { instrumentId: { id: "USDCx", admin: "DSO::x" } } }),
+        paymentHeader({ extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "USDCx", admin: "DSO::x" } } }),
       );
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_asset");

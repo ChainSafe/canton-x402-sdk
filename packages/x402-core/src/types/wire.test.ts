@@ -27,11 +27,12 @@ describe("x402-core wire types", () => {
       network: "canton:devnet",
       amount: "100000000",
       asset: "CC",
-      extra: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+      extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
       payTo: "merchant::1220dead",
       resource: "/api/resource",
       nonce: "550e8400-e29b-41d4-a716-446655440000",
       validBefore: "2026-01-01T00:00:00.000Z",
+      maxTimeoutSeconds: 60,
     };
 
     const payload: CantonPaymentPayload = {
@@ -99,6 +100,7 @@ describe("x402-core wire types", () => {
       resource: "/api/resource",
       nonce: "550e8400-e29b-41d4-a716-446655440000",
       validBefore: "2026-01-01T00:00:00.000Z",
+      maxTimeoutSeconds: 60,
       extra: { cantonRecipient: "merchant::1220dead" },
     };
 
@@ -137,11 +139,12 @@ describe("x402-core wire types", () => {
       network: "canton:devnet",
       amount: "100000000",
       asset: "CC",
-      extra: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+      extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
       payTo: "merchant::1220dead",
       resource: "/api/resource",
       nonce: "n-canton",
       validBefore: "2999-01-01T00:00:00.000Z",
+      maxTimeoutSeconds: 60,
     };
     const bridge: BridgeRequirements = {
       scheme: "batch-settlement-canton",
@@ -152,6 +155,7 @@ describe("x402-core wire types", () => {
       resource: "/api/resource",
       nonce: "n-bridge",
       validBefore: "2999-01-01T00:00:00.000Z",
+      maxTimeoutSeconds: 60,
       extra: { cantonRecipient: "merchant::1220dead" },
     };
 
