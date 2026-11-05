@@ -5,6 +5,7 @@ import {
   atomicToLedger,
   requirementsHash,
   signHash,
+  signatureToBase64,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
   type InstrumentId,
@@ -101,10 +102,10 @@ export class CantonX402Payer implements X402Payer {
       .prepare({ partyId: key.partyId, commands: command, disclosedContracts: disclosed })
       .toJSON();
 
-    // 3. Sign the hash. wallet-sdk hands base64; sign the same bytes as hex so the
-    //    facilitator's verifySignature (raw Ed25519 over the hash) accepts it.
-    const preparedTransactionHash = base64ToHex(response.preparedTransactionHash);
-    const partySignature = signHash(preparedTransactionHash, key.privateKey);
+    // 3. Sign the hash. wallet-sdk hands the hash as base64; the payload carries it
+    //    as hex and the signature as base64, which are the spec's encodings.
+    const preparedTxHash = base64ToHex(response.preparedTransactionHash);
+    const signature = signatureToBase64(signHash(preparedTxHash, key.privateKey));
 
     // 4. Assemble the payload the facilitator settles.
     return {
@@ -114,8 +115,8 @@ export class CantonX402Payer implements X402Payer {
       payload: {
         payer: key.partyId,
         preparedTransaction: response.preparedTransaction,
-        preparedTransactionHash,
-        partySignature,
+        preparedTxHash,
+        signature,
         requirementsHash: requirementsHash(requirements),
         publicKey: key.publicKey,
         // Must be exactly what prepare used — the signature is bound to a hash

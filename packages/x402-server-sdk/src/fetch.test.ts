@@ -27,8 +27,8 @@ const payload = {
   payload: {
     payer: "alice::x",
     preparedTransaction: "cHJlcA==",
-    preparedTransactionHash: "deadbeef",
-    partySignature: "cafe",
+    preparedTxHash: "deadbeef",
+    signature: "cafe",
     requirementsHash: "rh",
     publicKey: "cGs=",
     hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",

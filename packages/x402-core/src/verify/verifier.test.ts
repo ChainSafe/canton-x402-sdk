@@ -7,6 +7,7 @@ import {
   createVerifierRegistry,
   EXACT_SCHEME_ID,
   fingerprintForPublicKey,
+  signatureToBase64,
   signHash,
 } from "./index";
 import { requirementsHash } from "../hashing";
@@ -44,8 +45,8 @@ function buildSignedFixture() {
     maxTimeoutSeconds: 60,
   };
 
-  const preparedTransactionHash = "aa".repeat(32); // 32-byte hex message
-  const partySignature = signHash(preparedTransactionHash, toB64(seed));
+  const preparedTxHash = "aa".repeat(32); // 32-byte hex message
+  const signatureHex = signHash(preparedTxHash, toB64(seed));
 
   // A prepared-transaction blob whose TransferFactory_Transfer matches the
   // requirements (payer → payTo, the required Amulet, the required amount).
@@ -64,15 +65,28 @@ function buildSignedFixture() {
     payload: {
       payer,
       preparedTransaction,
-      preparedTransactionHash,
-      partySignature,
+      preparedTxHash,
+      signature: signatureToBase64(signatureHex),
       requirementsHash: requirementsHash(requirements),
       publicKey: pubB64,
       hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
     },
   };
 
-  return { requirements, payload, payer };
+  return { requirements, payload, payer, signatureHex, seedB64: toB64(seed) };
+}
+
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/**
+ * The same 64 bytes with a padding bit set. A 64-byte signature ends in one
+ * data character and "=="; that character's low four bits are padding, so
+ * flipping the lowest still decodes to the same bytes but is not canonical.
+ */
+function withPaddingBitSet(signature: string): string {
+  const i = signature.length - 3;
+  const flipped = BASE64_ALPHABET[BASE64_ALPHABET.indexOf(signature[i]) ^ 1];
+  return signature.slice(0, i) + flipped + signature.slice(i + 1);
 }
 
 describe("cantonExactVerifier", () => {
@@ -141,7 +155,10 @@ describe("cantonExactVerifier", () => {
 
   it("rejects a bad signature", () => {
     const { payload, requirements } = buildSignedFixture();
-    const p = { ...payload, payload: { ...payload.payload, partySignature: "ff".repeat(64) } };
+    const p = {
+      ...payload,
+      payload: { ...payload.payload, signature: signatureToBase64("ff".repeat(64)) },
+    };
     expect(verifier.verify(p, requirements)).toMatchObject({
       isValid: false,
       invalidReason: "bad_signature",
@@ -189,6 +206,77 @@ describe("cantonExactVerifier", () => {
     });
   });
 
+  it("reads the signature only as canonical base64 of 64 bytes", () => {
+    const { payload, requirements, signatureHex } = buildSignedFixture();
+    const signature = payload.payload.signature;
+    const nonCanonical = withPaddingBitSet(signature);
+    // Decodes to the very same signature, so only the canonical check refuses it.
+    expect(atob(nonCanonical)).toBe(atob(signature));
+    const urlSafe = signature.replace(/\+/g, "-").replace(/\//g, "_");
+    // The fixture's signature is fixed, and it has a "+" or a "/" to replace.
+    expect(urlSafe).not.toBe(signature);
+    // Hex is what a payer built against the old field sends. Its 128 digits are
+    // valid base64 too, so the 64-byte check is what refuses it.
+    for (const variant of [signatureHex, signature.replace(/=+$/, ""), nonCanonical, urlSafe, ` ${signature}`]) {
+      const p = { ...payload, payload: { ...payload.payload, signature: variant } };
+      expect(verifier.verify(p, requirements)).toMatchObject({
+        isValid: false,
+        invalidReason: "bad_signature",
+      });
+    }
+  });
+
+  it("answers bad_signature for a signature of megabytes, rather than throwing", () => {
+    // Unbounded, the base64 regex runs out of backtracking stack at about 4.5M
+    // characters and throws.
+    const { payload, requirements } = buildSignedFixture();
+    const p = { ...payload, payload: { ...payload.payload, signature: "A".repeat(5 * 1024 * 1024) } };
+    expect(verifier.verify(p, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "bad_signature",
+    });
+  });
+
+  it("reads preparedTxHash only as 64 lower-case hex digits", () => {
+    const { payload, requirements, seedB64 } = buildSignedFixture();
+    const hash = payload.payload.preparedTxHash;
+    // Each variant carries a valid signature over its own bytes, so the
+    // encoding check is the only thing that can refuse it. Upper case is the
+    // same 32 bytes that were signed.
+    for (const preparedTxHash of [hash.toUpperCase(), `1220${hash}`, `${hash}00`, hash.slice(2)]) {
+      const signature = signatureToBase64(signHash(preparedTxHash, seedB64));
+      const p = { ...payload, payload: { ...payload.payload, preparedTxHash, signature } };
+      expect(verifier.verify(p, requirements)).toMatchObject({
+        isValid: false,
+        invalidReason: "bad_signature",
+      });
+    }
+  });
+
+  it("refuses an empty hash or signature at the shape check", () => {
+    const { payload, requirements } = buildSignedFixture();
+    for (const field of ["preparedTxHash", "signature"] as const) {
+      const p = { ...payload, payload: { ...payload.payload, [field]: "" } };
+      expect(verifier.verify(p, requirements)).toMatchObject({
+        isValid: false,
+        invalidReason: "internal_error",
+      });
+    }
+  });
+
+  it("does not read the pre-spec field names", () => {
+    const { payload, requirements } = buildSignedFixture();
+    const { preparedTxHash, signature, ...rest } = payload.payload;
+    const p = {
+      ...payload,
+      payload: { ...rest, preparedTransactionHash: preparedTxHash, partySignature: signature },
+    };
+    expect(verifier.verify(p, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "internal_error",
+    });
+  });
+
   it("reports missing_public_key for a blank OR absent key (specific reason, not internal_error)", () => {
     const { payload, requirements } = buildSignedFixture();
     // blank string
@@ -206,14 +294,11 @@ describe("cantonExactVerifier", () => {
     });
   });
 
-  it("rejects a payload missing hashingSchemeVersion (internal_error)", () => {
-    const { payload, requirements } = buildSignedFixture();
+  it("accepts a payload without hashingSchemeVersion, which the spec reads as V2", () => {
+    const { payload, requirements, payer } = buildSignedFixture();
     const { hashingSchemeVersion: _omit, ...innerNoScheme } = payload.payload;
     const p = { ...payload, payload: innerNoScheme };
-    expect(verifier.verify(p, requirements)).toMatchObject({
-      isValid: false,
-      invalidReason: "internal_error",
-    });
+    expect(verifier.verify(p, requirements)).toEqual({ isValid: true, payer });
   });
 });
 

@@ -15,8 +15,8 @@ import type { CantonPaymentRequirements } from "./requirements";
 const inner: CantonPaymentInner = {
   payer: "alice::1220beef",
   preparedTransaction: "cHJlcGFyZWQ=",
-  preparedTransactionHash: "deadbeef",
-  partySignature: "cafe",
+  preparedTxHash: "deadbeef",
+  signature: "cafe",
   requirementsHash: "0f1e2d",
   publicKey: "cHVibGljS2V5",
   hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
@@ -45,10 +45,11 @@ describe("schema-first guards + parsers", () => {
 
   it("checks EVERY field — a missing one fails (no partial-guard drift)", () => {
     // The historical bug: a guard that validated a subset. Drop each required
-    // field in turn; the schema must reject all of them.
+    // field in turn; the schema must reject all of them. hashingSchemeVersion is
+    // the one optional field: the spec reads an absent one as V2.
     for (const key of Object.keys(inner) as (keyof CantonPaymentInner)[]) {
       const { [key]: _omitted, ...partial } = inner;
-      expect(isCantonPaymentInner(partial)).toBe(false);
+      expect(isCantonPaymentInner(partial)).toBe(key === "hashingSchemeVersion");
     }
     expect(isCantonPaymentRequirements({ ...requirements, asset: undefined })).toBe(false);
   });
@@ -100,6 +101,14 @@ describe("schema-first guards + parsers", () => {
     // them is a time a client can be given.
     for (const bad of [0, -5, 1.5, Infinity, NaN, "60", null]) {
       expect(isCantonPaymentRequirements({ ...requirements, maxTimeoutSeconds: bad })).toBe(false);
+    }
+  });
+
+  it("rejects an empty hash or signature in the inner payload", () => {
+    // The verifier checks their encodings, but an empty one should not get
+    // that far: present but empty is no hash and no signature.
+    for (const key of ["preparedTxHash", "signature"] as const) {
+      expect(isCantonPaymentInner({ ...inner, [key]: "" })).toBe(false);
     }
   });
 

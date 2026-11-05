@@ -9,8 +9,8 @@ const payload: CantonPaymentPayload = {
   payload: {
     payer: "alice::1220x",
     preparedTransaction: "b",
-    preparedTransactionHash: "h",
-    partySignature: "s",
+    preparedTxHash: "h",
+    signature: "s",
     requirementsHash: "rh",
     publicKey: "pk",
     hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",

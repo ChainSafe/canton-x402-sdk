@@ -25,10 +25,18 @@ export const CantonPaymentInnerSchema = v.object({
   payer: v.string(),
   /** Base64-encoded opaque blob from /v2/interactive-submission/prepare. */
   preparedTransaction: v.string(),
-  /** Hex of the hash that was signed. */
-  preparedTransactionHash: v.string(),
-  /** Hex Ed25519 signature over preparedTransactionHash. */
-  partySignature: v.string(),
+  /**
+   * The hash the payer signed: 32 bytes as lower-case hex, no multihash prefix.
+   * Non-empty here; the verifier checks the encoding itself.
+   */
+  preparedTxHash: v.pipe(v.string(), v.minLength(1)),
+  /**
+   * The payer's Ed25519 signature over `preparedTxHash`: 64 bytes as canonical
+   * standard base64. Base64, not hex — the spec's encoding, and the one the
+   * ledger's `partySignatures` takes, so the facilitator relays it unchanged.
+   * Non-empty here; the verifier checks the encoding itself.
+   */
+  signature: v.pipe(v.string(), v.minLength(1)),
   /** SHA-256 of the canonical (RFC-8785) PaymentRequirements. */
   requirementsHash: v.string(),
   /**
@@ -39,11 +47,12 @@ export const CantonPaymentInnerSchema = v.object({
   publicKey: v.string(),
   /**
    * Canton interactive-submission hashing scheme the payload was prepared with.
-   * Required — the signature is bound to a hash computed with this version, so the
-   * facilitator's execute must use the same one. Validated as a string (the
+   * The signature is bound to a hash computed with this version, so the
+   * facilitator's execute must use the same one. Optional: the spec reads an
+   * absent value as {@link HashingSchemeVersion.V2}. Validated as a string (the
    * {@link HashingSchemeVersion} open union is a type-level nicety).
    */
-  hashingSchemeVersion: v.string(),
+  hashingSchemeVersion: v.optional(v.string()),
 });
 export type CantonPaymentInner = v.InferOutput<typeof CantonPaymentInnerSchema>;
 
