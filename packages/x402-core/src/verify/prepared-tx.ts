@@ -328,9 +328,17 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
         stack.push({ nodeId, rolledBack });
       }
     };
-    reach(strings(txn, 2), false);
+    // ONE ROOT, AND IT IS THE TRANSFER. A payment is a single command, so its
+    // transaction is a single tree whose root is the transfer being paid for.
+    // Allowing the transfer to sit beside or beneath anything else would let a
+    // payer attach legs the facilitator relays, and pays the traffic fee for,
+    // without ever having verified them. Consequences of the transfer — the
+    // children its own choice produces — are not that, and still decode.
+    const roots = strings(txn, 2);
+    if (roots.length !== 1) throw new Error(`transaction declares ${roots.length} roots, expected 1`);
+    reach(roots, false);
 
-    let transferArg: Uint8Array | null | undefined; // the first TransferFactory_Transfer's chosen_value
+    let transferArg: Uint8Array | null | undefined; // the root TransferFactory_Transfer's chosen_value
     for (let next = stack.pop(); next; next = stack.pop()) {
       const v1 = nodes.get(next.nodeId);
       if (!v1) throw new Error(`node ${next.nodeId} is missing`);
@@ -345,7 +353,12 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
       if (choiceId !== TRANSFER_CHOICE) continue;
       // A transfer under a rollback node moves nothing.
       if (next.rolledBack) throw new Error("transfer under a rollback node");
-      if (transferArg === undefined) transferArg = chosenValue;
+      // The transfer IS the root, so there is exactly one of it. Canton runs
+      // every transfer in the tree; reporting one of several would describe a
+      // payment the caller never made, binding the requirements to one leg and
+      // letting the rest through unchecked.
+      if (next.nodeId !== roots[0]) throw new Error("the transfer is not the transaction's root");
+      transferArg = chosenValue;
     }
     if (reached.size !== nodes.size) throw new Error("a node is not reachable from the roots");
 
