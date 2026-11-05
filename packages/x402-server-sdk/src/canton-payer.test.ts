@@ -44,8 +44,9 @@ function makeRequirements(over: Partial<CantonPaymentRequirements> = {}): Canton
   return {
     scheme: "exact",
     network: NETWORK,
-    maxAmountRequired: "1.5",
-    asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+    amount: "15000000000",
+    asset: "CC",
+    extra: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
     payTo: "merchant::y",
     resource: "https://api.example/report",
     nonce: "nonce-1",
@@ -87,7 +88,7 @@ describe("CantonX402Payer.authorize", () => {
 
   it("rejects an invalid amount before preparing", async () => {
     const { sdk, prepare } = mockSdk();
-    await expect(makePayer(sdk).authorize(makeRequirements({ maxAmountRequired: "abc" }))).rejects.toThrow(/invalid amount/);
+    await expect(makePayer(sdk).authorize(makeRequirements({ amount: "abc" }))).rejects.toThrow(/invalid amount/);
     expect(prepare).not.toHaveBeenCalled();
   });
 
@@ -110,14 +111,14 @@ describe("CantonX402Payer.authorize", () => {
     expect(payer.supports(makeRequirements({ network: "canton:other" }))).toBe(false);
     // Unsupported asset (no registry configured for it).
     expect(
-      payer.supports(makeRequirements({ asset: { instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
+      payer.supports(makeRequirements({ asset: "USDCx", extra: { instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).toBe(false);
   });
 
   it("rejects an asset with no configured registry", async () => {
     const { sdk, prepare } = mockSdk();
     await expect(
-      makePayer(sdk).authorize(makeRequirements({ asset: { instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
+      makePayer(sdk).authorize(makeRequirements({ asset: "USDCx", extra: { instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).rejects.toThrow(/unsupported requirement/);
     expect(prepare).not.toHaveBeenCalled();
   });

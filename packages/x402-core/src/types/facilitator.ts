@@ -4,7 +4,7 @@ import {
   CantonPaymentRequirementsSchema,
   X402PaymentRequirementsEnvelopeSchema,
 } from "./requirements";
-import type { AssetSpec, NetworkId, X402Version } from "./common";
+import type { NetworkId, X402Version } from "./common";
 import type { CantonPaymentInner, X402PaymentPayload } from "./payment";
 import type { X402PaymentRequirements } from "./requirements";
 
@@ -13,14 +13,10 @@ import type { X402PaymentRequirements } from "./requirements";
  * parameterized by the same scheme seams. Generic → type-only; the concrete
  * canton-exact request below is schema-first.
  */
-export interface X402Request<
-  TInner = CantonPaymentInner,
-  TAsset = AssetSpec,
-  TExtra = Record<string, unknown>,
-> {
+export interface X402Request<TInner = CantonPaymentInner, TExtra = Record<string, unknown>> {
   x402Version: X402Version;
   paymentPayload: X402PaymentPayload<TInner>;
-  paymentRequirements: X402PaymentRequirements<TAsset, TExtra>;
+  paymentRequirements: X402PaymentRequirements<TExtra>;
 }
 
 /** canton-exact verify/settle request. Settle takes the identical envelope. */

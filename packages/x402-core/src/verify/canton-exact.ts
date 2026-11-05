@@ -19,7 +19,13 @@ import type {
 } from "../types/facilitator";
 import type { X402PaymentPayload } from "../types/payment";
 import type { X402PaymentRequirements } from "../types/requirements";
-import { amountGte, isExpired, requirementsHashMatches } from "./common";
+import {
+  isValidAmount,
+  isExpired,
+  ledgerToAtomic,
+  requirementsHashMatches,
+  WIRE_DECIMALS,
+} from "./common";
 import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 
 // @noble/ed25519 v3 needs sha512 wired (same as the facilitator's wallet.ts).
@@ -186,8 +192,10 @@ function verifyCantonExact(
  * Check a decoded transfer against the requirements. Returns `null` when the
  * transfer satisfies them, or a short field detail (`"sender" | "receiver" |
  * "instrument" | "amount"`) naming the first divergence — surfaced in the
- * `transfer_mismatch` response's `extensions.detail`. Overpayment is allowed
- * (`amount >= maxAmountRequired`); the amount compare is decimal-safe.
+ * `transfer_mismatch` response's `extensions.detail`. The amount must be EQUAL,
+ * not merely sufficient (Rule 4), and the two sides are in different units — the
+ * transfer carries an on-ledger Decimal, the requirements an atomic integer at
+ * the Token Standard's fixed scale.
  */
 export function findTransferMismatch(
   transfer: DecodedTransfer,
@@ -196,11 +204,18 @@ export function findTransferMismatch(
 ): "sender" | "receiver" | "instrument" | "amount" | null {
   if (transfer.sender !== payer) return "sender";
   if (transfer.receiver !== requirements.payTo) return "receiver";
-  const want = requirements.asset.instrumentId;
+  // From `extra`, not `asset`: the latter is only a symbol, which cannot say
+  // which registry issued the instrument.
+  const want = requirements.extra.instrumentId;
   if (transfer.instrumentId.id !== want.id || transfer.instrumentId.admin !== want.admin) {
     return "instrument";
   }
-  if (!amountGte(transfer.amount, requirements.maxAmountRequired)) return "amount";
+  // EQUAL, not at-least (Rule 4). The two sides are in different units, so both
+  // become atomic: the transfer carries an on-ledger Decimal, the quote an
+  // atomic integer. One scale for every instrument — see WIRE_DECIMALS.
+  const moved = ledgerToAtomic(transfer.amount, WIRE_DECIMALS);
+  const quoted = isValidAmount(requirements.amount) ? BigInt(requirements.amount) : null;
+  if (moved === null || quoted === null || moved !== quoted) return "amount";
   return null;
 }
 

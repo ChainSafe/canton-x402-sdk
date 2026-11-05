@@ -20,8 +20,9 @@ const payload: CantonPaymentPayload = {
 const requirements: CantonPaymentRequirements = {
   scheme: "exact",
   network: "canton:devnet",
-  maxAmountRequired: "0.05",
-  asset: { instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
+  amount: "500000000",
+  asset: "CC",
+  extra: { instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   payTo: "merchant::1220x",
   resource: "/r",
   nonce: "n",
@@ -35,10 +36,10 @@ describe("X-PAYMENT codec", () => {
     expect(decoded.requirements).toEqual(requirements);
   });
 
-  it("decodes any scheme's envelope — concrete inner/asset validation is the verifier's job", () => {
+  it("decodes any scheme's envelope — concrete inner validation is the verifier's job", () => {
     // Option A: decode validates the envelope (x402 shape + universal requirements),
     // NOT the canton-exact inner. A well-formed envelope carrying another scheme's
-    // inner + asset must decode; the per-scheme verifier rejects it downstream.
+    // inner must decode; the per-scheme verifier rejects it downstream.
     const foreign = {
       payment: {
         x402Version: 2,
@@ -49,11 +50,11 @@ describe("X-PAYMENT codec", () => {
       requirements: {
         scheme: "batch-settlement-canton",
         network: "eip155:1",
-        maxAmountRequired: "1000000",
+        amount: "1000000",
         payTo: "0xC0ffee",
         nonce: "n-bridge",
         validBefore: "2999-01-01T00:00:00.000Z",
-        asset: { chainId: 1 },
+        asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       },
     };
     const decoded = decodePaymentHeader(btoa(JSON.stringify(foreign)));

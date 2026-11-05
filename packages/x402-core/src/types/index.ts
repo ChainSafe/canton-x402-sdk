@@ -8,16 +8,18 @@
 // Multi-scheme generics: the chain-agnostic bases carry the scheme seams
 // via defaulted type params, and the canton-exact types are thin aliases —
 //
-//   interface X402PaymentPayload<TInner>            { x402Version; scheme; network; payload: TInner }
-//   interface X402PaymentRequirements<TAsset,TExtra> { …; asset: TAsset; extra?: TExtra }
-//   interface X402Request<TInner,TAsset,TExtra>     { paymentPayload; paymentRequirements }
+//   interface X402PaymentPayload<TInner>        { x402Version; scheme; network; payload: TInner }
+//   interface X402PaymentRequirements<TExtra>   { …; asset: string; extra?: TExtra }
+//   interface X402Request<TInner,TExtra>        { paymentPayload; paymentRequirements }
 //   type CantonPaymentPayload      = X402PaymentPayload<CantonPaymentInner>
-//   type CantonPaymentRequirements = X402PaymentRequirements<AssetSpec>
 //
-// Seams: the payload's ENTIRE `payload` object (TInner); requirements' `asset`
-// (TAsset) + `extra` (TExtra). A new scheme instantiates these with its own shapes
-// — no `as unknown as` casts. Defaults = the Canton types, so call sites using the
-// aliases (and `X402*` without args) are unchanged.
+// Seams: the payload's ENTIRE `payload` object (TInner), and requirements' `extra`
+// (TExtra). A new scheme instantiates these with its own shapes — no
+// `as unknown as` casts. `asset` is NOT a seam: the spec types it as a string for
+// every scheme, so whatever a string cannot carry belongs in `extra`.
+//
+// CantonPaymentRequirements is not an alias of the generic — it is schema-first
+// (one valibot definition giving shape, validator and type).
 //
 // Still pending (markers inline): reason-union open-vs-closed; branded DecimalString;
 // per-scheme `CantonNetworkId` narrowing (needs a TNetwork seam).
