@@ -25,6 +25,7 @@ const payload = {
   scheme: "exact",
   network: "canton:x",
   payload: {
+    assetTransferMethod: "transfer-factory",
     payer: "alice::x",
     preparedTransaction: "cHJlcA==",
     preparedTxHash: "deadbeef",

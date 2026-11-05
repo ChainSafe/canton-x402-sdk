@@ -1,4 +1,5 @@
 import {
+  ASSET_TRANSFER_METHOD,
   EXACT_SCHEME_ID,
   isExpired,
   WIRE_DECIMALS,
@@ -55,6 +56,9 @@ export class CantonX402Payer implements X402Payer {
     return (
       requirements.scheme === EXACT_SCHEME_ID &&
       requirements.network === this.opts.network &&
+      // The payload declares the method this payer uses. createX402Fetch does
+      // not validate the 402 body, so the type alone does not guarantee it.
+      requirements.extra.assetTransferMethod === ASSET_TRANSFER_METHOD &&
       this.registryFor(requirements.extra.instrumentId) !== undefined
     );
   }
@@ -68,12 +72,12 @@ export class CantonX402Payer implements X402Payer {
   }
 
   async authorize(requirements: CantonPaymentRequirements): Promise<CantonPaymentPayload> {
-    // Capability gate — supports() covers scheme + network + a configured registry.
+    // Capability gate — supports() covers scheme + network + transfer method + a configured registry.
     const registryUrl = this.registryFor(requirements.extra.instrumentId);
     if (!this.supports(requirements) || !registryUrl) {
       const { id, admin } = requirements.extra.instrumentId;
       throw new Error(
-        `x402: unsupported requirement (scheme "${requirements.scheme}", network "${requirements.network}", asset "${id}" admin "${admin}")`,
+        `x402: unsupported requirement (scheme "${requirements.scheme}", network "${requirements.network}", method "${requirements.extra.assetTransferMethod}", asset "${id}" admin "${admin}")`,
       );
     }
 
@@ -114,6 +118,9 @@ export class CantonX402Payer implements X402Payer {
       scheme: requirements.scheme,
       network: requirements.network,
       payload: {
+        // transfer.create built a TransferFactory_Transfer, the one method Canton's
+        // exact defines.
+        assetTransferMethod: ASSET_TRANSFER_METHOD,
         payer: key.partyId,
         // prepare hands back the protobuf as base64; the payload carries it
         // gzipped, as the spec defines, which also keeps the header small.

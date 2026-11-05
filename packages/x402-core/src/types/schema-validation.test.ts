@@ -13,6 +13,7 @@ import type { CantonPaymentInner } from "./payment";
 import type { CantonPaymentRequirements } from "./requirements";
 
 const inner: CantonPaymentInner = {
+  assetTransferMethod: "transfer-factory",
   payer: "alice::1220beef",
   preparedTransaction: "cHJlcGFyZWQ=",
   preparedTxHash: "deadbeef",
@@ -88,6 +89,15 @@ describe("schema-first guards + parsers", () => {
     for (const method of ["", "TRANSFER-FACTORY", "transfer-preapproval", "eip3009"]) {
       const extra = { ...requirements.extra, assetTransferMethod: method };
       expect(isCantonPaymentRequirements({ ...requirements, extra })).toBe(false);
+    }
+  });
+
+  it("requires the payload's assetTransferMethod too, with the same single value", () => {
+    // The spec requires the key in both `extra` and the payload.
+    const { assetTransferMethod: _omitted, ...withoutMethod } = inner;
+    expect(isCantonPaymentInner(withoutMethod)).toBe(false);
+    for (const method of ["", "TRANSFER-FACTORY", "transfer-preapproval", "eip3009"]) {
+      expect(isCantonPaymentInner({ ...inner, assetTransferMethod: method })).toBe(false);
     }
   });
 

@@ -39,8 +39,9 @@ server (step 4).
 
 4. **Retry with `X-PAYMENT`**
 
-   The payload — `payer`, `preparedTransaction`, `preparedTxHash`, `signature`,
-   `publicKey`, `requirementsHash`, `hashingSchemeVersion` —
+   The payload — `assetTransferMethod`, `payer`, `preparedTransaction`,
+   `preparedTxHash`, `signature`, `publicKey`, `requirementsHash`,
+   `hashingSchemeVersion` —
    plus the requirements it was built against are JSON-encoded, base64'd into
    an `X-PAYMENT` header, and the request is retried. That header carries the
    prepared transaction, gzipped, with its disclosed contracts.

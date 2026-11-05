@@ -190,6 +190,8 @@ function verifyCantonExact(
     return fail("network_mismatch");
   }
   // 3. shapes — narrow the unknown inner/requirements before reading fields.
+  //    `assetTransferMethod` is the same literal in both schemas, so once both
+  //    pass, the payload's method and the requirements' agree.
   if (!isCantonPaymentRequirements(requirements) || !isObj(payload.payload)) {
     return fail("internal_error");
   }
