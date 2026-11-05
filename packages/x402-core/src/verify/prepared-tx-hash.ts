@@ -12,10 +12,12 @@ import {
  */
 export async function computePreparedTransactionHash(
   preparedTransaction: string,
-  hashingSchemeVersion: CantonHashingSchemeVersion,
+  hashingSchemeVersion?: CantonHashingSchemeVersion,
 ): Promise<string> {
-  if (hashingSchemeVersion !== HashingSchemeVersion.V2) {
-    throw new Error(`unsupported Canton hashing scheme: ${hashingSchemeVersion}`);
+  const effectiveVersion = hashingSchemeVersion ?? HashingSchemeVersion.V2;
+
+  if (effectiveVersion !== HashingSchemeVersion.V2) {
+    throw new Error(`unsupported Canton hashing scheme: ${effectiveVersion}`);
   }
 
   return hashPreparedTransaction(preparedTransaction, "hex");

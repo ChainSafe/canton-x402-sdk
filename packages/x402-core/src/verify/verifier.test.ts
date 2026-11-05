@@ -154,7 +154,10 @@ describe("cantonExactVerifier", () => {
     const cyclicTransaction = encodePreparedTransactionGraph(["0"], [{ id: "0", children: ["0"] }]);
     const maliciousPayload = {
       ...payload,
-      payload: { ...payload.payload, preparedTransaction: cyclicTransaction },
+      payload: {
+        ...payload.payload,
+        preparedTransaction: gzipped(cyclicTransaction),
+      },
     };
 
     expect(await verifier.verify(maliciousPayload, requirements)).toMatchObject({
@@ -272,8 +275,8 @@ describe("cantonExactVerifier", () => {
     const p = { ...payload, payload: { ...payload.payload, preparedTransaction: gzipped(preparedTransaction) } };
     expect(await verifier.verify(p, requirements)).toMatchObject({
       isValid: false,
-      invalidReason: "transfer_mismatch",
-      extensions: { detail: "undecodable" },
+      invalidReason: "invalid_prepared_transaction_structure",
+      extensions: { detail: "duplicate_node_id" },
     });
   });
 

@@ -16,6 +16,12 @@ describe("computePreparedTransactionHash", () => {
     ).resolves.toBe(LEDGER_PREPARED_TRANSACTION_HASH);
   });
 
+  it("treats an absent hashing scheme version as V2", async () => {
+    await expect(
+      computePreparedTransactionHash(LEDGER_PREPARED_TRANSACTION, undefined),
+    ).resolves.toBe(LEDGER_PREPARED_TRANSACTION_HASH);
+  });
+
   it("fails closed for an unsupported hashing scheme", async () => {
     await expect(
       computePreparedTransactionHash(LEDGER_PREPARED_TRANSACTION, HashingSchemeVersion.V3),
