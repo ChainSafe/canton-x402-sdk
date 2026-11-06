@@ -71,11 +71,13 @@ const { paymentRequired } = require("@chainsafe/x402-express");
    transaction id is returned in the `X-PAYMENT-RESPONSE` response header.
 
 Verification uses the requirements the client **echoes** in `X-PAYMENT`, not
-freshly-rebuilt ones, since those carry the `nonce` and `validBefore` the payer
-was quoted. They are not signed: the signed transfer is checked against them. The
-echoed set is validated against merchant policy (scheme, network, `payTo`, asset,
-and not under the priced amount, not expired) before use. Amounts are atomic
-units throughout — the same unit the wire carries.
+freshly-rebuilt ones: the payer built its transfer against the quote it was
+given, and a rebuilt quote is a different object. They are not signed — the
+signed transfer is what is checked against them. The echoed set is validated
+against merchant policy (scheme, network, `payTo`, asset, and not under the
+priced amount) before use, and `checkPayment` is where anything needing your
+own records goes. Amounts are atomic units throughout — the same unit the wire
+carries.
 
 ## Options
 
@@ -89,7 +91,7 @@ units throughout — the same unit the wire carries.
 
 ### `requirements`
 
-Either a **declarative spec** — `{ payTo, asset, network, amount, scheme?, resource?, description?, maxTimeoutSeconds?, executeBeforeSeconds?, memo? }`, where the middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120), and every field may be a fixed value **or** a `(req) => value` resolver — or a **builder** `(req) => CantonPaymentRequirements` for full control (you own `maxTimeoutSeconds` and the whole of `extra`).
+Either a **declarative spec** — `{ payTo, asset, network, synchronizerId, amount, scheme?, resource?, description?, maxTimeoutSeconds?, executeBeforeSeconds?, memo? }`, where the middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120), and every field may be a fixed value **or** a `(req) => value` resolver — or a **builder** `(req) => CantonPaymentRequirements` for full control (you own `maxTimeoutSeconds` and the whole of `extra`).
 
 `memo` is special: it's a **function only** (`(req) => string | Promise<string>`), called once per challenge, so a merchant can generate *and record* it (e.g. an order id persisted for reconciliation). Omit it to quote none. Quoting one **binds** it — the payer must sign the identical value into the transfer.
 

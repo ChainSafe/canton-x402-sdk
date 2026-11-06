@@ -22,6 +22,13 @@ export type Resolvable<T> = T | ((req: Request) => T | Promise<T>);
  * fixed value or a per-request resolver.
  */
 export interface RequirementsSpec {
+  /**
+   * The Global Synchronizer to settle on, as its LOGICAL id
+   * (`<name>::<namespace fingerprint>`). No default: it is deployment state,
+   * and inventing one would quote a domain you may not settle on. Read it from
+   * the facilitator's `/supported` rather than typing it by hand.
+   */
+  synchronizerId: Resolvable<string>;
   /** Merchant party receiving payment. */
   payTo: Resolvable<string>;
   /** Asset to charge in. */
@@ -294,6 +301,7 @@ async function buildRequirements(
     extra: {
       assetTransferMethod: ASSET_TRANSFER_METHOD,
       instrumentId: instrument.instrumentId,
+      synchronizerId: await resolve(source.synchronizerId, req),
       executeBeforeSeconds: source.executeBeforeSeconds
         ? await resolve(source.executeBeforeSeconds, req)
         : DEFAULT_EXECUTE_BEFORE_SECONDS,

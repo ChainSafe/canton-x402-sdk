@@ -71,6 +71,13 @@ export const CantonRequirementsExtraSchema = v.looseObject({
    * so unlike `maxTimeoutSeconds` this one reaches the ledger, and the verifier
    * refuses a transfer whose deadline is not still ahead of now (Rule 10).
    */
+  /**
+   * The Global Synchronizer the transfer settles on, as its LOGICAL id
+   * (`<name>::<namespace fingerprint>`) — the form `prepare` accepts. The
+   * network name stopped carrying it when it became a name, so this is the
+   * only place it travels.
+   */
+  synchronizerId: nonEmptyString,
   executeBeforeSeconds: positiveSeconds,
   /**
    * Optional merchant reference. When set, the transfer's metadata MUST carry

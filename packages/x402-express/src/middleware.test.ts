@@ -15,6 +15,7 @@ const baseOptions: PaymentRequiredOptions = {
   facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
   requirements: {
     network: "canton:x",
+    synchronizerId: "global-domain::1220sync",
     payTo: "merchant::x",
     asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
     amount: "500000000",
@@ -49,6 +50,7 @@ function makeApp(opts: Partial<PaymentRequiredOptions> = {}): Express {
 
 const ECHOED_EXTRA = {
   assetTransferMethod: "transfer-factory",
+  synchronizerId: "global-domain::1220sync",
   executeBeforeSeconds: 120,
   instrumentId: { id: "Amulet", admin: "DSO::x" },
 };
@@ -58,6 +60,7 @@ function paymentHeader(overrides: Record<string, unknown> = {}): string {
   const requirements = {
     scheme: "exact",
     network: "canton:x",
+    synchronizerId: "global-domain::1220sync",
     amount: "500000000",
     asset: "CC",
     extra: ECHOED_EXTRA,
@@ -71,6 +74,7 @@ function paymentHeader(overrides: Record<string, unknown> = {}): string {
     x402Version: 2,
     scheme: "exact",
     network: "canton:x",
+    synchronizerId: "global-domain::1220sync",
     payload: {
       assetTransferMethod: "transfer-factory",
       payer: "alice::x",
@@ -96,6 +100,7 @@ describe("paymentRequired", () => {
         ...baseOptions,
         requirements: {
           network: "canton:x",
+          synchronizerId: "global-domain::1220sync",
           payTo: "merchant::x",
           asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
           amount: (req) => (req.method === "GET" ? "900000000" : "100000000"),
@@ -123,6 +128,7 @@ describe("paymentRequired", () => {
         ...baseOptions,
         requirements: {
           network: "canton:x",
+          synchronizerId: "global-domain::1220sync",
           payTo: "merchant::x",
           asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
           amount: policy,
@@ -169,9 +175,10 @@ describe("paymentRequired", () => {
           ({
             scheme: "exact",
             network: "canton:x",
+            synchronizerId: "global-domain::1220sync",
             amount: "0.05", // CC where atomic units are required
             asset: "CC",
-            extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
+            extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220sync", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
             payTo: "merchant::x",
             resource: "https://f.example/paid",
             maxTimeoutSeconds: 60,
@@ -214,6 +221,7 @@ describe("paymentRequired", () => {
         ...baseOptions,
         requirements: {
           network: "canton:x",
+          synchronizerId: "global-domain::1220sync",
           payTo: "merchant::x",
           asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
           amount: "0.05", // CC, where atomic units are expected
@@ -247,6 +255,7 @@ describe("paymentRequired", () => {
         ...baseOptions,
         requirements: {
           network: "canton:x",
+          synchronizerId: "global-domain::1220sync",
           payTo: "merchant::1220y",
           asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
           amount: "500000000",
@@ -258,6 +267,14 @@ describe("paymentRequired", () => {
     app.get("/fast", (_req, res) => res.json({ ok: true }));
     expect((await request(app).get("/paid/slow")).body.accepts[0].maxTimeoutSeconds).toBe(600);
     expect((await request(app).get("/paid/fast")).body.accepts[0].maxTimeoutSeconds).toBe(30);
+  });
+
+  it("quotes the synchronizer the merchant configured", async () => {
+    // No default: it is deployment state, and a wrong one quotes a domain the
+    // merchant may not settle on.
+    stubFacilitator();
+    const res = await request(makeApp()).get("/paid");
+    expect(res.body.accepts[0].extra.synchronizerId).toBe("global-domain::1220sync");
   });
 
   it("quotes an executeBeforeSeconds, and a memo only when the merchant sets one", async () => {
@@ -350,6 +367,7 @@ describe("paymentRequired", () => {
         ...baseOptions,
         requirements: {
           network: "canton:x",
+          synchronizerId: "global-domain::1220sync",
           payTo: "merchant::1220y",
           asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
           amount: "500000000",
@@ -381,9 +399,10 @@ describe("paymentRequired", () => {
         requirements: () => ({
           scheme: "exact",
           network: "canton:x",
+          synchronizerId: "global-domain::1220sync",
           amount: "500000000",
           asset: "CC",
-          extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
+          extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220sync", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
           payTo: "merchant::x",
           resource: "/r",
           description: "d",
@@ -529,7 +548,7 @@ describe("paymentRequired", () => {
       .get("/paid")
       .set(
         "X-PAYMENT",
-        paymentHeader({ extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::impostor" } } }),
+        paymentHeader({ extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220sync", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::impostor" } } }),
       );
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_asset");
@@ -542,7 +561,7 @@ describe("paymentRequired", () => {
       .get("/paid")
       .set(
         "X-PAYMENT",
-        paymentHeader({ extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "DSO::x" } } }),
+        paymentHeader({ extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220sync", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "DSO::x" } } }),
       );
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_asset");

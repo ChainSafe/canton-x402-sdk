@@ -33,7 +33,8 @@ holds the state involved:
    your terms: the prepared transaction is decoded and its sender, receiver,
    instrument and amount are checked against the requirements, so a valid
    signature over a divergent transfer is rejected with `transfer_mismatch` and
-   the field that diverged. The amount must be EQUAL, not merely sufficient —
+   the field that diverged — including the synchronizer, so a payment cannot
+   land on a domain you do not settle on. The amount must be EQUAL, not merely sufficient —
    `exact` is the scheme's distinguishing property, and a payer who overpays has
    no refund path. The transfer's `x402.memo` must equal your `extra.memo`
    exactly — in both directions, so a transfer carrying a memo you did not

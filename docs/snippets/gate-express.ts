@@ -15,6 +15,7 @@ import { amuletAsset } from "@chainsafe/x402-core";
 // The .env the dashboard's integration panel gives you (API keys page).
 const NETWORK = process.env.NETWORK_ID!; // from GET /v2/supported (step 4)
 const DSO_PARTY = process.env.AMULET_ADMIN!; // from GET /v2/supported (step 4)
+const SYNCHRONIZER = process.env.SYNCHRONIZER_ID!; // the logical `global-domain::1220…`
 const PAY_TO = process.env.MERCHANT_PARTY!; // your payout party (step 1)
 const API_KEY = process.env.FACILITATOR_API_KEY!; // your API key (step 2)
 
@@ -30,6 +31,7 @@ app.use(
     settle: true,
     requirements: {
       network: NETWORK,
+      synchronizerId: SYNCHRONIZER,
       payTo: PAY_TO,
       asset: amuletAsset(DSO_PARTY),
       amount: "500000000", // atomic units: 1 CC = 1e10, so this is 0.05 CC
