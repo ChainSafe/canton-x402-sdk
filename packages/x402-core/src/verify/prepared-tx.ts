@@ -31,7 +31,7 @@ import { Reader } from "protobufjs/minimal";
  * `preparedTransaction` blob. Checked against the requirements by the verifier.
  */
 export interface DecodedTransfer {
-  /** Paying party — must equal the payment payload's `payer`. */
+  /** Paying party: the payment's payer (spec Rule 8), since the payload names none. */
   sender: string;
   /** Receiving party — must equal `requirements.payTo`. */
   receiver: string;

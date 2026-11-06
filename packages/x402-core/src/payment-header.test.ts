@@ -8,7 +8,6 @@ const payload: CantonPaymentPayload = {
   network: "canton:devnet",
   payload: {
     assetTransferMethod: "transfer-factory",
-    payer: "alice::1220x",
     preparedTransaction: "b",
     preparedTxHash: "h",
     signature: "s",
@@ -94,12 +93,10 @@ describe("X-PAYMENT codec", () => {
   });
 
   it("handles non-ASCII content (isomorphic UTF-8)", () => {
-    const p: CantonPaymentPayload = {
-      ...payload,
-      payload: { ...payload.payload, payer: "café::1220x" },
-    };
-    const decoded = decodePaymentHeader(encodePaymentHeader(p, requirements));
-    expect(decoded.payload).toEqual(p);
+    const r: CantonPaymentRequirements = { ...requirements, description: "Café crème ☕" };
+    const decoded = decodePaymentHeader(encodePaymentHeader(payload, r));
+    expect(decoded.requirements).toEqual(r);
+    expect(decoded.payload).toEqual(payload);
   });
 
   it("throws on invalid base64 and invalid JSON", () => {

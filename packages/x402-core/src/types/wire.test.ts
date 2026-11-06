@@ -41,7 +41,6 @@ describe("x402-core wire types", () => {
       network: requirements.network,
       payload: {
         assetTransferMethod: "transfer-factory",
-        payer: "alice::1220beef",
         preparedTransaction: "cHJlcGFyZWQ=",
         preparedTxHash: "deadbeef",
         signature: "cafe",

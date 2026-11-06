@@ -6,6 +6,7 @@ import {
   computePreparedTransactionHash,
   createCantonExactVerifier,
   createVerifierRegistry,
+  decodePayloadTransfer,
   decodePreparedTransaction,
   EXACT_SCHEME_ID,
   fingerprintForPublicKey,
@@ -82,7 +83,6 @@ async function buildSignedFixture() {
     network: NETWORK,
     payload: {
       assetTransferMethod: "transfer-factory",
-      payer,
       preparedTransaction,
       preparedTxHash,
       signature: signatureToBase64(signatureHex),
@@ -189,17 +189,14 @@ describe("cantonExactVerifier", () => {
     expect(result).toMatchObject({ isValid: false, invalidReason: "network_mismatch" });
   });
 
-  it("rejects expired requirements", async () => {
-    const { payload, requirements } = await buildSignedFixture();
+  it("rejects expired requirements, naming the transfer's sender as the payer", async () => {
+    // The transfer is decoded first, so even this early refusal names the payer.
+    const { payload, requirements, payer } = await buildSignedFixture();
     const expired = { ...requirements, validBefore: "2000-01-01T00:00:00.000Z" };
-    // requirementsHash is bound to the requirements, so re-derive after mutating.
-    const p = {
-      ...payload,
-      payload: { ...payload.payload, requirementsHash: requirementsHashOf(expired) },
-    };
-    expect(await verifier.verify(p, expired)).toMatchObject({
+    expect(await verifier.verify(payload, expired)).toEqual({
       isValid: false,
       invalidReason: "requirements_expired",
+      payer,
     });
   });
 
@@ -213,19 +210,42 @@ describe("cantonExactVerifier", () => {
     }
   });
 
-  it("rejects a payer whose fingerprint doesn't match the public key", async () => {
-    const { payload, requirements } = await buildSignedFixture();
+  it("reports the transfer's sender as the payer, whatever payer an older payload names", async () => {
+    // The spec's payload names no payer (Rule 8). A `payer` an older payer still
+    // sends is ignored, so it can neither fail the payment nor change who it
+    // reports as having paid.
+    const { payload, requirements, payer } = await buildSignedFixture();
     const p = { ...payload, payload: { ...payload.payload, payer: "mallory::1220wrong" } };
-    // rebind the hash so we fail on fingerprint, not on the hash check
-    const req = requirements;
-    expect(await verifier.verify(p, req)).toMatchObject({
-      isValid: false,
-      invalidReason: "bad_fingerprint",
+    expect(await verifier.verify(p, requirements)).toEqual({ isValid: true, payer });
+  });
+
+  it("refuses a key that is not the sender's: a transfer from another party, signed with this key", async () => {
+    // The fingerprint check is what binds the key to the transfer's sender.
+    // Without it, any key could sign a transfer naming someone else. The hash
+    // and signature are right for this transaction, so only that check refuses.
+    const { payload, requirements, privateKey } = await buildSignedFixture();
+    const victim = `victim::${fingerprintForPublicKey(toB64(getPublicKey(new Uint8Array(32).fill(9))))}`;
+    const protobuf = encodePreparedTransaction({
+      sender: victim,
+      receiver: requirements.payTo,
+      amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
+      instrumentId: requirements.extra.instrumentId,
     });
+    const preparedTxHash = await computePreparedTransactionHash(protobuf, HashingSchemeVersion.V2);
+    const p = {
+      ...payload,
+      payload: {
+        ...payload.payload,
+        preparedTransaction: gzipped(protobuf),
+        preparedTxHash,
+        signature: signatureToBase64(signHash(preparedTxHash, privateKey)),
+      },
+    };
+    expect(await verifier.verify(p, requirements)).toEqual({ isValid: false, invalidReason: "bad_fingerprint", payer: victim });
   });
 
   it("rejects a bad signature", async () => {
-    const { payload, requirements } = await buildSignedFixture();
+    const { payload, requirements, payer } = await buildSignedFixture();
     const p = {
       ...payload,
       payload: {
@@ -233,10 +253,38 @@ describe("cantonExactVerifier", () => {
         signature: signatureToBase64("ff".repeat(64)),
       },
     };
-    expect(await verifier.verify(p, requirements)).toMatchObject({
-      isValid: false,
-      invalidReason: "bad_signature",
+    expect(await verifier.verify(p, requirements)).toEqual({ isValid: false, invalidReason: "bad_signature", payer });
+  });
+
+  it("refuses a transfer that pays another party or another amount, naming its sender as the payer", async () => {
+    // The binding runs on the decoded transfer, and the payer it reports is that
+    // transfer's sender: the payload names none.
+    const { payload, requirements, payer } = await buildSignedFixture();
+    const cases = [
+      [{ ...requirements, payTo: "someoneelse::1220" }, "receiver"],
+      [{ ...requirements, amount: "100000001" }, "amount"],
+      [{ ...requirements, extra: { ...requirements.extra, instrumentId: { id: "USDC", admin: "DSO::1220dso" } } }, "instrument"],
+    ] as const;
+    for (const [req, detail] of cases) {
+      expect(await verifier.verify(payload, req)).toEqual({
+        isValid: false,
+        invalidReason: "transfer_mismatch",
+        payer,
+        extensions: { detail },
+      });
+    }
+  });
+
+  it("decodes a payload's preparedTransaction to the transfer, and anything else to null", async () => {
+    const { payload, payer, requirements } = await buildSignedFixture();
+    expect(decodePayloadTransfer(payload.payload.preparedTransaction)).toMatchObject({
+      sender: payer,
+      receiver: requirements.payTo,
     });
+    // Untrusted input: no throw for a value that is not a string.
+    for (const junk of ["", "not base64!", 123, undefined, null, {}]) {
+      expect(decodePayloadTransfer(junk as unknown as string)).toBeNull();
+    }
   });
 
   it("rejects a prepared transaction whose transfer node is also encoded as another node type", async () => {
@@ -281,7 +329,7 @@ describe("cantonExactVerifier", () => {
   });
 
   it("reads the signature only as canonical base64 of 64 bytes", async () => {
-    const { payload, requirements, signatureHex } = await buildSignedFixture();
+    const { payload, requirements, signatureHex, payer } = await buildSignedFixture();
     const signature = payload.payload.signature;
     const nonCanonical = withPaddingBitSet(signature);
     // Decodes to the very same signature, so only the canonical check refuses it.
@@ -293,9 +341,10 @@ describe("cantonExactVerifier", () => {
     // valid base64 too, so the 64-byte check is what refuses it.
     for (const variant of [signatureHex, signature.replace(/=+$/, ""), nonCanonical, urlSafe, ` ${signature}`]) {
       const p = { ...payload, payload: { ...payload.payload, signature: variant } };
-      expect(await verifier.verify(p, requirements)).toMatchObject({
+      expect(await verifier.verify(p, requirements)).toEqual({
         isValid: false,
         invalidReason: "bad_signature",
+        payer,
       });
     }
   });
@@ -356,7 +405,6 @@ describe("cantonExactVerifier", () => {
       expect(await verifier.verify(p, requirements)).toEqual({
         isValid: false,
         invalidReason: "transfer_mismatch",
-        payer: payload.payload.payer,
         extensions: { detail: "undecodable" },
       });
     }
@@ -387,20 +435,23 @@ describe("cantonExactVerifier", () => {
   });
 
   it("reports missing_public_key for a blank OR absent key (specific reason, not internal_error)", async () => {
+    // Refused before the transfer is decoded, so there is no payer to report,
+    // and a stale `payer` field does not stand in for one.
     const { payload, requirements } = await buildSignedFixture();
+    const stale = { ...payload.payload, payer: "mallory::1220wrong" };
     // blank string
-    const blank = { ...payload, payload: { ...payload.payload, publicKey: "" } };
-    expect(await verifier.verify(blank, requirements)).toMatchObject({
-      isValid: false,
-      invalidReason: "missing_public_key",
-    });
+    const blank = { ...payload, payload: { ...stale, publicKey: "" } };
+    expect(await verifier.verify(blank, requirements)).toEqual({ isValid: false, invalidReason: "missing_public_key" });
     // entirely absent — the specific reason must survive the completed inner guard
-    const { publicKey: _omit, ...innerNoKey } = payload.payload;
+    const { publicKey: _omit, ...innerNoKey } = stale;
     const absent = { ...payload, payload: innerNoKey };
-    expect(await verifier.verify(absent, requirements)).toMatchObject({
-      isValid: false,
-      invalidReason: "missing_public_key",
-    });
+    expect(await verifier.verify(absent, requirements)).toEqual({ isValid: false, invalidReason: "missing_public_key" });
+  });
+
+  it("reports missing_public_key, naming the sender, for a key that is not 32 bytes", async () => {
+    const { payload, requirements, payer } = await buildSignedFixture();
+    const p = { ...payload, payload: { ...payload.payload, publicKey: toB64(new Uint8Array(31)) } };
+    expect(await verifier.verify(p, requirements)).toEqual({ isValid: false, invalidReason: "missing_public_key", payer });
   });
 
   it("accepts a payload without hashingSchemeVersion, which the spec reads as V2", async () => {
