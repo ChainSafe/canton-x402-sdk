@@ -10,7 +10,6 @@ import {
   type AssetSpec,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
-  type X402PaymentRequirements,
   type SettleResponse,
   type VerifyResponse,
 } from "@chainsafe/x402-core";
@@ -173,15 +172,23 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       const header = req.header("X-PAYMENT");
       if (!header) throw new PaymentRejection("payment_required", fresh);
 
-      // The X-PAYMENT envelope carries the requirements the payload was signed
-      // against; verify against those (they carry the nonce + validBefore the
-      // payer was quoted), after checking them against merchant policy.
+      // The payment carries the requirements it was built against as `accepted`,
+      // the accepts[] entry the payer chose. Verify against those (they carry the
+      // nonce + validBefore the payer was quoted), after checking them against
+      // merchant policy.
       let payload: CantonPaymentPayload;
-      let requirements: CantonPaymentRequirements;
       try {
-        ({ payload, requirements } = decodePaymentHeader(header));
+        payload = decodePaymentHeader(header);
       } catch {
         throw new PaymentRejection("bad_payload", fresh);
+      }
+      // The codec checks `accepted` only for a scheme and a network, and types
+      // it optimistically; nothing else in it has been checked. Narrow before
+      // reading a field, or one without `extra` throws a TypeError and answers
+      // 500 instead of 402 — attacker-controlled input choosing our status code.
+      const requirements: unknown = payload.accepted;
+      if (!isCantonPaymentRequirements(requirements)) {
+        throw new PaymentRejection("policy_requirements_invalid", fresh);
       }
 
       const policyError = validateEchoedRequirements(requirements, fresh);
@@ -300,19 +307,18 @@ async function resolve<T>(value: Resolvable<T>, req: Request): Promise<T> {
   return typeof value === "function" ? (value as (req: Request) => T | Promise<T>)(req) : value;
 }
 
-/** Ensure client-echoed requirements are acceptable per merchant policy. */
+/**
+ * Ensure the requirements the payer chose (`accepted`) are acceptable per
+ * merchant policy: the scheme, network, `payTo`, resource, instrument, asset
+ * and `maxTimeoutSeconds` must be this request's terms, and the amount must not
+ * be under the price. Other fields (`nonce`, `validBefore`, `description`,
+ * `extra` keys beyond the instrument) are not compared, and are forwarded as the
+ * payer sent them.
+ */
 function validateEchoedRequirements(
-  echoed: X402PaymentRequirements<unknown>,
+  echoed: CantonPaymentRequirements,
   policy: CantonPaymentRequirements,
 ): string | null {
-  // The header is only ENVELOPE-validated on decode, and the envelope is a
-  // looseObject that does not require `extra`. decodePaymentHeader types the
-  // result optimistically as canton-exact; nothing has checked it. Narrow
-  // before reading a field, or a header without `extra` throws a TypeError and
-  // answers 500 instead of 402 — attacker-controlled input choosing our status
-  // code. This is also why the parameter is the envelope type, not the
-  // concrete one: the old signature asserted a shape no one had verified.
-  if (!isCantonPaymentRequirements(echoed)) return "policy_requirements_invalid";
   if (echoed.scheme !== policy.scheme) return "policy_scheme";
   if (echoed.network !== policy.network) return "policy_network";
   if (echoed.payTo !== policy.payTo) return "policy_payTo";
@@ -332,6 +338,9 @@ function validateEchoedRequirements(
   // anything over ~900k CC exceeds Number.MAX_SAFE_INTEGER and two different
   // prices start comparing equal.
   if (BigInt(echoed.amount) < BigInt(policy.amount)) return "policy_underpriced";
+  // The facilitator holds a payment for at most this long; the payer does not
+  // get to stretch it.
+  if (echoed.maxTimeoutSeconds !== policy.maxTimeoutSeconds) return "policy_timeout";
   if (Date.parse(echoed.validBefore) <= Date.now()) return "requirements_expired";
   return null;
 }

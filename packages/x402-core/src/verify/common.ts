@@ -65,10 +65,13 @@ export function isExpired(validBefore: string, now: number = Date.now()): boolea
   return !Number.isFinite(t) || t <= now;
 }
 
-/** The payload's scheme + network must match the requirements. */
+/** The scheme + network the payer chose (`accepted`) must match the requirements. */
 export function schemeNetworkMatches(
   payload: X402PaymentPayload<unknown>,
   requirements: X402PaymentRequirements<unknown>,
 ): boolean {
-  return payload.scheme === requirements.scheme && payload.network === requirements.network;
+  const accepted: unknown = payload.accepted;
+  if (typeof accepted !== "object" || accepted === null) return false;
+  const { scheme, network } = accepted as { scheme?: unknown; network?: unknown };
+  return scheme === requirements.scheme && network === requirements.network;
 }

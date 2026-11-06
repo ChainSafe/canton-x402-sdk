@@ -8,7 +8,7 @@
 // Multi-scheme generics: the chain-agnostic bases carry the scheme seams
 // via defaulted type params, and the canton-exact types are thin aliases —
 //
-//   interface X402PaymentPayload<TInner>        { x402Version; scheme; network; payload: TInner }
+//   interface X402PaymentPayload<TInner>        { x402Version; accepted; payload: TInner; resource?; extensions? }
 //   interface X402PaymentRequirements<TExtra>   { …; asset: string; extra?: TExtra }
 //   interface X402Request<TInner,TExtra>        { paymentPayload; paymentRequirements }
 //   type CantonPaymentPayload      = X402PaymentPayload<CantonPaymentInner>

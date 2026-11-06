@@ -90,8 +90,7 @@ guarantee.
   "x402Version": 2,
   "paymentPayload": {
     "x402Version": 2,
-    "scheme": "exact",
-    "network": "canton:devnet",
+    "accepted": { "scheme": "exact", "network": "canton:devnet", … },
     "payload": {
       "assetTransferMethod": "transfer-factory",
       "preparedTransaction": "<base64 of the gzipped transaction from interactive-submission/prepare>",
@@ -125,6 +124,8 @@ guarantee.
 | Field                                       | Rule                                                                                                                                                                                                                                                                           |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `x402Version`                               | Must be exactly `2`, at the top level and inside `paymentPayload`.                                                                                                                                                                                                             |
+| `paymentPayload.accepted`                   | Required: the `accepts[]` entry the payer chose, here elided. Its `scheme` must be `exact` and its `network` must equal `paymentRequirements.network` (spec Rule 1), or the answer is `scheme_mismatch` / `network_mismatch`. Nothing else in it is checked: the transfer is bound to `paymentRequirements`, which the merchant takes from it after checking it against its own terms. A body whose `paymentPayload` has no `accepted`, or has `scheme` and `network` at the top level instead (the pre-spec envelope), is not a well-formed request: `400` with `bad_request`. |
+| `paymentPayload.resource`, `paymentPayload.extensions` | Optional; `null` is accepted for either, and neither affects the verdict. `resource` is `{ url, description?, mimeType?, serviceName?, tags?, iconUrl? }` with a non-empty `url`, and `extensions` is an object keyed by extension id. A value of another shape is a malformed body: `400` with `bad_request`. |
 | `paymentPayload.payload`                    | The six fields above, all required except `hashingSchemeVersion`, which means `HASHING_SCHEME_VERSION_V2` when absent. `assetTransferMethod` must be `"transfer-factory"`, as in the requirements' `extra`; a payload without it or with another value fails the shape check (`internal_error`). `signature` is canonical base64 of the 64-byte signature and `preparedTxHash` is 64 lower-case hex digits; an empty one fails the payload's shape check (`internal_error`), and any other encoding is `bad_signature`. `preparedTransaction` is base64 of exactly one gzip member with no optional header fields, at most 8 KiB compressed and 64 KiB decompressed; anything else is `transfer_mismatch` with detail `undecodable`. `publicKey` replaced the older `keyFingerprint` — the facilitator derives the fingerprint from the key and matches it against the `::` suffix of the transfer's sender, which is the payer: the payload names none. The signature covers the prepared transaction, whose receiver, instrument and amount the facilitator checks against `paymentRequirements`: that is what binds the payload to them. |
 | `amount`                                    | Integer string of atomic units — 1 CC = 1e10, so `"500000000"` is 0.05 CC. **Exact**, not a floor: the transfer must move this amount, and an overpayment is rejected.                                                                                                       |
 | `payTo`                                     | Must be a party your API key owns. Otherwise verify answers `transfer_mismatch` and settle answers `unauthorized`.                                                                                                                                                             |
@@ -174,8 +175,7 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
   "x402Version": 2,
   "paymentPayload": {
     "x402Version": 2,
-    "scheme": "exact",
-    "network": "canton:devnet",
+    "accepted": { "scheme": "exact", "network": "canton:devnet", … },
     "payload": {
       "assetTransferMethod": "transfer-factory",
       "preparedTransaction": "…",
@@ -230,8 +230,7 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
   "x402Version": 2,
   "paymentPayload": {
     "x402Version": 2,
-    "scheme": "exact",
-    "network": "canton:devnet",
+    "accepted": { "scheme": "exact", "network": "canton:devnet", … },
     "payload": {
       "assetTransferMethod": "transfer-factory",
       "preparedTransaction": "<base64 of the gzipped transaction from interactive-submission/prepare>",

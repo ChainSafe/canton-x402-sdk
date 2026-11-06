@@ -3,79 +3,61 @@
 // header), the merchant middleware (reads it), and the facilitator.
 //
 // ── The envelope ────────────────────────────────────────────────────────────
-// `X-PAYMENT` is base64(JSON) of a two-slot wrapper: the payment, and the
-// requirements it was signed against.
+// `X-PAYMENT` is base64(JSON) of the x402 v2 PaymentPayload, nothing around it:
 //
-//   {
-//     "payment":      { "x402Version": 2, "scheme": "exact", "network": "canton:devnet",
-//                       "payload": { "preparedTransaction": "…", "signature": "…", … } },
-//     "requirements": { "scheme": "exact", "nonce": "…", "validBefore": "…", … }
-//   }
+//   { "x402Version": 2,
+//     "accepted": { "scheme": "exact", "network": "canton:devnet", "nonce": "…", … },
+//     "payload":  { "preparedTransaction": "…", "signature": "…", … } }
 //
-// Two slots (not a merge) so each is validated independently on decode (at the
-// envelope level — see decodePaymentHeader), and `payment` (not `payload`) at the
-// top disambiguates from the payment's own inner `.payload`.
-//
-// The requirements are mandatory: verification is stateless, and the facilitator
-// checks the signed transfer and the expiry against one specific requirements
-// object (its exact nonce + validBefore), so that object must travel back with
-// the payment. A payment without them is unverifiable. The merchant validates the
-// echoed requirements against its policy before trusting them.
+// `accepted` is the `accepts[]` entry the payer chose, so the requirements the
+// payment was built against travel inside it. Verification is stateless: the
+// facilitator checks the signed transfer and the expiry against one specific
+// requirements object (its exact nonce + validBefore), and that is the one the
+// merchant forwards, after validating it against its own policy.
 //
 // Isomorphic on purpose (browser + node): base64 via btoa/atob, UTF-8 via
 // TextEncoder/TextDecoder — no Node Buffer.
 
-import { isX402PaymentPayload, isX402PaymentRequirements } from "./types";
+import { isX402PaymentPayload } from "./types";
 import type { CantonPaymentPayload } from "./types/payment";
-import type { CantonPaymentRequirements } from "./types/requirements";
 
 /**
- * The decoded X-PAYMENT slots. Generic over the payment + requirements types so a
- * future scheme can parameterize it; both default to the canton-exact concrete
- * types, so existing use (and `decodePaymentHeader`'s return) is unchanged. Widening
- * to another scheme later needs no breaking change here.
+ * The deepest a decoded payment may nest. A real one is a handful of levels
+ * deep. `JSON.parse` accepts far deeper, but `JSON.stringify` overflows the
+ * stack at a few thousand levels when the payment is forwarded to the
+ * facilitator, turning a refusal into a 500; `extensions` and the unchecked
+ * keys of `accepted` can carry such a value.
  */
-export interface DecodedPaymentHeader<
-  TPayload = CantonPaymentPayload,
-  TRequirements = CantonPaymentRequirements,
-> {
-  payload: TPayload;
-  /** The requirements the payload was signed against, echoed from the 402. */
-  requirements: TRequirements;
+export const MAX_PAYMENT_DEPTH = 64;
+
+/**
+ * Serialise a payment into an `X-PAYMENT` header value ({@link decodePaymentHeader}
+ * is the inverse). Scheme-agnostic at runtime (it just serialises); generic so any
+ * scheme's payload can be encoded.
+ */
+export function encodePaymentHeader<TPayload = CantonPaymentPayload>(payload: TPayload): string {
+  return bytesToBase64(new TextEncoder().encode(JSON.stringify(payload)));
 }
 
 /**
- * Serialise a payment together with the requirements it was signed against into
- * an `X-PAYMENT` header value ({@link decodePaymentHeader} is the inverse).
- * Scheme-agnostic at runtime (it just serialises); generic over the two slot types
- * so any scheme's payload/requirements can be encoded.
- */
-export function encodePaymentHeader<
-  TPayload = CantonPaymentPayload,
-  TRequirements = CantonPaymentRequirements,
->(payload: TPayload, requirements: TRequirements): string {
-  const envelope = { payment: payload, requirements };
-  return bytesToBase64(new TextEncoder().encode(JSON.stringify(envelope)));
-}
-
-/**
- * Parse an `X-PAYMENT` header value into its `payment` + `requirements` slots.
- * Throws on bad base64 / JSON / envelope shape, or when either slot is missing or
- * not a well-formed x402 envelope.
+ * Parse an `X-PAYMENT` header value into the payment it carries. Throws on bad
+ * base64 / JSON, or when the value is not a well-formed x402 v2 payment envelope,
+ * including the pre-spec `{ payment, requirements }` wrapper and a payment with
+ * no `accepted`.
  *
- * Validation here is **envelope-level and scheme-agnostic** (x402 v2 shape, a scheme,
- * a network, a payload object, the universal requirements fields) — deliberately *not*
- * the concrete per-scheme inner. Concrete validation is the verifier's job: the
- * facilitator (or a local {@link createCantonExactVerifier}) checks the scheme-specific
- * inner + asset and the signature before the payment is trusted. This keeps the codec
- * one scheme-agnostic seam and avoids duplicating per-scheme knowledge here.
+ * Validation here is **envelope-level and scheme-agnostic** (x402 v2, an
+ * `accepted` with a scheme and a network, a payload object) — deliberately *not*
+ * the concrete per-scheme inner or the full requirements. Concrete validation is
+ * the verifier's job: the facilitator (or a local {@link createCantonExactVerifier})
+ * checks the scheme-specific inner + asset and the signature before the payment is
+ * trusted. This keeps the codec one scheme-agnostic seam and avoids duplicating
+ * per-scheme knowledge here.
  *
- * The slots are typed as the canton-exact concrete types by default (see
- * {@link DecodedPaymentHeader}) for caller convenience; that's optimistic — a caller
- * MUST verify before relying on scheme-specific fields. A future scheme narrows via
- * the generic parameters.
+ * The result is typed as the canton-exact payload for caller convenience; that's
+ * optimistic — a caller MUST verify before relying on scheme-specific fields, and
+ * narrow `accepted` before reading more than its scheme and network.
  */
-export function decodePaymentHeader(headerValue: string): DecodedPaymentHeader {
+export function decodePaymentHeader(headerValue: string): CantonPaymentPayload {
   let raw: string;
   try {
     raw = new TextDecoder().decode(base64ToBytes(headerValue));
@@ -88,22 +70,27 @@ export function decodePaymentHeader(headerValue: string): DecodedPaymentHeader {
   } catch (err) {
     throw new Error(`X-PAYMENT is not valid JSON: ${errMsg(err)}`);
   }
-  if (typeof parsed !== "object" || parsed === null) {
-    throw new Error("X-PAYMENT did not decode to a { payment, requirements } envelope");
+  if (nestsDeeperThan(parsed, MAX_PAYMENT_DEPTH)) {
+    throw new Error(`X-PAYMENT nests deeper than ${MAX_PAYMENT_DEPTH} levels`);
   }
-  const { payment, requirements } = parsed as { payment?: unknown; requirements?: unknown };
-  if (!isX402PaymentPayload(payment)) {
-    throw new Error("X-PAYMENT `payment` slot is missing or not a valid payment envelope");
+  if (!isX402PaymentPayload(parsed)) {
+    throw new Error("X-PAYMENT is not an x402 v2 payment (x402Version 2, accepted, payload)");
   }
-  if (!isX402PaymentRequirements(requirements)) {
-    throw new Error("X-PAYMENT `requirements` slot is missing or not valid payment requirements");
+  // Optimistically typed as canton-exact; the inner/asset are verified by the
+  // verifier, not here.
+  return parsed as CantonPaymentPayload;
+}
+
+/** True iff `value` has objects or arrays nested more than `max` deep. Iterative, so a deep value cannot overflow the stack here either. */
+function nestsDeeperThan(value: unknown, max: number): boolean {
+  const stack: Array<[unknown, number]> = [[value, 1]];
+  while (stack.length > 0) {
+    const [node, depth] = stack.pop() as [unknown, number];
+    if (typeof node !== "object" || node === null) continue;
+    if (depth > max) return true;
+    for (const child of Array.isArray(node) ? node : Object.values(node)) stack.push([child, depth + 1]);
   }
-  // Optimistically typed as the canton-exact concrete types (the DecodedPaymentHeader
-  // defaults); the inner/asset are verified by the verifier, not here.
-  return {
-    payload: payment as CantonPaymentPayload,
-    requirements: requirements as CantonPaymentRequirements,
-  };
+  return false;
 }
 
 /** bytes → base64. Isomorphic: `btoa` is global in Node 18+ and browsers. */

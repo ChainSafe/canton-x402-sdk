@@ -54,8 +54,12 @@ function makeApp(opts: Partial<PaymentRequiredOptions> = {}): Express {
   return app;
 }
 
-/** Build an `X-PAYMENT` header echoing acceptable requirements. */
-function paymentHeader(overrides: Record<string, unknown> = {}, inner: Record<string, unknown> = {}): string {
+/** Build an `X-PAYMENT` header whose payment chose (`accepted`) acceptable requirements. */
+function paymentHeader(
+  overrides: Record<string, unknown> = {},
+  inner: Record<string, unknown> = {},
+  envelope: Record<string, unknown> = {},
+): string {
   const requirements = {
     scheme: "exact",
     network: "canton:x",
@@ -72,8 +76,7 @@ function paymentHeader(overrides: Record<string, unknown> = {}, inner: Record<st
   } as unknown as CantonPaymentRequirements;
   const payload = {
     x402Version: 2,
-    scheme: "exact",
-    network: "canton:x",
+    accepted: requirements,
     payload: {
       assetTransferMethod: "transfer-factory",
       preparedTransaction: "b",
@@ -83,8 +86,9 @@ function paymentHeader(overrides: Record<string, unknown> = {}, inner: Record<st
       hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
       ...inner,
     },
+    ...envelope,
   } as unknown as CantonPaymentPayload;
-  return encodePaymentHeader(payload, requirements);
+  return encodePaymentHeader(payload);
 }
 
 describe("paymentRequired", () => {
@@ -482,16 +486,18 @@ describe("paymentRequired", () => {
     }
   });
 
-  it("rejects an EMPTY echoed amount at decode, before policy", async () => {
-    // BigInt("") is 0, so this one matters — but the envelope's nonEmptyString
-    // catches it first, which is why the code is bad_payload and not
-    // policy_amount_invalid. Asserted so the earlier guard cannot quietly go.
-    stubFacilitator();
+  it("rejects an EMPTY amount in accepted when narrowing it, before policy", async () => {
+    // BigInt("") is 0, so this one matters — but the requirements schema's
+    // non-empty amount catches it first, which is why the code is
+    // policy_requirements_invalid and not policy_amount_invalid. Asserted so the
+    // earlier guard cannot quietly go.
+    const fetchMock = stubFacilitator();
     const res = await request(makeApp())
       .get("/paid")
       .set("X-PAYMENT", paymentHeader({ amount: "" }));
     expect(res.status).toBe(402);
-    expect(res.body.error).toBe("bad_payload");
+    expect(res.body.error).toBe("policy_requirements_invalid");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects a look-alike instrument from another registry", async () => {
@@ -532,6 +538,59 @@ describe("paymentRequired", () => {
       .set("X-PAYMENT", paymentHeader({ asset: "USDCx" }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_asset");
+  });
+
+  it("forwards exactly the payment's accepted to the facilitator as paymentRequirements", async () => {
+    const fetchMock = stubFacilitator();
+    const header = paymentHeader(
+      { nonce: "nonce-forwarded" },
+      {},
+      { resource: { url: "https://f.example/paid", description: "Access" }, extensions: { "x-ext": { info: { a: 1 }, schema: {} } } },
+    );
+    const res = await request(makeApp({ settle: true })).get("/paid").set("X-PAYMENT", header);
+    expect(res.status).toBe(200);
+    const sent = JSON.parse(atob(header));
+    for (const path of ["/v2/verify", "/v2/settle"]) {
+      const call = fetchMock.mock.calls.find((c) => String(c[0]).includes(path));
+      const init = (call as unknown as [string, RequestInit] | undefined)?.[1];
+      const body = JSON.parse(String(init?.body));
+      expect(body.paymentRequirements).toEqual(sent.accepted);
+      expect(body.paymentPayload).toEqual(sent);
+    }
+  });
+
+  it("answers 402 bad_payload, not 500, for the pre-spec { payment, requirements } header", async () => {
+    const fetchMock = stubFacilitator();
+    const { accepted, ...rest } = JSON.parse(atob(paymentHeader()));
+    const legacy = { payment: { ...rest, scheme: "exact", network: "canton:x" }, requirements: accepted };
+    const res = await request(makeApp()).get("/paid").set("X-PAYMENT", btoa(JSON.stringify(legacy)));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("bad_payload");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("answers 402 bad_payload, not 500, for a payment nested too deep to forward", async () => {
+    // JSON.parse takes it, but JSON.stringify overflows the stack serialising
+    // the facilitator request; the codec refuses it first.
+    const fetchMock = stubFacilitator();
+    const json = atob(paymentHeader());
+    const deep = json.slice(0, -1) + `,"extensions":{"x":${"[".repeat(5000)}0${"]".repeat(5000)}}}`;
+    const res = await request(makeApp()).get("/paid").set("X-PAYMENT", btoa(deep));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("bad_payload");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses an accepted whose maxTimeoutSeconds is not the merchant's", async () => {
+    // Only nonce and validBefore are the payer's quote's own; a field that does
+    // not change between requests has to match this request's terms.
+    const fetchMock = stubFacilitator();
+    for (const maxTimeoutSeconds of [3600, 10]) {
+      const res = await request(makeApp()).get("/paid").set("X-PAYMENT", paymentHeader({ maxTimeoutSeconds }));
+      expect(res.status).toBe(402);
+      expect(res.body.error).toBe("policy_timeout");
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("answers 402, not 500, when the echoed requirements carry no `extra`", async () => {

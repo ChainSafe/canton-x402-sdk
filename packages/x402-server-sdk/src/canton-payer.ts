@@ -114,8 +114,10 @@ export class CantonX402Payer implements X402Payer {
     // 4. Assemble the payload the facilitator settles.
     return {
       x402Version: 2,
-      scheme: requirements.scheme,
-      network: requirements.network,
+      // The accepts[] entry this payment answers, as the spec's `accepted`: the
+      // scheme and network travel in it, and the merchant forwards it to the
+      // facilitator as the requirements to verify against.
+      accepted: requirements,
       payload: {
         // transfer.create built a TransferFactory_Transfer, the one method Canton's
         // exact defines.

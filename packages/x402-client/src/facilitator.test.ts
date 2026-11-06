@@ -2,8 +2,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import type { CantonPaymentPayload, CantonPaymentRequirements } from "@chainsafe/x402-core";
 import { FacilitatorClient, FacilitatorError } from "./facilitator";
 
-const payload = { x402Version: 2, scheme: "exact", network: "canton:x", payload: {} } as unknown as CantonPaymentPayload;
 const requirements = { scheme: "exact", network: "canton:x", nonce: "n" } as unknown as CantonPaymentRequirements;
+const payload = { x402Version: 2, accepted: requirements, payload: {} } as unknown as CantonPaymentPayload;
 
 const json = (body: unknown, status = 200, headers?: Record<string, string>) =>
   new Response(JSON.stringify(body), { status, headers });
@@ -21,7 +21,7 @@ describe("FacilitatorClient", () => {
     expect(url).toBe("https://f.example/v2/verify");
     expect(JSON.parse(String(init?.body))).toMatchObject({
       x402Version: 2,
-      paymentPayload: { scheme: "exact" },
+      paymentPayload: { accepted: { scheme: "exact", network: "canton:x" } },
       paymentRequirements: { nonce: "n" },
     });
   });
