@@ -10,8 +10,7 @@ import type { CantonPaymentRequirements } from "./index";
 // requirements — so this test pins byte-for-byte parity. Regenerate ONLY if the facilitator's
 // algorithm intentionally changes (and update the facilitator in lockstep).
 //
-// Last regenerated when `extra.assetTransferMethod` and `maxTimeoutSeconds`
-// became required. The hash covers every value in the object, so a new field
+// Last regenerated when `nonce` and `validBefore` were dropped. The hash covers every value in the object, so a new field
 // moves it even though the algorithm is untouched. `maxTimeoutSeconds` is the
 // first NUMBER in this vector, so it is also what pins number formatting
 // across the two canonicalizers.
@@ -20,24 +19,20 @@ const REQUIREMENTS: CantonPaymentRequirements = {
   network: "canton:devnet",
   amount: "100000000",
   asset: "CC",
-  extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+  extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
   resource: "/api/resource",
-  nonce: "550e8400-e29b-41d4-a716-446655440000",
-  validBefore: "2026-01-01T00:00:00.000Z",
   maxTimeoutSeconds: 60,
 };
 
 const GOLDEN_CANONICAL =
   '{"amount":"100000000","asset":"CC",' +
-  '"extra":{"assetTransferMethod":"transfer-factory",' +
+  '"extra":{"assetTransferMethod":"transfer-factory","executeBeforeSeconds":120,' +
   '"instrumentId":{"admin":"DSO::1220be58c29e","id":"Amulet"}},' +
   '"maxTimeoutSeconds":60,"network":"canton:devnet",' +
-  '"nonce":"550e8400-e29b-41d4-a716-446655440000","payTo":"merchant::1220dead",' +
-  '"resource":"/api/resource","scheme":"exact",' +
-  '"validBefore":"2026-01-01T00:00:00.000Z"}';
+  '"payTo":"merchant::1220dead","resource":"/api/resource","scheme":"exact"}';
 
-const GOLDEN_HASH = "df3e5d74993eda5c5bad089c16d91d318b08523abad10dc9f5be53b085ef9581";
+const GOLDEN_HASH = "e4ac6c7f84ce323b9083e81ab3685422c21b40da659d8f41ee104b021991834e";
 
 describe("requirements hashing — facilitator parity", () => {
   it("canonicalizes to the golden string (keys sorted, nested sorted)", () => {
@@ -51,11 +46,9 @@ describe("requirements hashing — facilitator parity", () => {
   it("is order-independent (field order in the object doesn't change the hash)", () => {
     const reordered: CantonPaymentRequirements = {
       extra: REQUIREMENTS.extra,
-      validBefore: REQUIREMENTS.validBefore,
       scheme: REQUIREMENTS.scheme,
       resource: REQUIREMENTS.resource,
       payTo: REQUIREMENTS.payTo,
-      nonce: REQUIREMENTS.nonce,
       asset: REQUIREMENTS.asset,
       network: REQUIREMENTS.network,
       amount: REQUIREMENTS.amount,

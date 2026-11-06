@@ -1,7 +1,7 @@
 // Scheme-agnostic verify primitives. Pure and stateless — usable standalone for
 // a client self-check before paying. Anything scheme-specific (Ed25519, Canton
 // fingerprints, canton-id shape) lives in the per-scheme module; anything
-// stateful (nonce replay, on-chain proof) stays in the facilitator.
+// stateful (replay, on-chain proof) stays in the facilitator.
 
 import type { X402PaymentPayload } from "../types/payment";
 import type { X402PaymentRequirements } from "../types/requirements";
@@ -57,12 +57,6 @@ export function atomicToLedger(amount: string, decimals: number): string | null 
   const whole = padded.slice(0, -decimals).replace(/^0+(?=\d)/, "");
   const frac = padded.slice(-decimals).replace(/0+$/, "");
   return frac ? `${whole}.${frac}` : whole;
-}
-
-/** True iff `validBefore` (ISO 8601) is unparseable or at/before `now` (expired). */
-export function isExpired(validBefore: string, now: number = Date.now()): boolean {
-  const t = Date.parse(validBefore);
-  return !Number.isFinite(t) || t <= now;
 }
 
 /** The payload's scheme + network must match the requirements. */

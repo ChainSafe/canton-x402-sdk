@@ -76,10 +76,11 @@ export interface SchemeVerifier {
 export const VerifyInvalidReasonSchema = v.picklist([
   "scheme_mismatch",
   "network_mismatch",
-  "requirements_expired",
   /**
-   * Not returned by this package's verifier: the payload no longer carries a
-   * `requirementsHash` to check. Kept so a facilitator that still sends it parses.
+   * Nothing produces this any more: the payload carries no `requirementsHash`
+   * to check. Kept pending #98, which reworks these codes against the spec's
+   * own `invalid_exact_canton_*` vocabulary — not because anything still emits
+   * it. `requirements_expired` went the other way, with the field it named.
    */
   "requirements_hash_mismatch",
   "bad_fingerprint",
@@ -88,6 +89,13 @@ export const VerifyInvalidReasonSchema = v.picklist([
   "missing_public_key",
   /** The signed prepared transaction does not transfer what the requirements demand. */
   "transfer_mismatch",
+  /**
+   * The signed transfer's own `executeBefore` has passed, is about to, or is
+   * missing — so it cannot settle, and the client should prepare another. The
+   * only expiry left: a quote no longer goes stale on its own, because the
+   * deadline that decides is the one inside what the payer signed.
+   */
+  "transfer_expired",
   "internal_error",
 ]);
 export type VerifyInvalidReason = v.InferOutput<typeof VerifyInvalidReasonSchema>;
@@ -122,8 +130,7 @@ export const SettleErrorReasonSchema = v.picklist([
   "unauthorized",
   "scheme_mismatch",
   "network_mismatch",
-  "requirements_expired",
-  /** As in {@link VerifyInvalidReasonSchema}: kept so an older response parses. */
+  /** As in {@link VerifyInvalidReasonSchema}: unproducible, kept pending #98. */
   "requirements_hash_mismatch",
   "bad_fingerprint",
   "bad_signature",

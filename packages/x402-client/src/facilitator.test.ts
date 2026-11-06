@@ -3,7 +3,7 @@ import type { CantonPaymentPayload, CantonPaymentRequirements } from "@chainsafe
 import { FacilitatorClient, FacilitatorError } from "./facilitator";
 
 const payload = { x402Version: 2, scheme: "exact", network: "canton:x", payload: {} } as unknown as CantonPaymentPayload;
-const requirements = { scheme: "exact", network: "canton:x", nonce: "n" } as unknown as CantonPaymentRequirements;
+const requirements = { scheme: "exact", network: "canton:x", payTo: "merchant::x" } as unknown as CantonPaymentRequirements;
 
 const json = (body: unknown, status = 200, headers?: Record<string, string>) =>
   new Response(JSON.stringify(body), { status, headers });
@@ -22,7 +22,7 @@ describe("FacilitatorClient", () => {
     expect(JSON.parse(String(init?.body))).toMatchObject({
       x402Version: 2,
       paymentPayload: { scheme: "exact" },
-      paymentRequirements: { nonce: "n" },
+      paymentRequirements: { payTo: "merchant::x" },
     });
   });
 
