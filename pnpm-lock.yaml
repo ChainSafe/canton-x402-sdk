@@ -180,6 +180,10 @@ importers:
         version: 5.9.3
 
   packages/x402-core:
+    dependencies:
+      '@canton-network/core-tx-visualizer':
+        specifier: ~1.7.0
+        version: 1.7.0
     devDependencies:
       '@noble/ed25519':
         specifier: ^3.0.0
@@ -492,6 +496,9 @@ packages:
 
   '@canton-network/core-tx-visualizer@1.13.0':
     resolution: {integrity: sha512-vHGnLsfNQhFLthKH9Ifz5dG40L3kBDksTius9VphpQtW3GqlN9jPtEfNPFkYHhMtvD7dCxombmkIxreS5IkvBg==}
+
+  '@canton-network/core-tx-visualizer@1.7.0':
+    resolution: {integrity: sha512-gNVNGXaEIxKPkdUcNZ5RuZrPaVXd3ySPsDFUbKSOxYSskoKq1GVKf0MF6B3j31Zgb8lePI9BpubP+zDYu25ZxA==}
 
   '@canton-network/core-types@1.14.0':
     resolution: {integrity: sha512-InvLx8VtxRn4jqCGAqIwQf+0Ts/I+xwdpU1PhBkfZ0PvDMkZ6QtgWnvKB0nMlwtaqDWRklPbIpzlUcPVIPiuZA==}
@@ -3953,6 +3960,12 @@ snapshots:
       - supports-color
 
   '@canton-network/core-tx-visualizer@1.13.0':
+    dependencies:
+      '@canton-network/core-ledger-proto': 1.13.0
+      '@types/node': 25.9.5
+      camelcase-keys: 10.0.2
+
+  '@canton-network/core-tx-visualizer@1.7.0':
     dependencies:
       '@canton-network/core-ledger-proto': 1.13.0
       '@types/node': 25.9.5

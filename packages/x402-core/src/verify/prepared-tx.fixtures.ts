@@ -84,11 +84,82 @@ export interface EncodeOptions {
 
 /** A `DamlTransaction.Node{1: node_id, 1000: v1}` around a v1 `Node` body. */
 export function encodeNode(nodeId: string, v1: Uint8Array): Uint8Array {
-  return Writer.create().uint32(tag(1, WIRE_LEN)).string(nodeId).uint32(tag(1000, WIRE_LEN)).bytes(v1).finish();
+  return Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string(nodeId)
+    .uint32(tag(1000, WIRE_LEN))
+    .bytes(v1)
+    .finish();
+}
+
+export interface PreparedTransactionGraphNode {
+  id: string;
+  children: string[];
+}
+
+export interface PreparedTransactionGraphOptions {
+  nodeSeedCount?: number;
+  inputContractCount?: number;
+}
+
+/** Encode a minimal rollback-only graph for structural validation tests. */
+export function encodePreparedTransactionGraph(
+  roots: string[],
+  nodes: PreparedTransactionGraphNode[],
+  options: PreparedTransactionGraphOptions = {},
+): string {
+  const damlTxn = Writer.create().uint32(tag(1, WIRE_LEN)).string("2.1");
+
+  for (const root of roots) {
+    damlTxn.uint32(tag(2, WIRE_LEN)).string(root);
+  }
+
+  for (const node of nodes) {
+    const rollback = Writer.create();
+
+    for (const child of node.children) {
+      rollback.uint32(tag(1, WIRE_LEN)).string(child);
+    }
+
+    const damlNode = Writer.create()
+      .uint32(tag(1, WIRE_LEN))
+      .string(node.id)
+      .uint32(tag(1000, WIRE_LEN))
+      .bytes(wrap(4, rollback.finish()))
+      .finish();
+
+    damlTxn.uint32(tag(3, WIRE_LEN)).bytes(damlNode);
+  }
+  for (let index = 0; index < (options.nodeSeedCount ?? 0); index += 1) {
+    const nodeSeed = Writer.create()
+      .uint32(tag(1, 0))
+      .int32(index)
+      .uint32(tag(2, WIRE_LEN))
+      .bytes(new Uint8Array())
+      .finish();
+    damlTxn.uint32(tag(4, WIRE_LEN)).bytes(nodeSeed);
+  }
+
+  const metadata = Writer.create();
+  for (let index = 0; index < (options.inputContractCount ?? 0); index += 1) {
+    metadata.uint32(tag(7, WIRE_LEN)).bytes(new Uint8Array());
+  }
+
+  return bytesToBase64(
+    Writer.create()
+      .uint32(tag(1, WIRE_LEN))
+      .bytes(damlTxn.finish())
+      .uint32(tag(2, WIRE_LEN))
+      .bytes(metadata.finish())
+      .finish(),
+  );
 }
 
 /** The TransferFactory_Transfer argument for `transfer`, as the exercise's `chosen_value`. */
-export function encodeChoiceArgument(transfer: DecodedTransfer, opts: EncodeOptions = {}): Uint8Array {
+export function encodeChoiceArgument(
+  transfer: DecodedTransfer,
+  opts: EncodeOptions = {},
+): Uint8Array {
   const positional = opts.positional ?? false;
   const extra = opts.extra ?? {};
 
@@ -129,7 +200,14 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
   const extra = opts.extra ?? {};
 
   // Exercise{9: choice_id, 10: chosen_value}
+  // Exercise containing the transfer choice.
   const exercise = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string("2.1")
+    .uint32(tag(4, WIRE_LEN))
+    .bytes(new Uint8Array())
+    .uint32(tag(7, WIRE_LEN))
+    .string(transfer.sender)
     .uint32(tag(9, WIRE_LEN))
     .string(opts.choiceId ?? "TransferFactory_Transfer")
     .uint32(tag(10, WIRE_LEN))
@@ -137,14 +215,54 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
     .finish();
 
   const nodeId = opts.nodeId ?? "0";
-  const v1Node = concat(wrap(3, concat(exercise, extra.exercise)), extra.node); // Node{3: exercise}
-  const damlNode = concat(encodeNode(nodeId, v1Node), extra.damlNode); // DamlTransaction.Node{1: node_id, 1000: v1}
+  const v1Node = concat(wrap(3, concat(exercise, extra.exercise)), extra.node);
+  const damlNode = concat(encodeNode(nodeId, v1Node), extra.damlNode);
 
-  // DamlTransaction{2: roots[], 3: nodes[]}
-  const damlTxn = Writer.create();
-  for (const root of opts.roots ?? [nodeId]) damlTxn.uint32(tag(2, WIRE_LEN)).string(root);
-  for (const node of [damlNode, ...(opts.nodes ?? [])]) damlTxn.uint32(tag(3, WIRE_LEN)).bytes(node);
+  const nodeSeed = Writer.create()
+    .uint32(tag(1, 0))
+    .int32(0)
+    .uint32(tag(2, WIRE_LEN))
+    .bytes(new Uint8Array(32).fill(1))
+    .finish();
 
-  const prepared = concat(wrap(1, damlTxn.finish()), extra.prepared); // PreparedTransaction{1: transaction}
+  const damlTxn = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string("2.1");
+
+  for (const root of opts.roots ?? [nodeId]) {
+    damlTxn.uint32(tag(2, WIRE_LEN)).string(root);
+  }
+
+  for (const node of [damlNode, ...(opts.nodes ?? [])]) {
+    damlTxn.uint32(tag(3, WIRE_LEN)).bytes(node);
+  }
+
+  damlTxn.uint32(tag(4, WIRE_LEN)).bytes(nodeSeed);
+
+  const submitterInfo = Writer.create()
+    .uint32(tag(1, WIRE_LEN))
+    .string(transfer.sender)
+    .uint32(tag(2, WIRE_LEN))
+    .string("test-command")
+    .finish();
+
+  const metadata = Writer.create()
+    .uint32(tag(2, WIRE_LEN))
+    .bytes(submitterInfo)
+    .uint32(tag(3, WIRE_LEN))
+    .string("test-synchronizer")
+    .uint32(tag(5, WIRE_LEN))
+    .string("test-transaction")
+    .finish();
+
+  const prepared = concat(
+    Writer.create()
+      .uint32(tag(1, WIRE_LEN))
+      .bytes(damlTxn.finish())
+      .uint32(tag(2, WIRE_LEN))
+      .bytes(metadata)
+      .finish(),
+    extra.prepared,
+  );
   return bytesToBase64(prepared);
 }
