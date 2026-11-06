@@ -79,8 +79,7 @@ async function buildSignedFixture() {
 
   const payload: CantonPaymentPayload = {
     x402Version: 2,
-    scheme: "exact",
-    network: NETWORK,
+    accepted: requirements,
     payload: {
       assetTransferMethod: "transfer-factory",
       preparedTransaction,
@@ -170,7 +169,7 @@ describe("cantonExactVerifier", () => {
   it("rejects a scheme mismatch", async () => {
     const { payload, requirements } = await buildSignedFixture();
     const result = await verifier.verify(
-      { ...payload, scheme: "batch-settlement-canton" },
+      { ...payload, accepted: { ...payload.accepted, scheme: "batch-settlement-canton" } },
       {
         ...requirements,
         scheme: "batch-settlement-canton",
@@ -183,7 +182,7 @@ describe("cantonExactVerifier", () => {
     const { payload, requirements } = await buildSignedFixture();
     const other = MAINNET_NETWORK;
     const result = await verifier.verify(
-      { ...payload, network: other },
+      { ...payload, accepted: { ...payload.accepted, network: other } },
       { ...requirements, network: other },
     );
     expect(result).toMatchObject({ isValid: false, invalidReason: "network_mismatch" });
@@ -454,6 +453,56 @@ describe("cantonExactVerifier", () => {
     expect(await verifier.verify(p, requirements)).toEqual({ isValid: false, invalidReason: "missing_public_key", payer });
   });
 
+  it("refuses a payment with no usable accepted, or a pre-spec envelope, with scheme_mismatch rather than a throw", async () => {
+    const { payload, requirements } = await buildSignedFixture();
+    const { accepted: _omit, ...noAccepted } = payload;
+    const variants = [
+      noAccepted,
+      { ...noAccepted, accepted: null },
+      { ...noAccepted, accepted: [] },
+      { ...noAccepted, accepted: "exact" },
+      // The pre-spec envelope: the scheme and network at the top level.
+      { ...noAccepted, scheme: "exact", network: NETWORK },
+    ];
+    for (const p of variants) {
+      expect(await verifier.verify(p as unknown as CantonPaymentPayload, requirements)).toEqual({
+        isValid: false,
+        invalidReason: "scheme_mismatch",
+      });
+    }
+  });
+
+  it("refuses an x402Version other than 2", async () => {
+    const { payload, requirements } = await buildSignedFixture();
+    const p = { ...payload, x402Version: 1 } as unknown as CantonPaymentPayload;
+    expect(await verifier.verify(p, requirements)).toEqual({ isValid: false, invalidReason: "internal_error" });
+  });
+
+  it("checks accepted only for Rule 1: the rest of the verdict depends on paymentRequirements", async () => {
+    // The spec binds the transfer to paymentRequirements; accepted only has to
+    // name the same scheme and network. An accepted that carries just those, as
+    // another implementation might send, or that differs elsewhere, verifies.
+    const { payload, requirements, payer } = await buildSignedFixture();
+    const variants = [
+      { scheme: requirements.scheme, network: requirements.network },
+      { ...requirements, amount: "1", payTo: "someoneelse::1220" },
+    ];
+    for (const accepted of variants) {
+      expect(await verifier.verify({ ...payload, accepted }, requirements)).toEqual({ isValid: true, payer });
+    }
+  });
+
+  it("verifies a payment carrying resource and extensions, or null for either", async () => {
+    const { payload, requirements, payer } = await buildSignedFixture();
+    const variants = [
+      { ...payload, resource: { url: "https://merchant.example/r" }, extensions: { "x-ext": { info: {}, schema: {} } } },
+      { ...payload, resource: null, extensions: null },
+    ];
+    for (const p of variants) {
+      expect(await verifier.verify(p, requirements)).toEqual({ isValid: true, payer });
+    }
+  });
+
   it("accepts a payload without hashingSchemeVersion, which the spec reads as V2", async () => {
     const { payload, requirements, payer } = await buildSignedFixture();
     const { hashingSchemeVersion: _omit, ...innerNoScheme } = payload.payload;
@@ -479,11 +528,18 @@ describe("createVerifierRegistry", () => {
 
   it("returns scheme_mismatch for an unregistered (scheme, network)", async () => {
     const { payload, requirements } = await buildSignedFixture();
-    const p = { ...payload, network: "canton:testnet" };
-    expect(await registry.verify(p, requirements)).toEqual({
+    expect(await registry.verify(payload, { ...requirements, network: "canton:testnet" })).toEqual({
       isValid: false,
       invalidReason: "scheme_mismatch",
     });
+  });
+
+  it("routes on the requirements, so a payment whose accepted disagrees reaches the verifier", async () => {
+    // Routing never reads the payer's `accepted`: the verifier it reaches gives
+    // the specific verdict (Rule 1), rather than a generic no-verifier answer.
+    const { payload, requirements } = await buildSignedFixture();
+    const p = { ...payload, accepted: { ...payload.accepted, network: "canton:testnet" } };
+    expect(await registry.verify(p, requirements)).toEqual({ isValid: false, invalidReason: "network_mismatch" });
   });
 
   it("adding a scheme = registering another SchemeVerifier (no dispatcher change)", async () => {
@@ -500,8 +556,7 @@ describe("createVerifierRegistry", () => {
     expect(await multi.verify(payload, requirements)).toEqual({ isValid: true, payer });
     const evmPayload = {
       x402Version: 2 as const,
-      scheme: "exact-evm-to-canton-cc",
-      network: "eip155:1",
+      accepted: { scheme: "exact-evm-to-canton-cc", network: "eip155:1" },
       payload: {},
     };
     const evmReq = { ...requirements, scheme: "exact-evm-to-canton-cc", network: "eip155:1" };
@@ -520,11 +575,7 @@ describe("the ids the verifier answers to", () => {
     return {
       payer,
       requirements: req,
-      payload: {
-        ...payload,
-        scheme,
-        network,
-      },
+      payload: { ...payload, accepted: req },
     };
   }
 
@@ -563,7 +614,7 @@ describe("the ids the verifier answers to", () => {
     // Both sides are checked, so naming the right id on one is not enough.
     const { payload, requirements } = await fixtureFor(EXACT_SCHEME_ID, NETWORK);
     expect(
-      await verifier.verify({ ...payload, scheme: "exact-canton" }, requirements),
+      await verifier.verify({ ...payload, accepted: { ...payload.accepted, scheme: "exact-canton" } }, requirements),
     ).toEqual({ isValid: false, invalidReason: "scheme_mismatch" });
   });
 
@@ -594,7 +645,7 @@ describe("the ids the verifier answers to", () => {
   it("refuses a payload and requirements that disagree about the network", async () => {
     const { payload, requirements } = await fixtureFor(EXACT_SCHEME_ID, NETWORK);
     expect(
-      await verifier.verify({ ...payload, network: MAINNET_NETWORK }, requirements),
+      await verifier.verify({ ...payload, accepted: { ...payload.accepted, network: MAINNET_NETWORK } }, requirements),
     ).toEqual({ isValid: false, invalidReason: "network_mismatch" });
   });
 });

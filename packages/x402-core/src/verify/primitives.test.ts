@@ -211,8 +211,7 @@ describe("shape guards + scheme/network match", () => {
   };
   const payload = {
     x402Version: 2,
-    scheme: "exact",
-    network: "canton:devnet",
+    accepted: requirements,
     payload: inner,
   } as unknown as CantonPaymentPayload;
 
@@ -226,24 +225,29 @@ describe("shape guards + scheme/network match", () => {
     expect(isCantonPaymentInner({ ...inner, publicKey: undefined })).toBe(false);
     expect(isCantonPaymentInner({ ...inner, hashingSchemeVersion: undefined })).toBe(true);
     expect(isX402PaymentPayload(payload)).toBe(true);
-    // Loose: accepts any non-empty scheme (per-scheme inner validated elsewhere).
+    // Loose: accepts any non-empty scheme in `accepted` (per-scheme inner validated elsewhere).
     expect(
       isX402PaymentPayload({
         x402Version: 2,
-        scheme: "batch-settlement-canton",
-        network: "canton:devnet",
+        accepted: { scheme: "batch-settlement-canton", network: "canton:devnet" },
         payload: { ethereumTxHash: "0x" },
       }),
     ).toBe(true);
-    expect(isX402PaymentPayload({ x402Version: 2, scheme: "", network: "canton:devnet", payload: {} })).toBe(false);
-    expect(isX402PaymentPayload({ x402Version: 1, scheme: "exact", network: "n", payload: {} })).toBe(false);
+    expect(isX402PaymentPayload({ x402Version: 2, accepted: { scheme: "", network: "canton:devnet" }, payload: {} })).toBe(false);
+    expect(isX402PaymentPayload({ x402Version: 1, accepted: { scheme: "exact", network: "n" }, payload: {} })).toBe(false);
+    // The pre-spec envelope, with the scheme and network at the top level.
+    expect(isX402PaymentPayload({ x402Version: 2, scheme: "exact", network: "canton:devnet", payload: {} })).toBe(false);
     expect(isX402PaymentPayload({})).toBe(false);
     expect(isCantonVerifyRequest({ x402Version: 2, paymentPayload: payload, paymentRequirements: requirements })).toBe(true);
     expect(isCantonVerifyRequest({ x402Version: 2 })).toBe(false);
   });
 
-  it("matches scheme + network", () => {
+  it("matches the scheme + network the payer chose (accepted) against the requirements", () => {
     expect(schemeNetworkMatches(payload, requirements)).toBe(true);
-    expect(schemeNetworkMatches({ ...payload, network: "canton:other" }, requirements)).toBe(false);
+    expect(schemeNetworkMatches({ ...payload, accepted: { ...requirements, network: "canton:other" } }, requirements)).toBe(false);
+    expect(schemeNetworkMatches({ ...payload, accepted: { ...requirements, scheme: "exact-canton" } }, requirements)).toBe(false);
+    // No accepted at all (a pre-spec envelope) matches nothing, and does not throw.
+    const { accepted: _omit, ...legacy } = payload;
+    expect(schemeNetworkMatches({ ...legacy, scheme: "exact", network: "canton:devnet" } as unknown as CantonPaymentPayload, requirements)).toBe(false);
   });
 });

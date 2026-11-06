@@ -102,8 +102,8 @@ export function parseCantonPaymentRequirements(input: unknown): CantonPaymentReq
  * per-scheme seam). `looseObject` so a scheme's extra keys pass through. Mirrors
  * {@link isX402PaymentPayload} — envelope-level validation only; the per-scheme
  * verifier checks the concrete asset (use {@link isCantonPaymentRequirements} for
- * canton-exact). This is the requirements shape carried in the X402 request +
- * X-PAYMENT envelopes.
+ * canton-exact). This is the requirements shape carried as the X402 request's
+ * `paymentRequirements`.
  */
 export const X402PaymentRequirementsEnvelopeSchema = v.looseObject({
   scheme: nonEmptyString,

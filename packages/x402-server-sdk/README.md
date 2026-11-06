@@ -109,6 +109,10 @@ interface X402Payer {
 }
 ```
 
+`authorize` must return a payment whose `accepted` is the `requirements` it was
+given, whole: `createX402Fetch` sends the payment alone, and the merchant takes
+the requirements to verify against from it.
+
 `CantonX402Payer.authorize()`:
 - validates the requirement (amount, scheme, network, `extra.assetTransferMethod`, expiry) via `x402-core`;
 - builds the Token Standard transfer (`sdk.token.transfer.create` — routes the
@@ -117,7 +121,8 @@ interface X402Payer {
 - Ed25519-signs the hash with the party key (`x402-core`'s `signHash`, then
   `signatureToBase64`, since the payload carries `signature` as base64 and
   `preparedTxHash` as hex);
-- assembles the payload (`assetTransferMethod: "transfer-factory"`, the prepared transaction gzipped with `gzipPreparedTransaction`,
+- assembles the payment: `accepted` (the requirements it answers, as the spec names
+  them), and the payload (`assetTransferMethod: "transfer-factory"`, the prepared transaction gzipped with `gzipPreparedTransaction`,
   required `publicKey`, and the `hashingSchemeVersion` prepare used)
   **without executing** — facilitator derives fingerprint from `publicKey` (`fingerprintForPublicKey`; no `keyFingerprint` on the wire). It names no payer: the
   facilitator takes the transfer's sender, and checks the key's fingerprint against it.

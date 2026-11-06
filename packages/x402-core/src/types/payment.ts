@@ -66,40 +66,79 @@ export const CantonPaymentInnerSchema = v.object({
 export type CantonPaymentInner = v.InferOutput<typeof CantonPaymentInnerSchema>;
 
 /**
- * Generic x402 payment envelope. `TInner` is the scheme-specific inner payload —
- * the whole `payload` object is the one chain-specific seam. `scheme` is the open
- * {@link Scheme} union so schemes share the envelope; each scheme guards on the
- * literal it knows. Generic → type-only (valibot can't infer a generic); the
- * loose runtime envelope check lives in `isX402PaymentPayload`.
+ * The `accepts[]` entry the payer chose, carried in the payment as `accepted`.
+ * Checked loosely: the scheme and the network, which the verifier compares
+ * with the requirements (spec Rule 1). Every other field passes through, so a
+ * payment built against another implementation's requirements still parses. A
+ * caller that reads more (the express middleware does) narrows it first, e.g.
+ * with `isCantonPaymentRequirements`.
+ */
+export const AcceptedRequirementsSchema = v.looseObject({
+  scheme: v.pipe(v.string(), v.minLength(1)),
+  network: v.string(),
+});
+export type AcceptedRequirements = v.InferOutput<typeof AcceptedRequirementsSchema>;
+
+/**
+ * x402 v2 `ResourceInfo`: what the payment is for. Only `url` is required. The
+ * optional fields also take an explicit `null`, as other implementations send
+ * it.
+ */
+export const ResourceInfoSchema = v.looseObject({
+  url: v.pipe(v.string(), v.minLength(1)),
+  description: v.nullish(v.string()),
+  mimeType: v.nullish(v.string()),
+  serviceName: v.nullish(v.string()),
+  tags: v.nullish(v.array(v.string())),
+  iconUrl: v.nullish(v.string()),
+});
+export type ResourceInfo = v.InferOutput<typeof ResourceInfoSchema>;
+
+/** x402 v2 `extensions`: extension id → its data. Passed through, not interpreted. */
+export const PaymentExtensionsSchema = v.record(v.string(), v.unknown());
+export type PaymentExtensions = v.InferOutput<typeof PaymentExtensionsSchema>;
+
+/**
+ * Generic x402 v2 payment envelope. `TInner` is the scheme-specific inner payload —
+ * the whole `payload` object is the one chain-specific seam. The scheme and the
+ * network are not top-level: they are `accepted`'s, the requirements the payer
+ * chose. Generic → type-only (valibot can't infer a generic); the loose runtime
+ * envelope check lives in `isX402PaymentPayload`.
  */
 export interface X402PaymentPayload<TInner = CantonPaymentInner> {
   x402Version: X402Version;
-  scheme: Scheme;
-  network: NetworkId;
+  /**
+   * The requirements the payer chose. Typed as only what every payment's
+   * `accepted` is checked to carry; a caller that reads more narrows it first.
+   */
+  accepted: { scheme: Scheme; network: NetworkId };
   payload: TInner;
+  resource?: ResourceInfo | null;
+  extensions?: PaymentExtensions | null;
 }
 
 /** canton-exact payload: the X-PAYMENT envelope carrying a {@link CantonPaymentInner}. */
 export const CantonPaymentPayloadSchema = v.object({
   x402Version: v.literal(2),
-  scheme: v.string(),
-  network: v.string(),
+  accepted: AcceptedRequirementsSchema,
   payload: CantonPaymentInnerSchema,
+  resource: v.nullish(ResourceInfoSchema),
+  extensions: v.nullish(PaymentExtensionsSchema),
 });
 export type CantonPaymentPayload = v.InferOutput<typeof CantonPaymentPayloadSchema>;
 
 /**
- * Loose validator for the outer payment envelope: x402 v2, any non-empty scheme
- * (the per-scheme verifier validates the inner `payload`), a network, and a
- * `payload` object. `looseObject` so extra envelope keys (e.g. the echoed
- * `paymentRequirements` the X-PAYMENT header carries) pass through. Scheme-agnostic
- * — use {@link isCantonPaymentInner} for the canton-exact inner.
+ * Loose validator for the outer payment envelope: x402 v2, an `accepted` with a
+ * scheme and a network, and a `payload` object (the per-scheme verifier
+ * validates the inner). `looseObject` so extra envelope keys pass through.
+ * Scheme-agnostic — use {@link isCantonPaymentInner} for the canton-exact inner.
  */
 export const X402PaymentEnvelopeSchema = v.looseObject({
   x402Version: v.literal(2),
-  scheme: v.pipe(v.string(), v.minLength(1)),
-  network: v.string(),
+  accepted: AcceptedRequirementsSchema,
   payload: v.looseObject({}),
+  resource: v.nullish(ResourceInfoSchema),
+  extensions: v.nullish(PaymentExtensionsSchema),
 });
 
 export function isX402PaymentPayload(x: unknown): x is X402PaymentPayload<unknown> {

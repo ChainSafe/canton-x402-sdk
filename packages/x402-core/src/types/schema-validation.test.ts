@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ValiError } from "valibot";
 import {
+  isCantonPaymentPayload,
   isCantonPaymentInner,
   parseCantonPaymentInner,
   isCantonPaymentRequirements,
@@ -139,7 +140,7 @@ describe("schema-first guards + parsers", () => {
 describe("generic (loose) vs concrete (canton-exact) verify request", () => {
   const cantonReq = {
     x402Version: 2,
-    paymentPayload: { x402Version: 2, scheme: "exact", network: requirements.network, payload: inner },
+    paymentPayload: { x402Version: 2, accepted: requirements, payload: inner },
     paymentRequirements: requirements,
   };
   // A different scheme: valid universal envelope, but the inner is NOT a CantonPaymentInner.
@@ -147,8 +148,7 @@ describe("generic (loose) vs concrete (canton-exact) verify request", () => {
     x402Version: 2,
     paymentPayload: {
       x402Version: 2,
-      scheme: "batch-settlement-canton",
-      network: "eip155:1",
+      accepted: { scheme: "batch-settlement-canton", network: "eip155:1" },
       payload: { evmTxHash: "0xfeed", quoteId: "q-1" },
     },
     paymentRequirements: {
@@ -173,8 +173,34 @@ describe("generic (loose) vs concrete (canton-exact) verify request", () => {
     expect(isCantonVerifyRequest(bridgeReq)).toBe(false);
   });
 
+  it("takes resource and extensions on the canton-exact payment, null included, and checks their shape", () => {
+    const pay = cantonReq.paymentPayload;
+    const ok = [
+      { ...pay, resource: null, extensions: null },
+      { ...pay, resource: { url: "https://m.example/r", description: null, tags: ["a"] }, extensions: { "x-ext": { info: {}, schema: {} } } },
+    ];
+    for (const paymentPayload of ok) {
+      expect(isCantonPaymentPayload(paymentPayload)).toBe(true);
+      expect(isCantonVerifyRequest({ ...cantonReq, paymentPayload })).toBe(true);
+    }
+    const bad = [
+      { ...pay, resource: { description: "no url" } },
+      { ...pay, resource: "https://m.example/r" },
+      { ...pay, resource: { url: "https://m.example/r", tags: "a" } },
+      { ...pay, extensions: "x" },
+    ];
+    for (const paymentPayload of bad) {
+      expect(isCantonPaymentPayload(paymentPayload)).toBe(false);
+      expect(isCantonVerifyRequest({ ...cantonReq, paymentPayload })).toBe(false);
+    }
+  });
+
   it("isX402Request rejects a malformed envelope", () => {
     expect(isX402Request({ x402Version: 2, paymentPayload: {}, paymentRequirements: {} })).toBe(false);
+    // The pre-spec payment envelope: the scheme and network at the top level, no accepted.
+    const legacy = { x402Version: 2, scheme: "exact", network: requirements.network, payload: inner };
+    expect(isX402Request({ ...cantonReq, paymentPayload: legacy })).toBe(false);
+    expect(isCantonVerifyRequest({ ...cantonReq, paymentPayload: legacy })).toBe(false);
     expect(isX402Request({ x402Version: 2 })).toBe(false);
   });
 });

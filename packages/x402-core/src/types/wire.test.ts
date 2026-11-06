@@ -37,8 +37,7 @@ describe("x402-core wire types", () => {
 
     const payload: CantonPaymentPayload = {
       x402Version: 2,
-      scheme: "exact",
-      network: requirements.network,
+      accepted: requirements,
       payload: {
         assetTransferMethod: "transfer-factory",
         preparedTransaction: "cHJlcGFyZWQ=",
@@ -105,8 +104,7 @@ describe("x402-core wire types", () => {
 
     const payload: X402PaymentPayload<EvmInner> = {
       x402Version: 2,
-      scheme: "exact-evm-to-canton-cc",
-      network: "eip155:1",
+      accepted: requirements,
       payload: {
         ethereumTxHash: "0xfeed",
         quoteId: "q-1",

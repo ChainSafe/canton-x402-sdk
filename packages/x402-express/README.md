@@ -63,18 +63,22 @@ const { paymentRequired } = require("@chainsafe/x402-express");
 1. **Unpaid request** (no/invalid `X-PAYMENT`) → `402` with
    `{ x402Version: 2, accepts: [requirements] }`. Requirements are built from your
    options with a generated `nonce` and a `validBefore` TTL.
-2. **Paid request** → the `X-PAYMENT` header is decoded to a payment payload (plus
-   the requirements it was signed against). Those echoed requirements are checked
-   against your policy, then sent to the facilitator's `/v2/verify`.
+2. **Paid request** → the `X-PAYMENT` header is decoded to a payment, which carries
+   the requirements it was built against as `accepted`. Those are checked against
+   your policy, then sent to the facilitator's `/v2/verify`.
 3. On a valid verify (and a successful `/v2/settle` when `settle: true`), the
    payer is attached to `req.x402` and `next()` is called. Settlement's ledger
    transaction id is returned in the `X-PAYMENT-RESPONSE` response header.
 
-Verification uses the requirements the client **echoes** in `X-PAYMENT`, not
+Verification uses the requirements the payment carries as **`accepted`**, not
 freshly-rebuilt ones, since those carry the `nonce` and `validBefore` the payer
-was quoted. They are not signed: the signed transfer is checked against them. The
-echoed set is validated against merchant policy (scheme, network, `payTo`, asset,
-and not under the priced amount, not expired) before use. Amounts are atomic
+was quoted. They are not signed: the signed transfer is checked against them.
+They are validated against merchant policy before use: the scheme, network,
+`payTo`, resource, asset and `maxTimeoutSeconds` must be this request's terms,
+the amount must not be under the price, and they must not be expired. Other
+fields (`nonce`, `validBefore`, `description`, `extra` keys beyond the instrument)
+are not compared, and reach the facilitator as the payer sent them. A header in the pre-spec `{ payment, requirements }`
+shape, or a payment with no `accepted`, is `bad_payload`. Amounts are atomic
 units throughout — the same unit the wire carries.
 
 ## Options
