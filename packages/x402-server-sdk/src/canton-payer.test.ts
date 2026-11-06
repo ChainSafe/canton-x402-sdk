@@ -43,13 +43,14 @@ function mockSdk() {
       hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2" as const,
     },
   }));
-  const prepare = vi.fn(() => ({ toJSON }));
+  const prepare = vi.fn((_opts: { synchronizerId?: string; [k: string]: unknown }) => ({ toJSON }));
   const sdk = { token: { transfer: { create } }, ledger: { prepare } } as unknown as CantonX402PayerOptions["sdk"];
   return { sdk, create, prepare };
 }
 
 const EXTRA = {
   assetTransferMethod: "transfer-factory",
+  synchronizerId: "global-domain::1220sync",
   executeBeforeSeconds: 120,
   instrumentId: { id: "Amulet", admin: "DSO::x" },
 } as const;
@@ -135,6 +136,14 @@ describe("CantonX402Payer.authorize", () => {
     expect(create.mock.calls[0][0].meta).toBeUndefined();
   });
 
+  it("prepares against the quoted synchronizer, in its logical form", async () => {
+    // prepare takes the LOGICAL id and refuses the physical one; the bytes it
+    // returns carry the physical form, which is what the verifier pins.
+    const { sdk, prepare } = mockSdk();
+    await makePayer(sdk).authorize(makeRequirements());
+    expect(prepare.mock.calls[0][0]).toMatchObject({ synchronizerId: "global-domain::1220sync" });
+  });
+
   it("rejects an invalid amount before preparing", async () => {
     const { sdk, prepare } = mockSdk();
     await expect(makePayer(sdk).authorize(makeRequirements({ amount: "abc" }))).rejects.toThrow(/invalid amount/);
@@ -153,7 +162,7 @@ describe("CantonX402Payer.authorize", () => {
     expect(payer.supports(makeRequirements({ network: "canton:other" }))).toBe(false);
     // Unsupported asset (no registry configured for it).
     expect(
-      payer.supports(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
+      payer.supports(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220sync", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).toBe(false);
   });
 
@@ -172,7 +181,7 @@ describe("CantonX402Payer.authorize", () => {
   it("rejects an asset with no configured registry", async () => {
     const { sdk, prepare } = mockSdk();
     await expect(
-      makePayer(sdk).authorize(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
+      makePayer(sdk).authorize(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220sync", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).rejects.toThrow(/unsupported requirement/);
     expect(prepare).not.toHaveBeenCalled();
   });

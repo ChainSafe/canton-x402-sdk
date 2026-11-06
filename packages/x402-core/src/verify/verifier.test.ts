@@ -46,6 +46,7 @@ function buildSignedFixture(overrides: { executeBeforeSeconds?: number; memo?: s
     asset: "CC",
     extra: {
       assetTransferMethod: "transfer-factory",
+      synchronizerId: "global-domain::1220sync",
       executeBeforeSeconds,
       instrumentId: { id: "Amulet", admin: "DSO::1220dso" },
       ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
@@ -70,6 +71,8 @@ function buildSignedFixture(overrides: { executeBeforeSeconds?: number; memo?: s
     amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
     instrumentId: requirements.extra.instrumentId,
     executeBeforeMicros,
+    // The physical form, as a participant signs it.
+    synchronizerId: `${requirements.extra.synchronizerId}::35-2`,
     ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
   });
   const preparedTransaction = gzipped(protobuf);
@@ -122,6 +125,7 @@ function reDeadline(
       receiver: requirements.payTo,
       amount: atomicToLedger(requirements.amount, 10) as string,
       instrumentId: requirements.extra.instrumentId,
+      synchronizerId: `${requirements.extra.synchronizerId}::35-2`,
       ...(executeBeforeMicros === undefined ? {} : { executeBeforeMicros }),
     }),
   );

@@ -186,7 +186,7 @@ describe("shape guards + scheme/network match", () => {
     resource: "/r",
     maxTimeoutSeconds: 60,
     asset: "CC",
-    extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
+    extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220sync", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   } as CantonPaymentRequirements;
   const inner = {
     assetTransferMethod: "transfer-factory",

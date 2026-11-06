@@ -110,10 +110,11 @@ interface X402Payer {
 ```
 
 `CantonX402Payer.authorize()`:
-- validates the requirement (amount, scheme, network, `extra.assetTransferMethod`, expiry) via `x402-core`;
+- validates the requirement (amount, scheme, network, `extra.assetTransferMethod`) via `x402-core`;
 - builds the Token Standard transfer (`sdk.token.transfer.create` — routes the
   transfer factory via the registry);
-- prepares it (`sdk.ledger.prepare` — interactive submission) to get the hash;
+- prepares it (`sdk.ledger.prepare` — interactive submission) against the quoted
+  `extra.synchronizerId`, in its logical form, to get the hash;
 - Ed25519-signs the hash with the party key (`x402-core`'s `signHash`, then
   `signatureToBase64`, since the payload carries `signature` as base64 and
   `preparedTxHash` as hex);

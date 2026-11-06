@@ -27,7 +27,7 @@ const requirements: CantonPaymentRequirements = {
   network: "canton:devnet",
   amount: "100000000",
   asset: "CC",
-  extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+  extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220sync", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
   resource: "/api/resource",
   maxTimeoutSeconds: 60,
@@ -66,7 +66,7 @@ describe("schema-first guards + parsers", () => {
 
   it("rejects wrong field types", () => {
     expect(isCantonPaymentInner({ ...inner, payer: 42 })).toBe(false);
-    expect(isCantonPaymentRequirements({ ...requirements, extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet" } } })).toBe(false);
+    expect(isCantonPaymentRequirements({ ...requirements, extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220sync", executeBeforeSeconds: 120, instrumentId: { id: "Amulet" } } })).toBe(false);
   });
 
   it("rejects an empty string in any required field", () => {
@@ -108,6 +108,15 @@ describe("schema-first guards + parsers", () => {
     // them is a time a client can be given.
     for (const bad of [0, -5, 1.5, Infinity, NaN, "60", null]) {
       expect(isCantonPaymentRequirements({ ...requirements, maxTimeoutSeconds: bad })).toBe(false);
+    }
+  });
+
+  it("requires extra.synchronizerId", () => {
+    const { synchronizerId: _omitted, ...withoutSync } = requirements.extra;
+    expect(isCantonPaymentRequirements({ ...requirements, extra: withoutSync })).toBe(false);
+    for (const bad of ["", 42, null]) {
+      const extra = { ...requirements.extra, synchronizerId: bad };
+      expect(isCantonPaymentRequirements({ ...requirements, extra })).toBe(false);
     }
   });
 

@@ -21,7 +21,8 @@ server (step 4).
    Your route answers `402 Payment Required` with
    `{ x402Version: 2, accepts: [...] }`. Each entry carries `scheme`,
    `network`, `amount`, `asset`, `extra.assetTransferMethod`,
-   `extra.instrumentId`, `extra.executeBeforeSeconds` (120 by default, and
+   `extra.instrumentId`, `extra.synchronizerId`,
+   `extra.executeBeforeSeconds` (120 by default, and
    optionally an `extra.memo`), `payTo` (your Canton party), `resource` and a
    `maxTimeoutSeconds` (60 by default).
 

@@ -26,24 +26,29 @@ import {
   WIRE_DECIMALS,
   DEVNET_DSO_PARTY,
   DEVNET_NETWORK,
+  DEVNET_SYNCHRONIZER_ID,
   LOCALNET_NETWORK,
   MAINNET_DSO_PARTY,
   MAINNET_NETWORK,
+  MAINNET_SYNCHRONIZER_ID,
 } from "@chainsafe/x402-core";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const NETWORK = (process.env.NETWORK ?? "localnet").toLowerCase();
 
-/** Network id + DSO party default from the chosen network. */
-function networkDefaults(): { networkId: string; dso?: string } {
-  if (NETWORK === "devnet") return { networkId: DEVNET_NETWORK, dso: DEVNET_DSO_PARTY };
-  if (NETWORK === "mainnet") return { networkId: MAINNET_NETWORK, dso: MAINNET_DSO_PARTY };
-  // LocalNet allocates its DSO at runtime, so that one still has to be passed.
+/** Network id, DSO party and synchronizer default from the chosen network. */
+function networkDefaults(): { networkId: string; dso?: string; synchronizer?: string } {
+  if (NETWORK === "devnet")
+    return { networkId: DEVNET_NETWORK, dso: DEVNET_DSO_PARTY, synchronizer: DEVNET_SYNCHRONIZER_ID };
+  if (NETWORK === "mainnet")
+    return { networkId: MAINNET_NETWORK, dso: MAINNET_DSO_PARTY, synchronizer: MAINNET_SYNCHRONIZER_ID };
+  // LocalNet allocates both at runtime, so those still have to be passed.
   return { networkId: LOCALNET_NETWORK };
 }
 const def = networkDefaults();
 const NETWORK_ID = process.env.NETWORK_ID?.trim() || def.networkId;
 const DSO_PARTY = process.env.DSO_PARTY?.trim() || def.dso;
+const SYNCHRONIZER_ID = process.env.SYNCHRONIZER_ID?.trim() || def.synchronizer;
 const BUREAU_PARTY = process.env.BUREAU_PARTY;
 // Priced in CC, because that is what a human sets. The wire is atomic units,
 // so this app converts before quoting.
@@ -53,9 +58,9 @@ const FACILITATOR_URL = process.env.FACILITATOR_URL;
 const FACILITATOR_API_KEY = process.env.FACILITATOR_API_KEY;
 
 // NETWORK_ID always has a default now, so it is not checked here.
-if (!DSO_PARTY || !BUREAU_PARTY || !FACILITATOR_URL) {
+if (!DSO_PARTY || !SYNCHRONIZER_ID || !BUREAU_PARTY || !FACILITATOR_URL) {
   throw new Error(
-    "credit-bureau: set DSO_PARTY, BUREAU_PARTY and FACILITATOR_URL " +
+    "credit-bureau: set DSO_PARTY, SYNCHRONIZER_ID, BUREAU_PARTY and FACILITATOR_URL " +
       "(see examples/mortgage/.env.example).",
   );
 }
@@ -113,6 +118,7 @@ app.use(
     settle: true,
     requirements: {
       network: NETWORK_ID,
+      synchronizerId: SYNCHRONIZER_ID,
       payTo: BUREAU_PARTY,
       asset: ASSET,
       amount: PRICE_ATOMIC.toString(),

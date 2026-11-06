@@ -12,7 +12,7 @@ const requirements = {
   network: "canton:x",
   amount: "500000000",
   asset: "CC",
-  extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
+  extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220sync", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
   payTo: "merchant::x",
   resource: "https://api.example/paid",
   maxTimeoutSeconds: 60,

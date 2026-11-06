@@ -199,6 +199,11 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
   for (const root of opts.roots ?? [nodeId]) damlTxn.uint32(tag(2, WIRE_LEN)).string(root);
   for (const node of [damlNode, ...(opts.nodes ?? [])]) damlTxn.uint32(tag(3, WIRE_LEN)).bytes(node);
 
-  const prepared = concat(wrap(1, damlTxn.finish()), extra.prepared); // PreparedTransaction{1: transaction}
+  // PreparedTransaction{1: transaction, 2: metadata}; Metadata{3: synchronizer_id}
+  const metadata =
+    transfer.synchronizerId === undefined
+      ? new Uint8Array()
+      : wrap(2, Writer.create().uint32(tag(3, WIRE_LEN)).string(transfer.synchronizerId).finish());
+  const prepared = concat(concat(wrap(1, damlTxn.finish()), metadata), extra.prepared);
   return bytesToBase64(prepared);
 }

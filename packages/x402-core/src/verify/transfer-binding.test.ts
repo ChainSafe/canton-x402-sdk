@@ -72,7 +72,7 @@ describe("findTransferMismatch", () => {
     network: "canton:devnet",
     amount: "100000000",
     asset: "CC",
-    extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+    extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220sync", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
     payTo: "merchant::1220dead",
     resource: "/api/resource",
     maxTimeoutSeconds: 60,
@@ -82,11 +82,47 @@ describe("findTransferMismatch", () => {
     receiver: "merchant::1220dead",
     amount: "0.01",
     instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" },
+    // Canton signs the PHYSICAL id, so the honest case is the quoted logical
+    // one plus a participant-chosen `::<version>-<serial>`.
+    synchronizerId: "global-domain::1220sync::35-2",
   };
 
   it("accepts a transfer that pays exactly the quoted amount", () => {
     expect(findTransferMismatch(ok, requirements, PAYER)).toBeNull();
     expect(findTransferMismatch({ ...ok, amount: "0.0100" }, requirements, PAYER)).toBeNull();
+  });
+
+  it("accepts the PHYSICAL synchronizer id the participant signs", () => {
+    // `prepare` takes the LOGICAL id and 400s on the physical one, yet the
+    // bytes it returns carry the physical form. Exact equality would refuse
+    // every honest payment.
+    const quoted = requirements.extra.synchronizerId;
+    for (const signed of [quoted, `${quoted}::35-2`, `${quoted}::1-1`]) {
+      expect(findTransferMismatch({ ...ok, synchronizerId: signed }, requirements, PAYER)).toBeNull();
+    }
+  });
+
+  it("refuses any other synchronizer, and a missing one", () => {
+    // The suffix is the only latitude: the `1220…` is the domain's namespace
+    // fingerprint, so `quoted::<n>-<m>` is provably the same domain. Anything
+    // else is a different one, or text pretending to be a suffix.
+    const quoted = requirements.extra.synchronizerId;
+    const bad = [
+      undefined,
+      "",
+      "global-domain::1220other",
+      "other-domain::1220sync",
+      `${quoted}::35`, // not two runs
+      `${quoted}::35-2-1`, // three
+      `${quoted}::a-2`, // not decimal
+      `${quoted}::35-2x`,
+      `${quoted}-35-2`, // no `::`
+      `${quoted}::35-2::evil`,
+      `${quoted}suffix`,
+    ];
+    for (const synchronizerId of bad) {
+      expect(findTransferMismatch({ ...ok, synchronizerId }, requirements, PAYER)).toBe("synchronizer");
+    }
   });
 
   it("rejects an overpayment", () => {

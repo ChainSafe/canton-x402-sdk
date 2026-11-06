@@ -109,6 +109,7 @@ guarantee.
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
+      "synchronizerId": "global-domain::1220xyz…",
       "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
       "executeBeforeSeconds": 120
     },
@@ -131,6 +132,7 @@ guarantee.
 | `resource`                                  | Required — the URL being paid for.                                                                                                                                                                                                                                             |
 | `asset`                                     | A symbol — `"CC"` for Canton Coin, or a registry token's own. The instrument it names is `extra.instrumentId`.
 | `extra.instrumentId`                        | Required `{admin, id}`: `asset` alone cannot say which registry issued the instrument, and the facilitator binds the transfer against this.
+| `extra.synchronizerId`                      | Required — the Global Synchronizer, as its **logical** id (`global-domain::1220…`). The payer prepares against it and verification pins the transaction's signed `Metadata.synchronizer_id` to it, accepting the physical form Canton signs (`<logical>::<version>-<serial>`) and nothing else. A mismatch is `transfer_mismatch` with detail `synchronizer`.
 | `maxTimeoutSeconds`                         | Required — seconds the client has to complete payment. A whole number of at least 1; `0`, a negative, a fraction and `Infinity` are all refused.
 | `extra.assetTransferMethod`                 | Required, and MUST be `"transfer-factory"`. A reserved protocol key, so any other value is refused rather than carried through as scheme data.
 | `extra.executeBeforeSeconds`                | Required — seconds from request time. The client turns it into the transfer's `executeBefore`; verification refuses a transfer whose deadline is not still at least 5 seconds ahead (`transfer_expired`).
@@ -194,6 +196,7 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
+      "synchronizerId": "global-domain::1220xyz…",
       "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
       "executeBeforeSeconds": 120
     },
@@ -250,6 +253,7 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
+      "synchronizerId": "global-domain::1220xyz…",
       "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
       "executeBeforeSeconds": 120
     },

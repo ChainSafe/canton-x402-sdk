@@ -119,6 +119,30 @@ function isTransferExpired(executeBeforeMicros: bigint | undefined, now: number 
 // because the facilitator's login flow calls them with hex too. The two
 // helpers below convert at the payload boundary, so the hex side never changes.
 
+/**
+ * The suffix a participant appends to the LOGICAL synchronizer id to form the
+ * PHYSICAL one it signs into `Metadata.synchronizer_id`: `<protocol-version>-
+ * <topology-serial>`. Two non-empty decimal runs, one hyphen, nothing else.
+ */
+const PHYSICAL_SYNCHRONIZER_SUFFIX = /^[0-9]+-[0-9]+$/;
+
+/**
+ * Is the signed synchronizer id the one the merchant quoted?
+ *
+ * `prepare` takes the logical id and refuses the physical one, yet the bytes it
+ * returns carry the physical form — so exact equality would refuse every honest
+ * payment. A suffixed match is not a weakening: the `1220…` is the domain's
+ * namespace fingerprint, so anything of the form `<quoted>::<n>-<m>` is the
+ * same domain at a participant-chosen version and serial. A different name, a
+ * different fingerprint, or any other trailing text is refused.
+ */
+function synchronizerMatches(signed: string | undefined, quoted: string): boolean {
+  if (signed === undefined) return false;
+  if (signed === quoted) return true;
+  if (!signed.startsWith(`${quoted}::`)) return false;
+  return PHYSICAL_SYNCHRONIZER_SUFFIX.test(signed.slice(quoted.length + 2));
+}
+
 /** 32 bytes as lower-case hex: the only form `preparedTxHash` takes. */
 const PREPARED_TX_HASH = /^[0-9a-f]{64}$/;
 
@@ -268,7 +292,7 @@ function verifyCantonExact(
 /**
  * Check a decoded transfer against the requirements. Returns `null` when the
  * transfer satisfies them, or a short field detail (`"sender" | "receiver" |
- * "instrument" | "amount" | "memo"`) naming the first divergence — surfaced in the
+ * "instrument" | "amount" | "memo" | "synchronizer"`) naming the first divergence — surfaced in the
  * `transfer_mismatch` response's `extensions.detail`. The amount must be EQUAL,
  * not merely sufficient (Rule 4), and the two sides are in different units — the
  * transfer carries an on-ledger Decimal, the requirements an atomic integer at
@@ -278,7 +302,7 @@ export function findTransferMismatch(
   transfer: DecodedTransfer,
   requirements: CantonPaymentRequirements,
   payer: string,
-): "sender" | "receiver" | "instrument" | "amount" | "memo" | null {
+): "sender" | "receiver" | "instrument" | "amount" | "memo" | "synchronizer" | null {
   if (transfer.sender !== payer) return "sender";
   // Rule 12, both ways. The spec only requires the check when the merchant
   // quotes a memo, but `x402.memo` is a key the scheme reserves, not the
@@ -288,6 +312,12 @@ export function findTransferMismatch(
   // would otherwise credit whichever order a payer chose to name, paying a
   // cheap resource to settle an expensive one.
   if (transfer.memo !== requirements.extra.memo) return "memo";
+  // The domain the payer prepared for. In the signed block, so it is theirs to
+  // commit: without this a payment lands on whatever synchronizer the transfer
+  // names, which need not be one the merchant settles on.
+  if (!synchronizerMatches(transfer.synchronizerId, requirements.extra.synchronizerId)) {
+    return "synchronizer";
+  }
   if (transfer.receiver !== requirements.payTo) return "receiver";
   // From `extra`, not `asset`: the latter is only a symbol, which cannot say
   // which registry issued the instrument.

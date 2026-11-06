@@ -217,6 +217,28 @@ describe("decodePreparedTransaction reads only the node tree under the roots", (
   });
 });
 
+describe("the synchronizer", () => {
+  it("reads Metadata.synchronizer_id, from the signed block", () => {
+    // PreparedTransaction{2: metadata} → Metadata{3: synchronizer_id}, beside
+    // the transaction rather than inside it.
+    const signed = "global-domain::1220abc::35-2";
+    const got = decodePreparedTransaction(encodePreparedTransaction({ ...TRANSFER, synchronizerId: signed }));
+    expect(got?.synchronizerId).toBe(signed);
+  });
+
+  it("reports none when the metadata carries none", () => {
+    expect(decodePreparedTransaction(encodePreparedTransaction(TRANSFER))?.synchronizerId).toBeUndefined();
+  });
+
+  it("refuses a repeated metadata block rather than reading the first", () => {
+    const one = encodePreparedTransaction({ ...TRANSFER, synchronizerId: "global-domain::1220a" });
+    const bytes = Buffer.from(one, "base64");
+    // A second PreparedTransaction.metadata: protobuf merges singular fields,
+    // so a reader taking the first would disagree with the engine.
+    expect(decodePreparedTransaction(Buffer.concat([bytes, bytes]).toString("base64"))).toBeNull();
+  });
+});
+
 describe("the deadline and the memo", () => {
   const DEADLINE = 1_762_300_000_000_000n; // µs
   const dated = { ...TRANSFER, executeBeforeMicros: DEADLINE };
