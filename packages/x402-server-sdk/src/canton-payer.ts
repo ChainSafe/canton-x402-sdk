@@ -1,9 +1,11 @@
 import {
+  ASSET_TRANSFER_METHOD,
   EXACT_SCHEME_ID,
   WIRE_DECIMALS,
   atomicToLedger,
-  requirementsHash,
   signHash,
+  signatureToBase64,
+  gzipPreparedTransaction,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
   type InstrumentId,
@@ -52,6 +54,9 @@ export class CantonX402Payer implements X402Payer {
     return (
       requirements.scheme === EXACT_SCHEME_ID &&
       requirements.network === this.opts.network &&
+      // The payload declares the method this payer uses. createX402Fetch does
+      // not validate the 402 body, so the type alone does not guarantee it.
+      requirements.extra.assetTransferMethod === ASSET_TRANSFER_METHOD &&
       this.registryFor(requirements.extra.instrumentId) !== undefined
     );
   }
@@ -65,12 +70,12 @@ export class CantonX402Payer implements X402Payer {
   }
 
   async authorize(requirements: CantonPaymentRequirements): Promise<CantonPaymentPayload> {
-    // Capability gate — supports() covers scheme + network + a configured registry.
+    // Capability gate — supports() covers scheme + network + transfer method + a configured registry.
     const registryUrl = this.registryFor(requirements.extra.instrumentId);
     if (!this.supports(requirements) || !registryUrl) {
       const { id, admin } = requirements.extra.instrumentId;
       throw new Error(
-        `x402: unsupported requirement (scheme "${requirements.scheme}", network "${requirements.network}", asset "${id}" admin "${admin}")`,
+        `x402: unsupported requirement (scheme "${requirements.scheme}", network "${requirements.network}", method "${requirements.extra.assetTransferMethod}", asset "${id}" admin "${admin}")`,
       );
     }
 
@@ -106,10 +111,10 @@ export class CantonX402Payer implements X402Payer {
       .prepare({ partyId: key.partyId, commands: command, disclosedContracts: disclosed })
       .toJSON();
 
-    // 3. Sign the hash. wallet-sdk hands base64; sign the same bytes as hex so the
-    //    facilitator's verifySignature (raw Ed25519 over the hash) accepts it.
-    const preparedTransactionHash = base64ToHex(response.preparedTransactionHash);
-    const partySignature = signHash(preparedTransactionHash, key.privateKey);
+    // 3. Sign the hash. wallet-sdk hands the hash as base64; the payload carries it
+    //    as hex and the signature as base64, which are the spec's encodings.
+    const preparedTxHash = base64ToHex(response.preparedTransactionHash);
+    const signature = signatureToBase64(signHash(preparedTxHash, key.privateKey));
 
     // 4. Assemble the payload the facilitator settles.
     return {
@@ -117,11 +122,15 @@ export class CantonX402Payer implements X402Payer {
       scheme: requirements.scheme,
       network: requirements.network,
       payload: {
+        // transfer.create built a TransferFactory_Transfer, the one method Canton's
+        // exact defines.
+        assetTransferMethod: ASSET_TRANSFER_METHOD,
         payer: key.partyId,
-        preparedTransaction: response.preparedTransaction,
-        preparedTransactionHash,
-        partySignature,
-        requirementsHash: requirementsHash(requirements),
+        // prepare hands back the protobuf as base64; the payload carries it
+        // gzipped, as the spec defines, which also keeps the header small.
+        preparedTransaction: gzipPreparedTransaction(Buffer.from(response.preparedTransaction, "base64")),
+        preparedTxHash,
+        signature,
         publicKey: key.publicKey,
         // Must be exactly what prepare used — the signature is bound to a hash
         // computed with this version, so the facilitator's execute must match it.

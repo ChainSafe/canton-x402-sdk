@@ -178,10 +178,10 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       const header = req.header("X-PAYMENT");
       if (!header) throw new PaymentRejection("payment_required", fresh);
 
-      // The X-PAYMENT envelope carries the requirements the payload referenced;
-      // verify against those, after checking them against merchant policy. The
-      // requirementsHash binds the payload to this exact object, so a client
-      // cannot pay one quote and present another.
+      // The X-PAYMENT envelope carries the requirements the payload was built
+      // against; verify against those, after checking them against merchant
+      // policy. Nothing in the payload binds them on its own — what binds is
+      // the signed transfer the verifier decodes and compares to them.
       let payload: CantonPaymentPayload;
       let requirements: CantonPaymentRequirements;
       try {

@@ -76,6 +76,12 @@ export interface SchemeVerifier {
 export const VerifyInvalidReasonSchema = v.picklist([
   "scheme_mismatch",
   "network_mismatch",
+  /**
+   * Nothing produces this any more: the payload carries no `requirementsHash`
+   * to check. Kept pending #98, which reworks these codes against the spec's
+   * own `invalid_exact_canton_*` vocabulary — not because anything still emits
+   * it. `requirements_expired` went the other way, with the field it named.
+   */
   "requirements_hash_mismatch",
   "bad_fingerprint",
   "bad_signature",
@@ -124,6 +130,7 @@ export const SettleErrorReasonSchema = v.picklist([
   "unauthorized",
   "scheme_mismatch",
   "network_mismatch",
+  /** As in {@link VerifyInvalidReasonSchema}: unproducible, kept pending #98. */
   "requirements_hash_mismatch",
   "bad_fingerprint",
   "bad_signature",

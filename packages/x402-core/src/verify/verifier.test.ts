@@ -5,11 +5,14 @@ import {
   atomicToLedger,
   createCantonExactVerifier,
   createVerifierRegistry,
+  decodePreparedTransaction,
   EXACT_SCHEME_ID,
   fingerprintForPublicKey,
+  gzipPreparedTransaction,
+  signatureToBase64,
   signHash,
 } from "./index";
-import { requirementsHash } from "../hashing";
+import { requirementsHash as requirementsHashOf } from "../hashing";
 import { encodeNode, encodePreparedTransaction, wrap } from "./prepared-tx.fixtures";
 import type {
   CantonPaymentPayload,
@@ -22,6 +25,10 @@ hashes.sha512 = sha512;
 
 const NETWORK = DEVNET_NETWORK;
 const toB64 = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes));
+
+/** A protobuf blob in the gzipped base64 form the payload carries it in. */
+const gzipped = (protobufB64: string): string =>
+  gzipPreparedTransaction(Buffer.from(protobufB64, "base64"));
 
 // A deterministic payer keypair + a well-formed, correctly-signed payload for it.
 function buildSignedFixture(overrides: { executeBeforeSeconds?: number; memo?: string } = {}) {
@@ -48,15 +55,16 @@ function buildSignedFixture(overrides: { executeBeforeSeconds?: number; memo?: s
     maxTimeoutSeconds: 60,
   };
 
-  const preparedTransactionHash = "aa".repeat(32); // 32-byte hex message
-  const partySignature = signHash(preparedTransactionHash, toB64(seed));
+  const preparedTxHash = "aa".repeat(32); // 32-byte hex message
+  const signatureHex = signHash(preparedTxHash, toB64(seed));
 
   // A prepared-transaction blob whose TransferFactory_Transfer matches the
-  // requirements (payer → payTo, the required Amulet, the required amount).
-  // The transfer carries an on-ledger Decimal; the quote is in atomic units.
+  // requirements (payer → payTo, the required Amulet, the required amount),
+  // gzipped as the payload carries it. The transfer carries an on-ledger
+  // Decimal; the quote is in atomic units.
   // Its deadline is the quoted horizon from now, as a real payer computes it.
   const executeBeforeMicros = BigInt(Date.now() + executeBeforeSeconds * 1000) * 1000n;
-  const preparedTransaction = encodePreparedTransaction({
+  const protobuf = encodePreparedTransaction({
     sender: payer,
     receiver: requirements.payTo,
     amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
@@ -64,43 +72,59 @@ function buildSignedFixture(overrides: { executeBeforeSeconds?: number; memo?: s
     executeBeforeMicros,
     ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
   });
+  const preparedTransaction = gzipped(protobuf);
 
   const payload: CantonPaymentPayload = {
     x402Version: 2,
     scheme: "exact",
     network: NETWORK,
     payload: {
+      assetTransferMethod: "transfer-factory",
       payer,
       preparedTransaction,
-      preparedTransactionHash,
-      partySignature,
-      requirementsHash: requirementsHash(requirements),
+      preparedTxHash,
+      signature: signatureToBase64(signatureHex),
       publicKey: pubB64,
       hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
     },
   };
 
-  return { requirements, payload, payer, executeBeforeMicros };
+  return { requirements, payload, payer, signatureHex, seedB64: toB64(seed), protobuf, executeBeforeMicros };
+}
+
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/**
+ * The same 64 bytes with a padding bit set. A 64-byte signature ends in one
+ * data character and "=="; that character's low four bits are padding, so
+ * flipping the lowest still decodes to the same bytes but is not canonical.
+ */
+function withPaddingBitSet(signature: string): string {
+  const i = signature.length - 3;
+  const flipped = BASE64_ALPHABET[BASE64_ALPHABET.indexOf(signature[i]) ^ 1];
+  return signature.slice(0, i) + flipped + signature.slice(i + 1);
 }
 
 /**
  * The same payload with the transfer re-encoded at a different deadline. Only
- * the blob changes: the signature is over `preparedTxHash`, and the hash is
- * over the requirements, so neither depends on the transfer's bytes — which is
- * what lets this vary one field and leave every earlier check passing.
+ * the blob changes: the signature is over `preparedTxHash`, which does not
+ * depend on the transfer's bytes — which is what lets this vary one field and
+ * leave every earlier check passing.
  */
 function reDeadline(
   payload: CantonPaymentPayload,
   requirements: CantonPaymentRequirements,
   executeBeforeMicros: bigint | undefined,
 ): CantonPaymentPayload {
-  const preparedTransaction = encodePreparedTransaction({
-    sender: payload.payload.payer,
-    receiver: requirements.payTo,
-    amount: atomicToLedger(requirements.amount, 10) as string,
-    instrumentId: requirements.extra.instrumentId,
-    ...(executeBeforeMicros === undefined ? {} : { executeBeforeMicros }),
-  });
+  const preparedTransaction = gzipped(
+    encodePreparedTransaction({
+      sender: payload.payload.payer,
+      receiver: requirements.payTo,
+      amount: atomicToLedger(requirements.amount, 10) as string,
+      instrumentId: requirements.extra.instrumentId,
+      ...(executeBeforeMicros === undefined ? {} : { executeBeforeMicros }),
+    }),
+  );
   return { ...payload, payload: { ...payload.payload, preparedTransaction } };
 }
 
@@ -134,13 +158,14 @@ describe("cantonExactVerifier", () => {
     expect(result).toMatchObject({ isValid: false, invalidReason: "network_mismatch" });
   });
 
-  it("rejects a requirementsHash that doesn't bind to the requirements", () => {
-    const { payload, requirements } = buildSignedFixture();
-    const p = { ...payload, payload: { ...payload.payload, requirementsHash: "deadbeef" } };
-    expect(verifier.verify(p, requirements)).toMatchObject({
-      isValid: false,
-      invalidReason: "requirements_hash_mismatch",
-    });
+  it("ignores a requirementsHash an older payer still sends, right or wrong", () => {
+    // The spec has no such field, and an unsigned hash binds nothing the decoded
+    // transfer does not: it is not checked, so a stale one does not fail the payment.
+    const { payload, requirements, payer } = buildSignedFixture();
+    for (const requirementsHash of [requirementsHashOf(requirements), "deadbeef"]) {
+      const p = { ...payload, payload: { ...payload.payload, requirementsHash } };
+      expect(verifier.verify(p, requirements)).toEqual({ isValid: true, payer });
+    }
   });
 
   it("rejects a payer whose fingerprint doesn't match the public key", () => {
@@ -156,7 +181,10 @@ describe("cantonExactVerifier", () => {
 
   it("rejects a bad signature", () => {
     const { payload, requirements } = buildSignedFixture();
-    const p = { ...payload, payload: { ...payload.payload, partySignature: "ff".repeat(64) } };
+    const p = {
+      ...payload,
+      payload: { ...payload.payload, signature: signatureToBase64("ff".repeat(64)) },
+    };
     expect(verifier.verify(p, requirements)).toMatchObject({
       isValid: false,
       invalidReason: "bad_signature",
@@ -176,7 +204,7 @@ describe("cantonExactVerifier", () => {
       },
       { extra: { node: wrap(1, new Uint8Array()) } },
     );
-    const p = { ...payload, payload: { ...payload.payload, preparedTransaction } };
+    const p = { ...payload, payload: { ...payload.payload, preparedTransaction: gzipped(preparedTransaction) } };
     expect(verifier.verify(p, requirements)).toMatchObject({
       isValid: false,
       invalidReason: "transfer_mismatch",
@@ -196,11 +224,117 @@ describe("cantonExactVerifier", () => {
       },
       { nodes: [encodeNode("0", wrap(1, new Uint8Array()))] },
     );
-    const p = { ...payload, payload: { ...payload.payload, preparedTransaction } };
+    const p = { ...payload, payload: { ...payload.payload, preparedTransaction: gzipped(preparedTransaction) } };
     expect(verifier.verify(p, requirements)).toMatchObject({
       isValid: false,
       invalidReason: "transfer_mismatch",
       extensions: { detail: "undecodable" },
+    });
+  });
+
+  it("reads the signature only as canonical base64 of 64 bytes", () => {
+    const { payload, requirements, signatureHex } = buildSignedFixture();
+    const signature = payload.payload.signature;
+    const nonCanonical = withPaddingBitSet(signature);
+    // Decodes to the very same signature, so only the canonical check refuses it.
+    expect(atob(nonCanonical)).toBe(atob(signature));
+    const urlSafe = signature.replace(/\+/g, "-").replace(/\//g, "_");
+    // The fixture's signature is fixed, and it has a "+" or a "/" to replace.
+    expect(urlSafe).not.toBe(signature);
+    // Hex is what a payer built against the old field sends. Its 128 digits are
+    // valid base64 too, so the 64-byte check is what refuses it.
+    for (const variant of [signatureHex, signature.replace(/=+$/, ""), nonCanonical, urlSafe, ` ${signature}`]) {
+      const p = { ...payload, payload: { ...payload.payload, signature: variant } };
+      expect(verifier.verify(p, requirements)).toMatchObject({
+        isValid: false,
+        invalidReason: "bad_signature",
+      });
+    }
+  });
+
+  it("answers bad_signature for a signature of megabytes, rather than throwing", () => {
+    // Unbounded, the base64 regex runs out of backtracking stack at about 4.5M
+    // characters and throws.
+    const { payload, requirements } = buildSignedFixture();
+    const p = { ...payload, payload: { ...payload.payload, signature: "A".repeat(5 * 1024 * 1024) } };
+    expect(verifier.verify(p, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "bad_signature",
+    });
+  });
+
+  it("reads preparedTxHash only as 64 lower-case hex digits", () => {
+    const { payload, requirements, seedB64 } = buildSignedFixture();
+    const hash = payload.payload.preparedTxHash;
+    // Each variant carries a valid signature over its own bytes, so the
+    // encoding check is the only thing that can refuse it. Upper case is the
+    // same 32 bytes that were signed.
+    for (const preparedTxHash of [hash.toUpperCase(), `1220${hash}`, `${hash}00`, hash.slice(2)]) {
+      const signature = signatureToBase64(signHash(preparedTxHash, seedB64));
+      const p = { ...payload, payload: { ...payload.payload, preparedTxHash, signature } };
+      expect(verifier.verify(p, requirements)).toMatchObject({
+        isValid: false,
+        invalidReason: "bad_signature",
+      });
+    }
+  });
+
+  it("refuses an empty hash or signature at the shape check", () => {
+    const { payload, requirements } = buildSignedFixture();
+    for (const field of ["preparedTxHash", "signature"] as const) {
+      const p = { ...payload, payload: { ...payload.payload, [field]: "" } };
+      expect(verifier.verify(p, requirements)).toMatchObject({
+        isValid: false,
+        invalidReason: "internal_error",
+      });
+    }
+  });
+
+  it("reads preparedTransaction only as one gzip member within the caps", () => {
+    const { payload, requirements, protobuf } = buildSignedFixture();
+    const bytes = Buffer.from(protobuf, "base64");
+    // The same transfer padded past the 64 KiB decompressed cap with an unknown
+    // field (15, length-delimited), which the decoder skips. It decodes to the
+    // matching transfer, so only the cap can refuse it; about 100 bytes gzipped.
+    const pad = 70_000;
+    const padded = Buffer.concat([bytes, Buffer.from([(15 << 3) | 2, 0x80 | (pad & 0x7f), 0x80 | ((pad >> 7) & 0x7f), pad >> 14]), Buffer.alloc(pad)]);
+    expect(decodePreparedTransaction(padded.toString("base64"))).not.toBeNull();
+    const overCap = gzipPreparedTransaction(padded);
+    // One gzip member and then a byte: refused by the single-member rule.
+    const trailing = Buffer.concat([Buffer.from(payload.payload.preparedTransaction, "base64"), Buffer.from([0])]).toString("base64");
+    // The protobuf without gzip is what a payer built before this sends.
+    for (const preparedTransaction of [protobuf, overCap, trailing]) {
+      const p = { ...payload, payload: { ...payload.payload, preparedTransaction } };
+      expect(verifier.verify(p, requirements)).toEqual({
+        isValid: false,
+        invalidReason: "transfer_mismatch",
+        payer: payload.payload.payer,
+        extensions: { detail: "undecodable" },
+      });
+    }
+  });
+
+  it("refuses a payload without assetTransferMethod, or with another value, at the shape check", () => {
+    // Everything else is right: the signature verifies and the transfer matches.
+    const { payload, requirements } = buildSignedFixture();
+    const { assetTransferMethod: _omit, ...withoutMethod } = payload.payload;
+    const variants = [withoutMethod, { ...payload.payload, assetTransferMethod: "transfer-preapproval" }];
+    for (const inner of variants) {
+      const p = { ...payload, payload: inner } as unknown as CantonPaymentPayload;
+      expect(verifier.verify(p, requirements)).toEqual({ isValid: false, invalidReason: "internal_error" });
+    }
+  });
+
+  it("does not read the pre-spec field names", () => {
+    const { payload, requirements } = buildSignedFixture();
+    const { preparedTxHash, signature, ...rest } = payload.payload;
+    const p = {
+      ...payload,
+      payload: { ...rest, preparedTransactionHash: preparedTxHash, partySignature: signature },
+    };
+    expect(verifier.verify(p, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "internal_error",
     });
   });
 
@@ -237,10 +371,10 @@ describe("cantonExactVerifier", () => {
     // Signed a different memo, or none, against requirements that quote one.
     for (const memo of ["invoice-2024-002", undefined]) {
       const other = buildSignedFixture(memo === undefined ? {} : { memo });
-      const p = { ...other.payload, payload: { ...other.payload.payload } };
-      expect(
-        verifier.verify({ ...p, payload: { ...p.payload, requirementsHash: quoted.payload.payload.requirementsHash } }, quoted.requirements),
-      ).toMatchObject({ invalidReason: "transfer_mismatch", extensions: { detail: "memo" } });
+      expect(verifier.verify(other.payload, quoted.requirements)).toMatchObject({
+        invalidReason: "transfer_mismatch",
+        extensions: { detail: "memo" },
+      });
     }
   });
 
@@ -249,11 +383,7 @@ describe("cantonExactVerifier", () => {
     // payment that satisfies every term the merchant actually set.
     const { requirements } = buildSignedFixture();
     const withMemo = buildSignedFixture({ memo: "payer's own note" });
-    const p = {
-      ...withMemo.payload,
-      payload: { ...withMemo.payload.payload, requirementsHash: requirementsHash(requirements) },
-    };
-    expect(verifier.verify(p, requirements)).toMatchObject({ isValid: true });
+    expect(verifier.verify(withMemo.payload, requirements)).toMatchObject({ isValid: true });
   });
 
   it("reports missing_public_key for a blank OR absent key (specific reason, not internal_error)", () => {
@@ -273,14 +403,11 @@ describe("cantonExactVerifier", () => {
     });
   });
 
-  it("rejects a payload missing hashingSchemeVersion (internal_error)", () => {
-    const { payload, requirements } = buildSignedFixture();
+  it("accepts a payload without hashingSchemeVersion, which the spec reads as V2", () => {
+    const { payload, requirements, payer } = buildSignedFixture();
     const { hashingSchemeVersion: _omit, ...innerNoScheme } = payload.payload;
     const p = { ...payload, payload: innerNoScheme };
-    expect(verifier.verify(p, requirements)).toMatchObject({
-      isValid: false,
-      invalidReason: "internal_error",
-    });
+    expect(verifier.verify(p, requirements)).toEqual({ isValid: true, payer });
   });
 });
 
@@ -328,9 +455,8 @@ describe("createVerifierRegistry", () => {
 
 describe("the ids the verifier answers to", () => {
   /**
-   * The fixture re-pointed at another scheme/network. `requirementsHash` walks
-   * the whole requirements object, so changing either re-derives it — a payload
-   * paying `exact` must be bound to requirements that say `exact`.
+   * The fixture re-pointed at another scheme/network, on both the payload and the
+   * requirements, so only the id under test differs from a valid payment.
    */
   function fixtureFor(scheme: string, network: string) {
     const { payload, requirements, payer } = buildSignedFixture();
@@ -342,7 +468,6 @@ describe("the ids the verifier answers to", () => {
         ...payload,
         scheme,
         network,
-        payload: { ...payload.payload, requirementsHash: requirementsHash(req) },
       },
     };
   }
@@ -387,8 +512,9 @@ describe("the ids the verifier answers to", () => {
   });
 
   it("refuses requirements naming another scheme, even when the payload is right", () => {
-    // Needs its own case: with only the payload side checked this reaches the
-    // hash check and reports requirements_hash_mismatch instead.
+    // Needs its own case: nothing after the scheme check reads the requirements'
+    // scheme (the transfer does not carry it), so checking only the payload side
+    // would let this verify.
     const { payload, requirements } = fixtureFor(EXACT_SCHEME_ID, NETWORK);
     expect(
       verifier.verify(payload, { ...requirements, scheme: "exact-canton" }),

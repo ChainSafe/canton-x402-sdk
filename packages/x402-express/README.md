@@ -70,8 +70,9 @@ const { paymentRequired } = require("@chainsafe/x402-express");
    payer is attached to `req.x402` and `next()` is called. Settlement's ledger
    transaction id is returned in the `X-PAYMENT-RESPONSE` response header.
 
-Verification uses the **client-signed** requirements (echoed in `X-PAYMENT`), not
-freshly-rebuilt ones, so the payload's `requirementsHash` binds correctly. The
+Verification uses the requirements the client **echoes** in `X-PAYMENT`, not
+freshly-rebuilt ones, since those carry the `nonce` and `validBefore` the payer
+was quoted. They are not signed: the signed transfer is checked against them. The
 echoed set is validated against merchant policy (scheme, network, `payTo`, asset,
 and not under the priced amount, not expired) before use. Amounts are atomic
 units throughout — the same unit the wire carries.

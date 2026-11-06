@@ -104,18 +104,21 @@ Canton implementation):
 
 ```ts
 interface X402Payer {
-  supports(requirements: CantonPaymentRequirements): boolean;   // scheme + network + asset
+  supports(requirements: CantonPaymentRequirements): boolean;   // scheme + network + transfer method + asset
   authorize(requirements: CantonPaymentRequirements): Promise<CantonPaymentPayload>;
 }
 ```
 
 `CantonX402Payer.authorize()`:
-- validates the requirement (amount, scheme, network, expiry) via `x402-core`;
+- validates the requirement (amount, scheme, network, `extra.assetTransferMethod`, expiry) via `x402-core`;
 - builds the Token Standard transfer (`sdk.token.transfer.create` — routes the
   transfer factory via the registry);
 - prepares it (`sdk.ledger.prepare` — interactive submission) to get the hash;
-- Ed25519-signs the hash with the party key (`x402-core`'s `signHash`);
-- assembles the payload (`requirementsHash`, required `publicKey`, required `hashingSchemeVersion`)
+- Ed25519-signs the hash with the party key (`x402-core`'s `signHash`, then
+  `signatureToBase64`, since the payload carries `signature` as base64 and
+  `preparedTxHash` as hex);
+- assembles the payload (`assetTransferMethod: "transfer-factory"`, the prepared transaction gzipped with `gzipPreparedTransaction`,
+  required `publicKey`, and the `hashingSchemeVersion` prepare used)
   **without executing** — facilitator derives fingerprint from `publicKey` (`fingerprintForPublicKey`; no `keyFingerprint` on the wire).
 
 `CantonX402Payer` is stateless: double-settle is prevented by the facilitator (it

@@ -28,9 +28,10 @@ rule exists to avoid. An absent deadline counts as expired: a real transfer
 always carries one, and reading a missing field as "no deadline" would make the
 check skippable by leaving it out.
 
-`transfer_expired` is separate from `requirements_expired` because the client
-does different things with them — fetch a new 402, or prepare a new transfer
-against the quote it already has.
+`transfer_expired` is the only expiry left, and it says something narrower than
+the one it replaces: not that the quote went stale, but that the transfer the
+payer signed can no longer settle, so the client should prepare another against
+the quote it already has.
 
 **Rule 12, memo.** When the merchant quotes one, the transfer's metadata must
 carry the identical value under `x402.memo`, or the payment is

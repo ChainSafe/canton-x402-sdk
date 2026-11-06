@@ -22,10 +22,10 @@ import type { X402PaymentRequirements } from "../types/requirements";
 import {
   isValidAmount,
   ledgerToAtomic,
-  requirementsHashMatches,
   WIRE_DECIMALS,
 } from "./common";
 import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
+import { gunzipPreparedTransaction } from "./prepared-tx-codec";
 
 // @noble/ed25519 v3 needs sha512 wired (same as the facilitator's wallet.ts).
 ed25519Hashes.sha512 = sha512;
@@ -113,6 +113,56 @@ function isTransferExpired(executeBeforeMicros: bigint | undefined, now: number 
   return executeBeforeMicros <= BigInt(now) * 1000n + EXECUTE_BEFORE_MARGIN_MICROS;
 }
 
+// ─── payload encodings ──────────────────────────────────────────────────────
+// The payload carries `preparedTxHash` as lower-case hex and `signature` as
+// base64, which are the spec's encodings. signHash / verifySignature stay in hex
+// because the facilitator's login flow calls them with hex too. The two
+// helpers below convert at the payload boundary, so the hex side never changes.
+
+/** 32 bytes as lower-case hex: the only form `preparedTxHash` takes. */
+const PREPARED_TX_HASH = /^[0-9a-f]{64}$/;
+
+/** Standard alphabet, padded, nothing else. */
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+/** 64 bytes always encode to 88 characters of padded base64. */
+const SIGNATURE_BASE64_LENGTH = 88;
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+/**
+ * A hex Ed25519 signature (what {@link signHash} returns) in the base64 form the
+ * payload's `signature` carries.
+ */
+export function signatureToBase64(signatureHex: string): string {
+  return bytesToBase64(hexToBytes(signatureHex));
+}
+
+/**
+ * The payload's `signature` back to hex, for {@link verifySignature}. `null`
+ * unless it is canonical standard base64 of exactly 64 bytes. A hex signature
+ * is valid base64 (its 128 characters decode to 96 bytes), so the length check
+ * is what keeps it from being read as one. Canonical means the encoding
+ * {@link signatureToBase64} produces: no URL-safe alphabet, no missing padding,
+ * no non-zero padding bits.
+ *
+ * The length is checked first because the value comes from the client. Run on
+ * a few million characters, the regex below exhausts V8's backtracking stack
+ * and throws instead of returning false.
+ */
+export function signatureFromBase64(signatureBase64: string): string | null {
+  if (signatureBase64.length !== SIGNATURE_BASE64_LENGTH || !BASE64.test(signatureBase64)) {
+    return null;
+  }
+  const bytes = base64ToBytes(signatureBase64);
+  if (bytes.length !== 64 || bytesToBase64(bytes) !== signatureBase64) return null;
+  return bytesToHex(bytes);
+}
+
 // ─── canton network-id boundary guard ──────────────────────────────────────
 // NetworkId is a plain string (scheme-generic); this validates the `canton:<name>`
 // form at untrusted boundaries (env, raw input). Shape only — that the name is
@@ -151,6 +201,8 @@ function verifyCantonExact(
     return fail("network_mismatch");
   }
   // 3. shapes — narrow the unknown inner/requirements before reading fields.
+  //    `assetTransferMethod` is the same literal in both schemas, so once both
+  //    pass, the payload's method and the requirements' agree.
   if (!isCantonPaymentRequirements(requirements) || !isObj(payload.payload)) {
     return fail("internal_error");
   }
@@ -160,11 +212,7 @@ function verifyCantonExact(
   }
   if (!isCantonPaymentInner(raw)) return fail("internal_error");
   const inner = raw;
-  // 5. requirementsHash binds the signed payload to this exact PaymentRequirements
-  if (!requirementsHashMatches(requirements, inner.requirementsHash)) {
-    return fail("requirements_hash_mismatch", inner.payer);
-  }
-  // 6. public key well-formed (32-byte Ed25519). Malformed key bytes are
+  // 4. public key well-formed (32-byte Ed25519). Malformed key bytes are
   //    indistinguishable from "no usable key" here → missing_public_key.
   let derivedFingerprint: string;
   try {
@@ -172,22 +220,34 @@ function verifyCantonExact(
   } catch {
     return fail("missing_public_key", inner.payer);
   }
-  // 7. the fingerprint derived from the public key must match the payer's
+  // 5. the fingerprint derived from the public key must match the payer's
   //    `::<fingerprint>` suffix (replaces the removed wire `keyFingerprint`)
   const partySuffix = inner.payer.split("::")[1];
   if (!partySuffix || derivedFingerprint.toLowerCase() !== partySuffix.toLowerCase()) {
     return fail("bad_fingerprint", inner.payer);
   }
-  // 8. signature over the prepared-transaction hash
-  if (!verifySignature(inner.preparedTransactionHash, inner.partySignature, inner.publicKey)) {
+  // 6. signature over the prepared-transaction hash, each in the one encoding
+  //    the spec gives it. The facilitator relays `signature` to the ledger as
+  //    is. `preparedTxHash` is keyed on (the facilitator's submissionId), so one
+  //    hash has one spelling: an upper-case copy decodes to the same bytes and
+  //    would verify, and is still refused.
+  const signatureHex = signatureFromBase64(inner.signature);
+  if (
+    !PREPARED_TX_HASH.test(inner.preparedTxHash) ||
+    signatureHex === null ||
+    !verifySignature(inner.preparedTxHash, signatureHex, inner.publicKey)
+  ) {
     return fail("bad_signature", inner.payer);
   }
-  // 9. the signed transfer must actually move what the requirements demand.
-  //    requirementsHash proves the payload *references* these requirements;
-  //    only decoding the prepared transaction proves it *satisfies* them —
-  //    binding sender/receiver/instrument/amount so a valid signature over a
-  //    divergent transfer (e.g. to another party, or a smaller amount) is rejected.
-  const transfer = decodePreparedTransaction(inner.preparedTransaction);
+  // 7. the signed transfer must actually move what the requirements demand.
+  //    This is the payload's one binding to the requirements: the signature
+  //    covers the prepared transaction, so decoding it and checking sender/
+  //    receiver/instrument/amount rejects a valid signature over a divergent
+  //    transfer (e.g. to another party, or a smaller amount).
+  //    The payload carries it gzipped; a member that is malformed or over
+  //    either bound is as undecodable as a bad protobuf.
+  const prepared = gunzipPreparedTransaction(inner.preparedTransaction);
+  const transfer = prepared && decodePreparedTransaction(bytesToBase64(prepared));
   if (!transfer) {
     return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: "undecodable" } };
   }
@@ -195,7 +255,7 @@ function verifyCantonExact(
   if (mismatch) {
     return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: mismatch } };
   }
-  // 10. the transfer must still be executable. An absent deadline counts as
+  // 8. the transfer must still be executable. An absent deadline counts as
   //     expired: `executeBefore` is not optional in a real transfer, and
   //     reading a missing one as "no deadline" would make the check skippable
   //     by leaving the field out.

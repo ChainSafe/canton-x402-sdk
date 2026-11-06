@@ -8,7 +8,7 @@
 //
 //   {
 //     "payment":      { "x402Version": 2, "scheme": "exact", "network": "canton:devnet",
-//                       "payload": { "payer": "…", "partySignature": "…", "requirementsHash": "…" } },
+//                       "payload": { "payer": "…", "signature": "…", … } },
 //     "requirements": { "scheme": "exact", "amount": "…", "payTo": "…", … }
 //   }
 //
@@ -16,11 +16,11 @@
 // envelope level — see decodePaymentHeader), and `payment` (not `payload`) at the
 // top disambiguates from the payment's own inner `.payload`.
 //
-// The requirements are mandatory: verification is stateless, and `requirementsHash`
-// binds to a specific requirements object — every value in it — so that object
-// must travel back with the payment for the facilitator to recompute the
-// hash and check the signature. A payment without them is unverifiable. The
-// merchant validates the echoed requirements against its policy before trusting them.
+// The requirements are mandatory: verification is stateless, and the facilitator
+// checks the signed transfer against one specific requirements object — its
+// receiver, instrument, amount and memo — so that object must travel back with
+// the payment. A payment without them is unverifiable. The merchant validates the
+// echoed requirements against its policy before trusting them.
 //
 // Isomorphic on purpose (browser + node): base64 via btoa/atob, UTF-8 via
 // TextEncoder/TextDecoder — no Node Buffer.

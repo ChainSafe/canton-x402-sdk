@@ -5,4 +5,5 @@
 export * from "./common";
 export * from "./canton-exact";
 export * from "./prepared-tx";
+export * from "./prepared-tx-codec";
 export * from "./registry";

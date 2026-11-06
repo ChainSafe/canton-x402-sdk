@@ -7,6 +7,8 @@ import {
   matchesFingerprint,
   verifySignature,
   signHash,
+  signatureToBase64,
+  signatureFromBase64,
   isValidAmount,
   isValidLedgerAmount,
   schemeNetworkMatches,
@@ -78,6 +80,49 @@ describe("signHash", () => {
   });
 });
 
+describe("signatureToBase64 / signatureFromBase64", () => {
+  // 0xfb 0xff 0xbf encodes as "+/+/", so this signature exercises both
+  // characters that differ between standard and URL-safe base64.
+  const sigBytes = new Uint8Array(64).map((_, i) => [0xfb, 0xff, 0xbf][i % 3]);
+  const sigHex = bytesToHex(sigBytes);
+  const sigB64 = signatureToBase64(sigHex);
+
+  it("encodes a hex signature as standard, padded base64", () => {
+    expect(sigB64).toBe(toB64(sigBytes));
+    expect(sigB64).toMatch(/^[A-Za-z0-9+/]{86}==$/);
+    expect(sigB64).toContain("+");
+    expect(sigB64).toContain("/");
+  });
+  it("round-trips", () => {
+    expect(signatureFromBase64(sigB64)).toBe(sigHex);
+  });
+  it("refuses the hex form, which is valid base64 of the wrong length", () => {
+    expect(atob(sigHex)).toHaveLength(96);
+    expect(signatureFromBase64(sigHex)).toBeNull();
+  });
+  it("refuses any other length", () => {
+    expect(signatureFromBase64(toB64(sigBytes.slice(0, 63)))).toBeNull();
+    expect(signatureFromBase64(toB64(new Uint8Array(65)))).toBeNull();
+    expect(signatureFromBase64("")).toBeNull();
+  });
+  it("refuses megabytes without throwing", () => {
+    expect(signatureFromBase64("A".repeat(5 * 1024 * 1024))).toBeNull();
+  });
+  it("refuses non-canonical encodings of the same bytes", () => {
+    expect(signatureFromBase64(sigB64.replace(/\+/g, "-").replace(/\//g, "_"))).toBeNull();
+    expect(signatureFromBase64(sigB64.slice(0, -2))).toBeNull();
+    expect(signatureFromBase64(` ${sigB64}`)).toBeNull();
+    expect(signatureFromBase64(`${sigB64}\n`)).toBeNull();
+    // The data character before "==" carries four padding bits; setting one
+    // still decodes to the same bytes.
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const i = sigB64.length - 3;
+    const padded = sigB64.slice(0, i) + alphabet[alphabet.indexOf(sigB64[i]) ^ 1] + sigB64.slice(i + 1);
+    expect(atob(padded)).toBe(atob(sigB64));
+    expect(signatureFromBase64(padded)).toBeNull();
+  });
+});
+
 describe("isValidAmount — the quoted, atomic form", () => {
   it("accepts a non-negative integer string", () => {
     for (const ok of ["0", "1", "500000000", "123456789012345678901234567890"])
@@ -144,11 +189,11 @@ describe("shape guards + scheme/network match", () => {
     extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   } as CantonPaymentRequirements;
   const inner = {
+    assetTransferMethod: "transfer-factory",
     payer: "alice::1220x",
     preparedTransaction: "b",
-    preparedTransactionHash: "h",
-    partySignature: "s",
-    requirementsHash: "rh",
+    preparedTxHash: "h",
+    signature: "s",
     publicKey: "cHVibGljS2V5",
     hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
   };
@@ -164,9 +209,10 @@ describe("shape guards + scheme/network match", () => {
     expect(isCantonPaymentRequirements({})).toBe(false);
     expect(isCantonPaymentInner(inner)).toBe(true);
     expect(isCantonPaymentInner({})).toBe(false);
-    // publicKey + hashingSchemeVersion are required fields — missing either is rejected.
+    // publicKey is required; hashingSchemeVersion is optional (the spec reads an
+    // absent one as V2).
     expect(isCantonPaymentInner({ ...inner, publicKey: undefined })).toBe(false);
-    expect(isCantonPaymentInner({ ...inner, hashingSchemeVersion: undefined })).toBe(false);
+    expect(isCantonPaymentInner({ ...inner, hashingSchemeVersion: undefined })).toBe(true);
     expect(isX402PaymentPayload(payload)).toBe(true);
     // Loose: accepts any non-empty scheme (per-scheme inner validated elsewhere).
     expect(
