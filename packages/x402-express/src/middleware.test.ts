@@ -67,6 +67,7 @@ function paymentHeader(overrides: Record<string, unknown> = {}): string {
     scheme: "exact",
     network: "canton:x",
     payload: {
+      assetTransferMethod: "transfer-factory",
       payer: "alice::x",
       preparedTransaction: "b",
       preparedTxHash: "h",

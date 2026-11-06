@@ -7,6 +7,7 @@ const payload: CantonPaymentPayload = {
   scheme: "exact",
   network: "canton:devnet",
   payload: {
+    assetTransferMethod: "transfer-factory",
     payer: "alice::1220x",
     preparedTransaction: "b",
     preparedTxHash: "h",

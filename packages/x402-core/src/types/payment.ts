@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { ASSET_TRANSFER_METHOD } from "./common";
 import type { NetworkId, Scheme, X402Version } from "./common";
 
 /**
@@ -21,6 +22,12 @@ export type HashingSchemeVersion =
  * validator can't drift from (or under-check) the type.
  */
 export const CantonPaymentInnerSchema = v.object({
+  /**
+   * MUST be `transfer-factory`, the same literal as the requirements'
+   * `extra.assetTransferMethod`: the spec requires it in both places. Any other
+   * value fails the shape check.
+   */
+  assetTransferMethod: v.literal(ASSET_TRANSFER_METHOD),
   /** Paying Canton party ID. */
   payer: v.string(),
   /**

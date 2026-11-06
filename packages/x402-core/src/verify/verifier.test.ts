@@ -71,6 +71,7 @@ function buildSignedFixture() {
     scheme: "exact",
     network: NETWORK,
     payload: {
+      assetTransferMethod: "transfer-factory",
       payer,
       preparedTransaction,
       preparedTxHash,
@@ -293,6 +294,17 @@ describe("cantonExactVerifier", () => {
         payer: payload.payload.payer,
         extensions: { detail: "undecodable" },
       });
+    }
+  });
+
+  it("refuses a payload without assetTransferMethod, or with another value, at the shape check", () => {
+    // Everything else is right: the signature verifies and the transfer matches.
+    const { payload, requirements } = buildSignedFixture();
+    const { assetTransferMethod: _omit, ...withoutMethod } = payload.payload;
+    const variants = [withoutMethod, { ...payload.payload, assetTransferMethod: "transfer-preapproval" }];
+    for (const inner of variants) {
+      const p = { ...payload, payload: inner } as unknown as CantonPaymentPayload;
+      expect(verifier.verify(p, requirements)).toEqual({ isValid: false, invalidReason: "internal_error" });
     }
   });
 

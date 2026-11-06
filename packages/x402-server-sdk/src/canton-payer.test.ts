@@ -75,6 +75,7 @@ describe("CantonX402Payer.authorize", () => {
     const inner = result.payload;
 
     expect(result).toMatchObject({ x402Version: 2, scheme: "exact", network: NETWORK });
+    expect(inner.assetTransferMethod).toBe("transfer-factory");
     expect(inner.payer).toBe(key.partyId);
     expect(inner.publicKey).toBe(publicKeyB64);
     expect(inner.requirementsHash).toBe(requirementsHash(req));
@@ -124,6 +125,18 @@ describe("CantonX402Payer.authorize", () => {
     expect(
       payer.supports(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).toBe(false);
+  });
+
+  it("supports() refuses requirements asking for another transfer method, so authorize never prepares", async () => {
+    // A 402 body reaches the payer unvalidated, so the literal type is no guarantee.
+    const { sdk, prepare } = mockSdk();
+    const payer = makePayer(sdk);
+    const other = makeRequirements({
+      extra: { assetTransferMethod: "transfer-preapproval", instrumentId: { id: "Amulet", admin: "DSO::x" } },
+    } as unknown as Partial<CantonPaymentRequirements>);
+    expect(payer.supports(other)).toBe(false);
+    await expect(payer.authorize(other)).rejects.toThrow(/unsupported requirement.*method "transfer-preapproval"/);
+    expect(prepare).not.toHaveBeenCalled();
   });
 
   it("rejects an asset with no configured registry", async () => {

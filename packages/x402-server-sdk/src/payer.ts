@@ -6,7 +6,7 @@ import type { CantonPaymentPayload, CantonPaymentRequirements } from "@chainsafe
  * touching it. `CantonX402Payer` (canton-payer.ts) is the canton-exact implementation.
  */
 export interface X402Payer {
-  /** Whether this payer can satisfy a requirement (scheme + network + asset). */
+  /** Whether this payer can satisfy a requirement (scheme + network + transfer method + asset). */
   supports(requirements: CantonPaymentRequirements): boolean;
   /** Prepare + sign a payment, returning the payload a facilitator settles. */
   authorize(requirements: CantonPaymentRequirements): Promise<CantonPaymentPayload>;

@@ -202,6 +202,7 @@ describe("shape guards + scheme/network match", () => {
     extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   } as CantonPaymentRequirements;
   const inner = {
+    assetTransferMethod: "transfer-factory",
     payer: "alice::1220x",
     preparedTransaction: "b",
     preparedTxHash: "h",
