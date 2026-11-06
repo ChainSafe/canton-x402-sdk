@@ -134,7 +134,7 @@ guarantee.
 | `maxTimeoutSeconds`                         | Required — seconds the client has to complete payment. A whole number of at least 1; `0`, a negative, a fraction and `Infinity` are all refused.
 | `extra.assetTransferMethod`                 | Required, and MUST be `"transfer-factory"`. A reserved protocol key, so any other value is refused rather than carried through as scheme data.
 | `extra.executeBeforeSeconds`                | Required — seconds from request time. The client turns it into the transfer's `executeBefore`; verification refuses a transfer whose deadline is not still at least 5 seconds ahead (`transfer_expired`).
-| `extra.memo`                                | Optional, UTF-8, at most 256 **bytes**. Quoting one binds it: the transfer's metadata must carry the identical value under `x402.memo`, or the payment is `transfer_mismatch` with detail `memo`.
+| `extra.memo`                                | Optional, UTF-8, at most 256 **bytes**. Binds in both directions: the transfer's `x402.memo` must equal it exactly, and a transfer carrying one when you quoted none is refused too — `x402.memo` is the scheme's key, not the payer's. Either way the refusal is `transfer_mismatch` with detail `memo`.
 | `description`                               | Optional.                                                                                                                                                                                                                                                                      |
 
 ### Response 200 — accepted

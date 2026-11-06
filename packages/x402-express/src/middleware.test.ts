@@ -272,6 +272,72 @@ describe("paymentRequired", () => {
     expect(res.body.accepts[0].extra).not.toHaveProperty("memo");
   });
 
+  // Rule 12 compares the transfer against the requirements the PAYER echoed, so
+  // on its own it proves only that the payer agreed with itself: it can drop
+  // the memo and sign none, or echo any value and sign that. The middleware
+  // keeps no record of what it issued, so a merchant reconciling by memo says so.
+  describe("a quoted memo is only as good as the merchant's own check", () => {
+    const quoting = (over: Partial<PaymentRequiredOptions> = {}) =>
+      makeApp({
+        requirements: { ...(baseOptions.requirements as object), memo: () => "order-1" } as never,
+        ...over,
+      });
+
+    it.each([
+      ["dropped from the echo", {}],
+      ["one this merchant never issued", { memo: "someone-elses-order" }],
+    ])("is accepted on its own when %s", async (_, extra) => {
+      stubFacilitator();
+      await request(quoting())
+        .get("/paid")
+        .set("X-PAYMENT", paymentHeader({ extra: { ...ECHOED_EXTRA, ...extra } }))
+        .expect(200);
+    });
+
+    it("and refused when checkPayment says so", async () => {
+      stubFacilitator();
+      const app = quoting({
+        checkPayment: ({ requirements }) =>
+          requirements.extra.memo === "order-1" ? undefined : "policy_memo_unknown",
+      });
+      for (const extra of [{}, { memo: "someone-elses-order" }]) {
+        const res = await request(app)
+          .get("/paid")
+          .set("X-PAYMENT", paymentHeader({ extra: { ...ECHOED_EXTRA, ...extra } }));
+        expect(res.status).toBe(402);
+        expect(res.body.error).toBe("policy_memo_unknown");
+      }
+    });
+  });
+
+  describe("checkPayment", () => {
+    it("sees the payload and the echoed requirements, and refuses before settle", async () => {
+      // Before settle is the point: a refusal after it would have moved funds.
+      const fetchMock = stubFacilitator();
+      let seen: { payer?: string } = {};
+      const app = makeApp({
+        settle: true,
+        checkPayment: ({ payload }) => {
+          seen = { payer: payload.payload.payer };
+          return "policy_order_closed";
+        },
+      });
+      const res = await request(app).get("/paid").set("X-PAYMENT", paymentHeader());
+      expect(res.status).toBe(402);
+      expect(res.body.error).toBe("policy_order_closed");
+      expect(seen.payer).toBe("alice::x");
+      for (const [url] of fetchMock.mock.calls) expect(String(url)).not.toContain("/v2/settle");
+    });
+
+    it("lets the payment through when it returns nothing", async () => {
+      stubFacilitator();
+      await request(makeApp({ checkPayment: () => undefined }))
+        .get("/paid")
+        .set("X-PAYMENT", paymentHeader())
+        .expect(200);
+    });
+  });
+
   it("asks the merchant for a memo per challenge, and records what it issued", async () => {
     // Quoting a memo binds it (Rule 12), so it is the merchant's reconciliation
     // key: generated AND recorded merchant-side, one call per challenge.

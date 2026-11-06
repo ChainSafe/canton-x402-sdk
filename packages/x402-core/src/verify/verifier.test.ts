@@ -378,12 +378,17 @@ describe("cantonExactVerifier", () => {
     }
   });
 
-  it("ignores a memo the merchant did not quote", () => {
-    // An unquoted memo is the payer's own reference. Refusing it would reject a
-    // payment that satisfies every term the merchant actually set.
+  it("refuses a memo the merchant did not quote", () => {
+    // `x402.memo` is the scheme's key, not the payer's. Letting a payer name an
+    // order the merchant never quoted lets a cheap payment reconcile against an
+    // expensive one, for any merchant that matches ledger payments by memo.
     const { requirements } = buildSignedFixture();
-    const withMemo = buildSignedFixture({ memo: "payer's own note" });
-    expect(verifier.verify(withMemo.payload, requirements)).toMatchObject({ isValid: true });
+    const withMemo = buildSignedFixture({ memo: "someone else's order" });
+    expect(verifier.verify(withMemo.payload, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      extensions: { detail: "memo" },
+    });
   });
 
   it("reports missing_public_key for a blank OR absent key (specific reason, not internal_error)", () => {

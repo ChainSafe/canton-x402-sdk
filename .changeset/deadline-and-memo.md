@@ -52,6 +52,17 @@ value to a reader and another to the engine.
 is a new option with no default, because quoting one binds it and an invented
 memo would refuse honest payments.
 
+There is also a new optional `checkPayment` hook, because Rule 12 on its own
+proves less than it looks: it compares the transfer against the requirements
+the PAYER echoed, so a payer can echo no memo and sign none, or echo another
+order's memo and sign that — either way the two agree, and the middleware keeps
+no record of what it issued. `checkPayment` is where that record goes. It takes
+the payload and the echoed requirements, runs after merchant policy and before
+verify (so before any settle), and returns a reason to refuse or nothing to
+accept. Not memo-specific: any check needing merchant state belongs there.
+
+Found in review by @dimartiro.
+
 **Payer.** `CantonX402Payer` now sets the transfer's expiry from the quoted
 horizon. Left unset the wallet SDK picks 24 hours, which would make the
 merchant's horizon decorative and Rule 10 pass on every payment regardless.

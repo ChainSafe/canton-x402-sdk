@@ -83,6 +83,30 @@ export interface PaymentRequiredOptions {
   settle?: boolean;
   /** How to produce the PaymentRequirements: a declarative spec, or a full builder. */
   requirements: RequirementsSpec | RequirementsBuilder;
+  /**
+   * Your own say on a paid request, run after the echoed requirements pass
+   * merchant policy and before verify — so before any settle. Return a short
+   * reason to refuse it (answered as a `402` carrying that code), or nothing
+   * to let it through.
+   *
+   * This is where merchant state goes, because the middleware has none. It
+   * rebuilds the quote on every request, so it can tell you the payer echoed
+   * *a* memo, but not whether it is one you issued; it knows the price it
+   * quotes now, but not whether that order is still open. Those are questions
+   * only your records answer:
+   *
+   * ```ts
+   * checkPayment: async ({ requirements }) => {
+   *   const order = await orders.findByRef(requirements.extra.memo);
+   *   if (!order) return "policy_memo_unknown";
+   *   if (order.status !== "awaiting-payment") return "policy_order_closed";
+   * },
+   * ```
+   */
+  checkPayment?: (
+    payment: { payload: CantonPaymentPayload; requirements: CantonPaymentRequirements },
+    req: Request,
+  ) => string | undefined | Promise<string | undefined>;
   /** Extra `accepts[]` entries for the 402 body (e.g. an alternate scheme). */
   additionalAccepts?: (req: Request) => CantonPaymentRequirements[] | Promise<CantonPaymentRequirements[]>;
   /**
@@ -192,6 +216,11 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
 
       const policyError = validateEchoedRequirements(requirements, fresh);
       if (policyError) throw new PaymentRejection(policyError, fresh);
+
+      // The merchant's own checks, on everything the payer sent. Placed here so
+      // a refusal costs no verify and, above all, no settle.
+      const refusal = await options.checkPayment?.({ payload, requirements }, req);
+      if (refusal) throw new PaymentRejection(refusal, fresh);
 
       // On any rejection, advertise `fresh` (this request's current terms) —
       // never the client's echoed requirements. Those are what the client just

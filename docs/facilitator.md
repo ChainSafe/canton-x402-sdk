@@ -35,8 +35,9 @@ holds the state involved:
    signature over a divergent transfer is rejected with `transfer_mismatch` and
    the field that diverged. The amount must be EQUAL, not merely sufficient —
    `exact` is the scheme's distinguishing property, and a payer who overpays has
-   no refund path. If you quoted an `extra.memo`, the transfer must carry the
-   identical value too.
+   no refund path. The transfer's `x402.memo` must equal your `extra.memo`
+   exactly — in both directions, so a transfer carrying a memo you did not
+   quote is refused as well.
 6. **No replay, and you're an allowed destination** — the payment has not
    settled before (the ledger is the real guard: a replayed transfer names
    input holdings that are already spent), and for an authenticated merchant

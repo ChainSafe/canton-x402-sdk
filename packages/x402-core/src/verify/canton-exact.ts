@@ -280,13 +280,14 @@ export function findTransferMismatch(
   payer: string,
 ): "sender" | "receiver" | "instrument" | "amount" | "memo" | null {
   if (transfer.sender !== payer) return "sender";
-  // Rule 12. Only when the merchant quoted one — an unquoted memo is the
-  // payer's own reference and none of our business. Quoted, it must match
-  // exactly, so the payer cannot sign a different reference from the one the
-  // merchant will reconcile against.
-  if (requirements.extra.memo !== undefined && transfer.memo !== requirements.extra.memo) {
-    return "memo";
-  }
+  // Rule 12, both ways. The spec only requires the check when the merchant
+  // quotes a memo, but `x402.memo` is a key the scheme reserves, not the
+  // payer's own namespace — its own references go under its own key, which is
+  // where the wallet SDK already writes them. So an unquoted transfer must
+  // carry no memo either: a merchant that reconciles ledger payments by memo
+  // would otherwise credit whichever order a payer chose to name, paying a
+  // cheap resource to settle an expensive one.
+  if (transfer.memo !== requirements.extra.memo) return "memo";
   if (transfer.receiver !== requirements.payTo) return "receiver";
   // From `extra`, not `asset`: the latter is only a symbol, which cannot say
   // which registry issued the instrument.

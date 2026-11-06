@@ -91,7 +91,20 @@ units throughout — the same unit the wire carries.
 
 Either a **declarative spec** — `{ payTo, asset, network, amount, scheme?, resource?, description?, maxTimeoutSeconds?, executeBeforeSeconds?, memo? }`, where the middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120), and every field may be a fixed value **or** a `(req) => value` resolver — or a **builder** `(req) => CantonPaymentRequirements` for full control (you own `maxTimeoutSeconds` and the whole of `extra`).
 
-`memo` is special: it's a **function only** (`(req) => string | Promise<string>`), called once per challenge, so a merchant can generate *and record* it (e.g. an order id persisted for reconciliation). Omit it to quote none. Quoting one **binds** it — the payer must sign the identical value into the transfer, which is what makes it usable as a reconciliation key.
+`memo` is special: it's a **function only** (`(req) => string | Promise<string>`), called once per challenge, so a merchant can generate *and record* it (e.g. an order id persisted for reconciliation). Omit it to quote none. Quoting one **binds** it — the payer must sign the identical value into the transfer.
+
+That proves less than it looks, though: the scheme compares the transfer against the requirements the **payer** echoed, so a payer can echo no memo and sign none, or echo any value and sign that. The middleware keeps no record of what it issued, so it cannot tell. If you reconcile *on* the memo, use `checkPayment` — your own say on a paid request, with everything the payer sent, run after merchant policy and **before verify, so before any settle**. Return a short reason to refuse (answered as a 402 carrying that code), or nothing to accept:
+
+```ts
+checkPayment: async ({ payload, requirements }) => {
+  const order = await orders.findByRef(requirements.extra.memo);
+  if (!order) return "policy_memo_unknown";
+  if (order.status !== "awaiting-payment") return "policy_order_closed";
+  if (!(await allowed(payload.payload.payer))) return "policy_payer_blocked";
+},
+```
+
+It is not memo-specific — it is where any check needing your own records belongs.
 
 ## `req.x402`
 
