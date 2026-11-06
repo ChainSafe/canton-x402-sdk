@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   ASSET_TRANSFER_METHOD,
   assetSymbol,
+  decodePayloadTransfer,
   isCantonPaymentRequirements,
   isValidAmount,
   decodePaymentHeader,
@@ -107,6 +108,7 @@ declare global {
   namespace Express {
     interface Request {
       x402?: {
+        /** The signed transfer's sender: `verify.payer`, or read from the payload when the facilitator leaves it out. */
         payer: string;
         requirements: CantonPaymentRequirements;
         payload: CantonPaymentPayload;
@@ -199,6 +201,12 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
           verify.extensions,
         );
       }
+      // The payload names no payer: it is the signed transfer's sender (spec
+      // Rule 8), which the facilitator reports. `payer` is optional in a verify
+      // response, so read the same sender here when it is left out — before
+      // settling, so a payment is never captured for a request we then fail.
+      const payer = verify.payer ?? decodePayloadTransfer(payload.payload.preparedTransaction)?.sender;
+      if (!payer) throw new PaymentRejection("transfer_mismatch", fresh, "undecodable");
 
       let settleResponse: SettleResponse | undefined;
       if (settle) {
@@ -209,7 +217,7 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
         res.setHeader("X-PAYMENT-RESPONSE", settleResponse.transaction);
       }
 
-      req.x402 = { payer: verify.payer ?? payload.payload.payer, requirements, payload, verify, settle: settleResponse };
+      req.x402 = { payer, requirements, payload, verify, settle: settleResponse };
       next();
     } catch (err) {
       let rejection: PaymentRejectionInfo | undefined;
