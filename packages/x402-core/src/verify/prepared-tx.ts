@@ -1,7 +1,7 @@
 // Prepared-transaction decoder — extracts the transfer a Canton interactive-
 // submission `PreparedTransaction` actually authorizes, so the verifier can bind
-// it to the requirements (a signed payload must move what it committed to via
-// `requirementsHash`, not something else).
+// it to the requirements (a signed payload must move what the requirements ask
+// for, not something else).
 //
 // Isomorphic: uses protobufjs's minimal Reader (pure JS, no fs, no Buffer) over a
 // base64→Uint8Array decode. Only the narrow field path we need is walked; every

@@ -30,7 +30,6 @@ const payload = {
     preparedTransaction: "cHJlcA==",
     preparedTxHash: "deadbeef",
     signature: "cafe",
-    requirementsHash: "rh",
     publicKey: "cGs=",
     hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
   },

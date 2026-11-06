@@ -4,7 +4,6 @@ import { sha512 } from "@noble/hashes/sha2.js";
 import {
   fingerprintForPublicKey,
   gunzipPreparedTransaction,
-  requirementsHash,
   signatureFromBase64,
   verifySignature,
   type CantonPaymentRequirements,
@@ -78,7 +77,8 @@ describe("CantonX402Payer.authorize", () => {
     expect(inner.assetTransferMethod).toBe("transfer-factory");
     expect(inner.payer).toBe(key.partyId);
     expect(inner.publicKey).toBe(publicKeyB64);
-    expect(inner.requirementsHash).toBe(requirementsHash(req));
+    // The spec's payload has no requirementsHash, and the payer no longer sends one.
+    expect(inner).not.toHaveProperty("requirementsHash");
     // prepare's protobuf goes out gzipped, and gunzips back to the same bytes.
     expect(Buffer.from(inner.preparedTransaction, "base64").subarray(0, 2)).toEqual(Buffer.from([0x1f, 0x8b]));
     expect(gunzipPreparedTransaction(inner.preparedTransaction)).toEqual(

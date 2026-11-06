@@ -45,7 +45,6 @@ describe("x402-core wire types", () => {
         preparedTransaction: "cHJlcGFyZWQ=",
         preparedTxHash: "deadbeef",
         signature: "cafe",
-        requirementsHash: "0f1e2d",
         publicKey: "cHVibGljS2V5",
         hashingSchemeVersion: HashingSchemeVersion.V2,
       },

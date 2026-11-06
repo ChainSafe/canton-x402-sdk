@@ -48,8 +48,6 @@ export const CantonPaymentInnerSchema = v.object({
    * Non-empty here; the verifier checks the encoding itself.
    */
   signature: v.pipe(v.string(), v.minLength(1)),
-  /** SHA-256 of the canonical (RFC-8785) PaymentRequirements. */
-  requirementsHash: v.string(),
   /**
    * Base64 32-byte Ed25519 public key. Required — the facilitator verifies the
    * signature against it and derives the party fingerprint from it (the party id's

@@ -207,7 +207,6 @@ describe("shape guards + scheme/network match", () => {
     preparedTransaction: "b",
     preparedTxHash: "h",
     signature: "s",
-    requirementsHash: "rh",
     publicKey: "cHVibGljS2V5",
     hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
   };

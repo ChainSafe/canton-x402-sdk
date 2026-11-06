@@ -77,6 +77,10 @@ export const VerifyInvalidReasonSchema = v.picklist([
   "scheme_mismatch",
   "network_mismatch",
   "requirements_expired",
+  /**
+   * Not returned by this package's verifier: the payload no longer carries a
+   * `requirementsHash` to check. Kept so a facilitator that still sends it parses.
+   */
   "requirements_hash_mismatch",
   "bad_fingerprint",
   "bad_signature",
@@ -119,6 +123,7 @@ export const SettleErrorReasonSchema = v.picklist([
   "scheme_mismatch",
   "network_mismatch",
   "requirements_expired",
+  /** As in {@link VerifyInvalidReasonSchema}: kept so an older response parses. */
   "requirements_hash_mismatch",
   "bad_fingerprint",
   "bad_signature",

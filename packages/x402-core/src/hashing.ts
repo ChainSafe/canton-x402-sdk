@@ -2,10 +2,11 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import type { X402PaymentRequirements } from "./types/requirements";
 
-// RFC 8785 (JSON Canonicalization Scheme). The client and the facilitator both
-// canonicalize PaymentRequirements identically and SHA-256 the UTF-8 bytes, so a
-// payload signed for one (resource, amount, payTo) can't be replayed against
-// another. `canonicalJson` is pure; only the hash pulls @noble/hashes (bundled).
+// RFC 8785 (JSON Canonicalization Scheme). Anyone who canonicalizes the same
+// PaymentRequirements and SHA-256s the UTF-8 bytes gets the same hash, so it
+// names one requirements object. The canton-exact payload no longer carries it:
+// what binds a payment to its requirements is the signed transfer the verifier
+// decodes. `canonicalJson` is pure; only the hash pulls @noble/hashes (bundled).
 // Ported verbatim from the facilitator's canonicalize.ts (kept byte-identical;
 // see the parity test).
 //
@@ -17,10 +18,10 @@ export function canonicalJson(value: unknown): string {
 }
 
 /**
- * requirementsHash — SHA-256 hex of the canonical PaymentRequirements. Binds a
- * signed payload to this exact (resource, amount, payTo, …). The canonicalizer
- * walks the whole object structurally, so it's scheme-agnostic in the asset/extra
- * seams — hence the widened `X402PaymentRequirements<unknown>` parameter.
+ * requirementsHash — SHA-256 hex of the canonical PaymentRequirements: a stable
+ * id for this exact (resource, amount, payTo, …). The canonicalizer walks the
+ * whole object structurally, so it's scheme-agnostic in the asset/extra seams —
+ * hence the widened `X402PaymentRequirements<unknown>` parameter.
  */
 export function requirementsHash(requirements: X402PaymentRequirements<unknown>): string {
   return canonicalSha256Hex(requirements);
