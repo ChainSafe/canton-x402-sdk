@@ -15,30 +15,36 @@ moves a payer's funds on its own authority: the only write that moves them is
 
 These run in order, with no chain write. The first six are shared code — the
 same `@chainsafe/x402-core` verifier the SDK exposes — so a payer can pre-flight
-its payload against them. The last is the facilitator's alone, since only it
-holds the state involved:
+its payload against them, and they refuse with the Canton scheme spec's codes,
+keeping the code they used before in `extensions.reason`. The last is the
+facilitator's alone, since only it holds the state involved:
 
 1. **Right scheme and network** — the payload, the requirements, and the
-   network this facilitator is bound to all agree.
+   network this facilitator is bound to all agree (`unsupported_scheme` or
+   `invalid_network` otherwise).
 2. **The transaction decodes** — `preparedTransaction` is one gzip member
-   within the size caps, its node graph is well-formed
-   (`invalid_prepared_transaction_structure` otherwise), and it holds the one
+   within the size caps, its node graph is well-formed, and it holds the one
    transfer. Its sender is the payer (the payload names none), and checks 3 to
-   6 report it. One that does not decode is `transfer_mismatch` with detail
-   `undecodable`.
+   6 report it. A payload missing its proof is
+   `invalid_exact_canton_missing_proof`, and one that does not decode is
+   `invalid_exact_canton_malformed_payload`.
 3. **Still executable** — the signed transfer's own `executeBefore` is far
-   enough in the future to settle (`transfer_expired`). The quote itself no
+   enough in the future to settle (`invalid_exact_canton_expired`). The quote itself no
    longer expires; the deadline that counts is inside what the payer signed.
 4. **The key belongs to the payer** — the fingerprint derived from the
    payload's `publicKey` must match the `::` suffix of the transfer's sender,
-   so a caller can't sign as a party it doesn't control.
+   so a caller can't sign as a party it doesn't control
+   (`invalid_exact_canton_signature_invalid` otherwise).
 5. **The signature is valid** — the hash recomputed from the transaction
-   itself must equal `preparedTxHash` (`prepared_transaction_hash_mismatch`
-   otherwise), and the payer's key must have signed it.
+   itself must equal `preparedTxHash`, and the payer's key must have signed it
+   (`invalid_exact_canton_signature_invalid` otherwise).
 6. **The signed transfer actually pays you.** This is what binds the payment to
    your terms: the transfer's receiver, instrument and amount are checked
    against the requirements, so a valid signature over a divergent transfer is
-   rejected with `transfer_mismatch` and the field that diverged. The amount
+   rejected: `invalid_exact_canton_merchant_mismatch`,
+   `invalid_exact_canton_instrument_id_mismatch`,
+   `invalid_exact_canton_amount_mismatch` or
+   `invalid_exact_canton_memo_mismatch`. The amount
    must be EQUAL, not merely sufficient — `exact` is the scheme's
    distinguishing property, and a payer who overpays has no refund path. The
    transfer's `x402.memo` must equal your `extra.memo` exactly — in both
