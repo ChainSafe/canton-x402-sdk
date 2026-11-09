@@ -51,13 +51,23 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
    npm install @chainsafe/x402-express @chainsafe/x402-client @chainsafe/x402-core
    ```
 
-4. **Find your network and asset**
+4. **Know what your facilitator settles (you do not have to configure it)**
 
-   Call `GET $FACILITATOR_URL/v2/supported` once — the `exact` entry
-   in its `kinds` array carries the `network` id this facilitator settles on
-   and `extra.asset.instrumentId.admin`, the DSO party that admins Amulet. You
-   pass both to the middleware below. The integration panel already has them,
-   as `NETWORK_ID` and `AMULET_ADMIN`. The
+   `GET $FACILITATOR_URL/v2/supported` says what a deployment settles: the
+   `network` id, and in `kinds[].extra` the synchronizer it submits to and the
+   instruments it validates, each with the registry party that admins it.
+
+   The middleware reads this for you. Leave `network` and `asset` out of your
+   requirements and it takes both from the facilitator — which means the party
+   your payments are validated against is read from the service doing the
+   validating, with no copy in your `.env` to go stale when a deployment moves.
+   It is fetched once and cached (see `supportedTtlMs` on `FacilitatorClient`),
+   not fetched per request.
+
+   Set them yourself when you want to pin them, or when your facilitator settles
+   more than one network or instrument — then naming one is required, because a
+   quote carries one price and a price means nothing without the instrument it
+   is denominated in. The
    [API reference](/api-reference#get-v2-supported) describes every field.
 
 5. **Gate a route**
@@ -80,7 +90,8 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
 <<< @/snippets/gate-express.ts#snippet
 
 Its settings are the integration panel's `.env`: `FACILITATOR_URL`,
-`FACILITATOR_API_KEY`, `NETWORK_ID`, `MERCHANT_PARTY` and `AMULET_ADMIN`.
+`FACILITATOR_API_KEY` and `MERCHANT_PARTY`. `NETWORK_ID` and `AMULET_ADMIN` are
+not among them — those come from `/v2/supported`, as step 4 describes.
 
 ### Take your first payment
 

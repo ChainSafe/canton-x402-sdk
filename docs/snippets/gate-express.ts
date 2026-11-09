@@ -10,11 +10,11 @@ import http from "node:http";
 import express from "express";
 import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "@chainsafe/x402-express";
-import { amuletAsset } from "@chainsafe/x402-core";
 
 // The .env the dashboard's integration panel gives you (API keys page).
-const NETWORK = process.env.NETWORK_ID!; // from GET /v2/supported (step 4)
-const DSO_PARTY = process.env.AMULET_ADMIN!; // from GET /v2/supported (step 4)
+// The network and the instrument are NOT in here: the middleware reads them
+// from the facilitator's own GET /v2/supported, so there is no copy of them to
+// keep true when a deployment changes.
 const PAY_TO = process.env.MERCHANT_PARTY!; // your payout party (step 1)
 const API_KEY = process.env.FACILITATOR_API_KEY!; // your API key (step 2)
 
@@ -29,9 +29,8 @@ app.use(
     facilitator,
     settle: true,
     requirements: {
-      network: NETWORK,
+      // Only what is the merchant's own business: who is paid, and how much.
       payTo: PAY_TO,
-      asset: amuletAsset(DSO_PARTY),
       amount: "500000000", // atomic units: 1 CC = 1e10, so this is 0.05 CC
       description: "Access to /paid",
     },
