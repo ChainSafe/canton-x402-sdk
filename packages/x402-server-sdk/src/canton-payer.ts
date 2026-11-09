@@ -1,8 +1,11 @@
 import {
-  isExpired,
-  isValidAmount,
-  requirementsHash,
+  ASSET_TRANSFER_METHOD,
+  EXACT_SCHEME_ID,
+  WIRE_DECIMALS,
+  atomicToLedger,
   signHash,
+  signatureToBase64,
+  gzipPreparedTransaction,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
   type InstrumentId,
@@ -11,7 +14,6 @@ import {
 import type { SDKInterface } from "@canton-network/wallet-sdk";
 import type { X402Payer } from "./payer.js";
 
-const EXACT_CANTON = "exact-canton";
 
 /** The external party's Ed25519 key material (client-side only). */
 export interface CantonPartyKey {
@@ -41,7 +43,7 @@ export interface CantonX402PayerOptions {
 }
 
 /**
- * Canton exact-canton payer over `@canton-network/wallet-sdk`: builds a Token
+ * Canton canton-exact payer over `@canton-network/wallet-sdk`: builds a Token
  * Standard transfer, prepares it (interactive submission), Ed25519-signs the hash,
  * and assembles the X-PAYMENT payload — without executing (the facilitator settles).
  */
@@ -50,9 +52,12 @@ export class CantonX402Payer implements X402Payer {
 
   supports(requirements: CantonPaymentRequirements): boolean {
     return (
-      requirements.scheme === EXACT_CANTON &&
+      requirements.scheme === EXACT_SCHEME_ID &&
       requirements.network === this.opts.network &&
-      this.registryFor(requirements.asset.instrumentId) !== undefined
+      // The payload declares the method this payer uses. createX402Fetch does
+      // not validate the 402 body, so the type alone does not guarantee it.
+      requirements.extra.assetTransferMethod === ASSET_TRANSFER_METHOD &&
+      this.registryFor(requirements.extra.instrumentId) !== undefined
     );
   }
 
@@ -65,32 +70,40 @@ export class CantonX402Payer implements X402Payer {
   }
 
   async authorize(requirements: CantonPaymentRequirements): Promise<CantonPaymentPayload> {
-    // Capability gate — supports() covers scheme + network + a configured registry.
-    const registryUrl = this.registryFor(requirements.asset.instrumentId);
+    // Capability gate — supports() covers scheme + network + transfer method + a configured registry.
+    const registryUrl = this.registryFor(requirements.extra.instrumentId);
     if (!this.supports(requirements) || !registryUrl) {
-      const { id, admin } = requirements.asset.instrumentId;
+      const { id, admin } = requirements.extra.instrumentId;
       throw new Error(
-        `x402: unsupported requirement (scheme "${requirements.scheme}", network "${requirements.network}", asset "${id}" admin "${admin}")`,
+        `x402: unsupported requirement (scheme "${requirements.scheme}", network "${requirements.network}", method "${requirements.extra.assetTransferMethod}", asset "${id}" admin "${admin}")`,
       );
     }
 
     // Per-request validity — not a capability, so checked here rather than in supports().
-    if (!isValidAmount(requirements.maxAmountRequired)) {
-      throw new Error(`x402: invalid amount "${requirements.maxAmountRequired}"`);
+    // Quoted in atomic units; the wallet SDK builds the transfer in Decimal.
+    const ledgerAmount = atomicToLedger(requirements.amount, WIRE_DECIMALS);
+    if (ledgerAmount === null) {
+      throw new Error(`x402: invalid amount "${requirements.amount}" (expected atomic units)`);
     }
-    if (isExpired(requirements.validBefore)) {
-      throw new Error(`x402: requirements expired at ${requirements.validBefore}`);
-    }
-
     const { sdk, key } = this.opts;
 
     // 1. Build the Token Standard transfer (routes the TransferFactory via the registry).
+    //    `expirationDate` becomes the transfer's `executeBefore`. Left unset the
+    //    wallet SDK picks 24 hours, which the quoted horizon is meant to replace
+    //    — and the verifier checks what the transfer carries, not what was quoted.
+    //    The memo travels under the scheme's own key: the SDK's `memo` parameter
+    //    writes `splice.lfdecentralizedtrust.org/reason`, a different one, so
+    //    both can be present without either standing in for the other.
     const [command, disclosed] = await sdk.token.transfer.create({
       sender: key.partyId,
       recipient: requirements.payTo,
-      amount: requirements.maxAmountRequired,
-      instrumentId: requirements.asset.instrumentId.id,
+      amount: ledgerAmount,
+      instrumentId: requirements.extra.instrumentId.id,
       registryUrl,
+      expirationDate: new Date(Date.now() + requirements.extra.executeBeforeSeconds * 1000),
+      ...(requirements.extra.memo === undefined
+        ? {}
+        : { meta: { values: { "x402.memo": requirements.extra.memo } } }),
     });
 
     // 2. Prepare (interactive submission) → prepared tx + hash to sign.
@@ -98,10 +111,10 @@ export class CantonX402Payer implements X402Payer {
       .prepare({ partyId: key.partyId, commands: command, disclosedContracts: disclosed })
       .toJSON();
 
-    // 3. Sign the hash. wallet-sdk hands base64; sign the same bytes as hex so the
-    //    facilitator's verifySignature (raw Ed25519 over the hash) accepts it.
-    const preparedTransactionHash = base64ToHex(response.preparedTransactionHash);
-    const partySignature = signHash(preparedTransactionHash, key.privateKey);
+    // 3. Sign the hash. wallet-sdk hands the hash as base64; the payload carries it
+    //    as hex and the signature as base64, which are the spec's encodings.
+    const preparedTxHash = base64ToHex(response.preparedTransactionHash);
+    const signature = signatureToBase64(signHash(preparedTxHash, key.privateKey));
 
     // 4. Assemble the payload the facilitator settles.
     return {
@@ -109,11 +122,15 @@ export class CantonX402Payer implements X402Payer {
       scheme: requirements.scheme,
       network: requirements.network,
       payload: {
+        // transfer.create built a TransferFactory_Transfer, the one method Canton's
+        // exact defines.
+        assetTransferMethod: ASSET_TRANSFER_METHOD,
         payer: key.partyId,
-        preparedTransaction: response.preparedTransaction,
-        preparedTransactionHash,
-        partySignature,
-        requirementsHash: requirementsHash(requirements),
+        // prepare hands back the protobuf as base64; the payload carries it
+        // gzipped, as the spec defines, which also keeps the header small.
+        preparedTransaction: gzipPreparedTransaction(Buffer.from(response.preparedTransaction, "base64")),
+        preparedTxHash,
+        signature,
         publicKey: key.publicKey,
         // Must be exactly what prepare used — the signature is bound to a hash
         // computed with this version, so the facilitator's execute must match it.

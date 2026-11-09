@@ -104,23 +104,27 @@ Canton implementation):
 
 ```ts
 interface X402Payer {
-  supports(requirements: CantonPaymentRequirements): boolean;   // scheme + network + asset
+  supports(requirements: CantonPaymentRequirements): boolean;   // scheme + network + transfer method + asset
   authorize(requirements: CantonPaymentRequirements): Promise<CantonPaymentPayload>;
 }
 ```
 
 `CantonX402Payer.authorize()`:
-- validates the requirement (amount, scheme, network, expiry) via `x402-core`;
+- validates the requirement (amount, scheme, network, `extra.assetTransferMethod`, expiry) via `x402-core`;
 - builds the Token Standard transfer (`sdk.token.transfer.create` — routes the
   transfer factory via the registry);
 - prepares it (`sdk.ledger.prepare` — interactive submission) to get the hash;
-- Ed25519-signs the hash with the party key (`x402-core`'s `signHash`);
-- assembles the payload (`requirementsHash`, required `publicKey`, required `hashingSchemeVersion`)
+- Ed25519-signs the hash with the party key (`x402-core`'s `signHash`, then
+  `signatureToBase64`, since the payload carries `signature` as base64 and
+  `preparedTxHash` as hex);
+- assembles the payload (`assetTransferMethod: "transfer-factory"`, the prepared transaction gzipped with `gzipPreparedTransaction`,
+  required `publicKey`, and the `hashingSchemeVersion` prepare used)
   **without executing** — facilitator derives fingerprint from `publicKey` (`fingerprintForPublicKey`; no `keyFingerprint` on the wire).
 
 `CantonX402Payer` is stateless: double-settle is prevented by the facilitator (it
-rejects a reused `nonce`) and Canton (it dedupes execute by a submissionId derived
-from the prepared-tx hash), so the payer doesn't track in-flight requests.
+rejects a reused memo, when the merchant quotes one) and by Canton itself: a
+replayed transfer names input holdings that are already spent, so the ledger
+refuses it. The payer doesn't track in-flight requests.
 
 ## Auto-pay fetch
 
@@ -150,8 +154,8 @@ re-readable — a value like a string, JSON, `Buffer`, or `URLSearchParams`, not
 ## Config presets
 
 `localnetConfig` / `devnetConfig` / `mainnetConfig` return `{ network, ledgerClientUrl, auth }`
-to feed `SDK.create`. LocalNet defaults the localhost ledger URL (network id is
-per-instance, so pass it); DevNet/MainNet fill the network id from `x402-core` and
+to feed `SDK.create`. LocalNet needs no arguments — it defaults the localhost ledger
+URL and `canton:localnet`; DevNet/MainNet fill the network id from `x402-core` and
 take your participant's ledger URL. Every field is overridable. **Registries are not
 here** — they're asset-specific (Amulet vs USDCx), so you pass them to `CantonX402Payer`.
 

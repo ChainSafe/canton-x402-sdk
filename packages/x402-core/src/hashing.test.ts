@@ -6,28 +6,33 @@ import type { CantonPaymentRequirements } from "./index";
 
 // Golden vector generated from the FACILITATOR's actual canonicalize.ts
 // (src/facilitator/canonicalize.ts) on this exact fixture. If either side's
-// canonicalization drifts, requirementsHash diverges and every /v2/verify fails —
-// so this test pins byte-for-byte parity. Regenerate ONLY if the facilitator's
+// canonicalization drifts, the two compute different hashes for the same
+// requirements — so this test pins byte-for-byte parity. Regenerate ONLY if the facilitator's
 // algorithm intentionally changes (and update the facilitator in lockstep).
+//
+// Last regenerated when `nonce` and `validBefore` were dropped. The hash covers every value in the object, so a new field
+// moves it even though the algorithm is untouched. `maxTimeoutSeconds` is the
+// first NUMBER in this vector, so it is also what pins number formatting
+// across the two canonicalizers.
 const REQUIREMENTS: CantonPaymentRequirements = {
-  scheme: "exact-canton",
-  network: "canton:1220be58c29e",
-  maxAmountRequired: "0.01",
-  asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+  scheme: "exact",
+  network: "canton:devnet",
+  amount: "100000000",
+  asset: "CC",
+  extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
   resource: "/api/resource",
-  nonce: "550e8400-e29b-41d4-a716-446655440000",
-  validBefore: "2026-01-01T00:00:00.000Z",
+  maxTimeoutSeconds: 60,
 };
 
 const GOLDEN_CANONICAL =
-  '{"asset":{"instrumentId":{"admin":"DSO::1220be58c29e","id":"Amulet"}},' +
-  '"maxAmountRequired":"0.01","network":"canton:1220be58c29e",' +
-  '"nonce":"550e8400-e29b-41d4-a716-446655440000","payTo":"merchant::1220dead",' +
-  '"resource":"/api/resource","scheme":"exact-canton",' +
-  '"validBefore":"2026-01-01T00:00:00.000Z"}';
+  '{"amount":"100000000","asset":"CC",' +
+  '"extra":{"assetTransferMethod":"transfer-factory","executeBeforeSeconds":120,' +
+  '"instrumentId":{"admin":"DSO::1220be58c29e","id":"Amulet"}},' +
+  '"maxTimeoutSeconds":60,"network":"canton:devnet",' +
+  '"payTo":"merchant::1220dead","resource":"/api/resource","scheme":"exact"}';
 
-const GOLDEN_HASH = "bdae45a239db3b771ee0ee5f70b4310f6b8894245666a3c7718b0a14674e0529";
+const GOLDEN_HASH = "e4ac6c7f84ce323b9083e81ab3685422c21b40da659d8f41ee104b021991834e";
 
 describe("requirements hashing — facilitator parity", () => {
   it("canonicalizes to the golden string (keys sorted, nested sorted)", () => {
@@ -40,14 +45,14 @@ describe("requirements hashing — facilitator parity", () => {
 
   it("is order-independent (field order in the object doesn't change the hash)", () => {
     const reordered: CantonPaymentRequirements = {
-      validBefore: REQUIREMENTS.validBefore,
+      extra: REQUIREMENTS.extra,
       scheme: REQUIREMENTS.scheme,
       resource: REQUIREMENTS.resource,
       payTo: REQUIREMENTS.payTo,
-      nonce: REQUIREMENTS.nonce,
       asset: REQUIREMENTS.asset,
       network: REQUIREMENTS.network,
-      maxAmountRequired: REQUIREMENTS.maxAmountRequired,
+      amount: REQUIREMENTS.amount,
+      maxTimeoutSeconds: REQUIREMENTS.maxTimeoutSeconds,
     };
     expect(requirementsHash(reordered)).toBe(GOLDEN_HASH);
   });

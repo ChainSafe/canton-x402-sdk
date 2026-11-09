@@ -22,8 +22,11 @@ import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "@chainsafe/x402-express";
 import {
   amuletAsset,
+  ledgerToAtomic,
+  WIRE_DECIMALS,
   DEVNET_DSO_PARTY,
   DEVNET_NETWORK,
+  LOCALNET_NETWORK,
   MAINNET_DSO_PARTY,
   MAINNET_NETWORK,
 } from "@chainsafe/x402-core";
@@ -31,26 +34,36 @@ import {
 // ─── Config ────────────────────────────────────────────────────────────────
 const NETWORK = (process.env.NETWORK ?? "localnet").toLowerCase();
 
-/** Network id + DSO party default from the chosen network; LocalNet must supply them. */
-function networkDefaults(): { networkId?: string; dso?: string } {
+/** Network id + DSO party default from the chosen network. */
+function networkDefaults(): { networkId: string; dso?: string } {
   if (NETWORK === "devnet") return { networkId: DEVNET_NETWORK, dso: DEVNET_DSO_PARTY };
   if (NETWORK === "mainnet") return { networkId: MAINNET_NETWORK, dso: MAINNET_DSO_PARTY };
-  return {}; // localnet: per-instance, pass NETWORK_ID + DSO_PARTY
+  // LocalNet allocates its DSO at runtime, so that one still has to be passed.
+  return { networkId: LOCALNET_NETWORK };
 }
 const def = networkDefaults();
-const NETWORK_ID = process.env.NETWORK_ID ?? def.networkId;
-const DSO_PARTY = process.env.DSO_PARTY ?? def.dso;
+const NETWORK_ID = process.env.NETWORK_ID?.trim() || def.networkId;
+const DSO_PARTY = process.env.DSO_PARTY?.trim() || def.dso;
 const BUREAU_PARTY = process.env.BUREAU_PARTY;
+// Priced in CC, because that is what a human sets. The wire is atomic units,
+// so this app converts before quoting.
 const PRICE_CC = process.env.PRICE_CC ?? "0.05";
 const PORT = Number(process.env.BUREAU_PORT ?? 4001);
 const FACILITATOR_URL = process.env.FACILITATOR_URL;
 const FACILITATOR_API_KEY = process.env.FACILITATOR_API_KEY;
 
-if (!NETWORK_ID || !DSO_PARTY || !BUREAU_PARTY || !FACILITATOR_URL) {
+// NETWORK_ID always has a default now, so it is not checked here.
+if (!DSO_PARTY || !BUREAU_PARTY || !FACILITATOR_URL) {
   throw new Error(
-    "credit-bureau: set NETWORK_ID, DSO_PARTY, BUREAU_PARTY and FACILITATOR_URL " +
+    "credit-bureau: set DSO_PARTY, BUREAU_PARTY and FACILITATOR_URL " +
       "(see examples/mortgage/.env.example).",
   );
+}
+
+const ASSET = amuletAsset(DSO_PARTY);
+const PRICE_ATOMIC = ledgerToAtomic(PRICE_CC, WIRE_DECIMALS);
+if (PRICE_ATOMIC === null) {
+  throw new Error(`credit-bureau: PRICE_CC "${PRICE_CC}" is not a decimal amount (≤10 places).`);
 }
 
 const facilitator = new FacilitatorClient(
@@ -101,8 +114,8 @@ app.use(
     requirements: {
       network: NETWORK_ID,
       payTo: BUREAU_PARTY,
-      asset: amuletAsset(DSO_PARTY),
-      amount: PRICE_CC,
+      asset: ASSET,
+      amount: PRICE_ATOMIC.toString(),
       description: "Credit-score pull",
     },
   }),
@@ -117,10 +130,11 @@ app.get("/v1/credit-score", (req, res) => {
   res.json({ ...creditReport(subject), payer: req.x402?.payer, cost: `${PRICE_CC} CC` });
 });
 
-// The x402 `X-PAYMENT` header carries the whole Canton payload (prepared-tx blob +
-// disclosed contracts), which far exceeds Node's default 16 KB header limit — so
-// create the server with a generous maxHeaderSize. Merchants gating Canton x402
-// routes must do this or the request is rejected with 431.
+// The x402 `X-PAYMENT` header carries the whole Canton payload (the gzipped
+// prepared tx with its disclosed contracts), about 10 KB: much of Node's default
+// 16 KB limit, which covers all of a request's headers together. So create the
+// server with a generous maxHeaderSize, or a paid request with a few more
+// headers is rejected with 431.
 createServer({ maxHeaderSize: 4 * 1024 * 1024 }, app).listen(PORT, () => {
   console.log(`[credit-bureau] listening on :${PORT} — network=${NETWORK}, price=${PRICE_CC} CC, payTo=${BUREAU_PARTY}`);
 });

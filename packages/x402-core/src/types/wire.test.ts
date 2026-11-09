@@ -21,28 +21,28 @@ import type {
 // changes incompatibly, the build fails here. The runtime assertions just give
 // vitest something to run and pin the enum values.
 describe("x402-core wire types", () => {
-  it("accepts a well-formed exact-canton request envelope", () => {
+  it("accepts a well-formed canton-exact request envelope", () => {
     const requirements: CantonPaymentRequirements = {
-      scheme: "exact-canton",
-      network: "canton:1220be58c29e",
-      maxAmountRequired: "0.01",
-      asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+      scheme: "exact",
+      network: "canton:devnet",
+      amount: "100000000",
+      asset: "CC",
+      extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
       payTo: "merchant::1220dead",
       resource: "/api/resource",
-      nonce: "550e8400-e29b-41d4-a716-446655440000",
-      validBefore: "2026-01-01T00:00:00.000Z",
+      maxTimeoutSeconds: 60,
     };
 
     const payload: CantonPaymentPayload = {
       x402Version: 2,
-      scheme: "exact-canton",
+      scheme: "exact",
       network: requirements.network,
       payload: {
+        assetTransferMethod: "transfer-factory",
         payer: "alice::1220beef",
         preparedTransaction: "cHJlcGFyZWQ=",
-        preparedTransactionHash: "deadbeef",
-        partySignature: "cafe",
-        requirementsHash: "0f1e2d",
+        preparedTxHash: "deadbeef",
+        signature: "cafe",
         publicKey: "cHVibGljS2V5",
         hashingSchemeVersion: HashingSchemeVersion.V2,
       },
@@ -57,7 +57,7 @@ describe("x402-core wire types", () => {
     const settleReq: SettleRequest = verifyReq;
 
     const supported: SupportedResponse = {
-      kinds: [{ x402Version: 2, scheme: "exact-canton", network: requirements.network }],
+      kinds: [{ x402Version: 2, scheme: "exact", network: requirements.network }],
     };
 
     const paymentRequired: CantonPaymentRequiredResponse = {
@@ -72,32 +72,31 @@ describe("x402-core wire types", () => {
     expect(paymentRequired.accepts[0]).toBe(requirements);
   });
 
-  it("expresses a second scheme's payload/asset/extra via the generics — no casts", () => {
-    // A future EVM→Canton scheme: different inner payload, asset descriptor, and
-    // `extra` bag. It instantiates the X402* generics directly; the fact that this
-    // block type-checks (no `as`/`as unknown as`) is the acceptance criterion.
+  it("expresses a second scheme's payload and extra via the generics — no casts", () => {
+    // A future EVM→Canton scheme: different inner payload and `extra` bag. It
+    // instantiates the X402* generics directly; the fact that this block
+    // type-checks (no `as`/`as unknown as`) is the acceptance criterion.
+    //
+    // `asset` is NOT a seam — the spec types it as a string for every scheme, so
+    // EVM puts a token address where we put a symbol. The chain is already in
+    // `network`. Anything an asset cannot say as a string goes in `extra`.
     interface EvmInner {
       ethereumTxHash: string;
       quoteId: string;
       quoteSignature: string;
     }
-    interface EvmAsset {
-      chainId: number;
-      tokenAddress: string;
-    }
     interface EvmExtra {
       cantonRecipient: string;
     }
 
-    const requirements: X402PaymentRequirements<EvmAsset, EvmExtra> = {
+    const requirements: X402PaymentRequirements<EvmExtra> = {
       scheme: "exact-evm-to-canton-cc",
       network: "eip155:1",
-      maxAmountRequired: "1000000",
-      asset: { chainId: 1, tokenAddress: "0xA0b8…" },
+      amount: "1000000",
+      asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       payTo: "merchant::1220dead",
       resource: "/api/resource",
-      nonce: "550e8400-e29b-41d4-a716-446655440000",
-      validBefore: "2026-01-01T00:00:00.000Z",
+      maxTimeoutSeconds: 60,
       extra: { cantonRecipient: "merchant::1220dead" },
     };
 
@@ -112,7 +111,7 @@ describe("x402-core wire types", () => {
       },
     };
 
-    const request: X402Request<EvmInner, EvmAsset, EvmExtra> = {
+    const request: X402Request<EvmInner, EvmExtra> = {
       x402Version: 2,
       paymentPayload: payload,
       paymentRequirements: requirements,
@@ -120,36 +119,35 @@ describe("x402-core wire types", () => {
 
     // Seams stay strongly typed on the way out — no widening to unknown.
     expect(request.paymentPayload.payload.ethereumTxHash).toBe("0xfeed");
-    expect(request.paymentRequirements.asset.chainId).toBe(1);
+    expect(request.paymentRequirements.asset).toBe("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
     expect(request.paymentRequirements.extra?.cantonRecipient).toBe("merchant::1220dead");
   });
 
   it("carries a mixed-scheme accepts[] in one 402 (union type argument)", () => {
     // A 402 may advertise several schemes at once. X402PaymentRequiredResponse is
     // generic over the accepts element, so a union of two schemes' requirements —
-    // with different asset/extra seams — assigns to one accepts[] with no casts.
+    // with different `extra` seams — assigns to one accepts[] with no casts.
     // That the value type-checks IS the acceptance criterion.
-    type BridgeRequirements = X402PaymentRequirements<{ chainId: number }, { cantonRecipient: string }>;
+    type BridgeRequirements = X402PaymentRequirements<{ cantonRecipient: string }>;
 
     const canton: CantonPaymentRequirements = {
-      scheme: "exact-canton",
-      network: "canton:1220be58c29e",
-      maxAmountRequired: "0.01",
-      asset: { instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+      scheme: "exact",
+      network: "canton:devnet",
+      amount: "100000000",
+      asset: "CC",
+      extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
       payTo: "merchant::1220dead",
       resource: "/api/resource",
-      nonce: "n-canton",
-      validBefore: "2999-01-01T00:00:00.000Z",
+      maxTimeoutSeconds: 60,
     };
     const bridge: BridgeRequirements = {
       scheme: "batch-settlement-canton",
       network: "eip155:1",
-      maxAmountRequired: "1000000",
-      asset: { chainId: 1 },
+      amount: "1000000",
+      asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       payTo: "0xC0ffee",
       resource: "/api/resource",
-      nonce: "n-bridge",
-      validBefore: "2999-01-01T00:00:00.000Z",
+      maxTimeoutSeconds: 60,
       extra: { cantonRecipient: "merchant::1220dead" },
     };
 
@@ -161,9 +159,9 @@ describe("x402-core wire types", () => {
 
     expect(offer.accepts).toHaveLength(2);
     // Fields shared by every scheme are reachable on the union without a cast.
-    expect(offer.accepts.map((a) => a.scheme)).toEqual(["exact-canton", "batch-settlement-canton"]);
+    expect(offer.accepts.map((a) => a.scheme)).toEqual(["exact", "batch-settlement-canton"]);
     expect(offer.accepts.every((a) => a.payTo.length > 0)).toBe(true);
-    // (Reaching a scheme-specific `asset`/`extra` needs a proper discriminant on
+    // (Reaching a scheme-specific `extra` needs a proper discriminant on
     // `scheme` — a literal union — which is the separate `Scheme`-open-union item.)
   });
 
@@ -176,7 +174,7 @@ describe("x402-core wire types", () => {
 
     const settleOk: SettleResponse = {
       success: true,
-      network: "canton:1220be58c29e",
+      network: "canton:devnet",
       transaction: "1220update",
       payer: "alice::1220beef",
     };

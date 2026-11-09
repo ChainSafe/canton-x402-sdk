@@ -7,8 +7,10 @@ import {
   matchesFingerprint,
   verifySignature,
   signHash,
+  signatureToBase64,
+  signatureFromBase64,
   isValidAmount,
-  isExpired,
+  isValidLedgerAmount,
   schemeNetworkMatches,
   isCantonNetworkId,
   parseCantonNetworkId,
@@ -78,61 +80,127 @@ describe("signHash", () => {
   });
 });
 
-describe("isValidAmount", () => {
-  it("accepts decimals up to 10 places", () => {
-    for (const ok of ["0", "1", "0.01", "10.1234567890"]) expect(isValidAmount(ok)).toBe(true);
+describe("signatureToBase64 / signatureFromBase64", () => {
+  // 0xfb 0xff 0xbf encodes as "+/+/", so this signature exercises both
+  // characters that differ between standard and URL-safe base64.
+  const sigBytes = new Uint8Array(64).map((_, i) => [0xfb, 0xff, 0xbf][i % 3]);
+  const sigHex = bytesToHex(sigBytes);
+  const sigB64 = signatureToBase64(sigHex);
+
+  it("encodes a hex signature as standard, padded base64", () => {
+    expect(sigB64).toBe(toB64(sigBytes));
+    expect(sigB64).toMatch(/^[A-Za-z0-9+/]{86}==$/);
+    expect(sigB64).toContain("+");
+    expect(sigB64).toContain("/");
   });
-  it("rejects malformed amounts", () => {
-    for (const bad of ["", "1.", ".5", "1.12345678901", "abc", "-1", "1e3", "1,5"])
-      expect(isValidAmount(bad)).toBe(false);
+  it("round-trips", () => {
+    expect(signatureFromBase64(sigB64)).toBe(sigHex);
+  });
+  it("refuses the hex form, which is valid base64 of the wrong length", () => {
+    expect(atob(sigHex)).toHaveLength(96);
+    expect(signatureFromBase64(sigHex)).toBeNull();
+  });
+  it("refuses any other length", () => {
+    expect(signatureFromBase64(toB64(sigBytes.slice(0, 63)))).toBeNull();
+    expect(signatureFromBase64(toB64(new Uint8Array(65)))).toBeNull();
+    expect(signatureFromBase64("")).toBeNull();
+  });
+  it("refuses megabytes without throwing", () => {
+    expect(signatureFromBase64("A".repeat(5 * 1024 * 1024))).toBeNull();
+  });
+  it("refuses non-canonical encodings of the same bytes", () => {
+    expect(signatureFromBase64(sigB64.replace(/\+/g, "-").replace(/\//g, "_"))).toBeNull();
+    expect(signatureFromBase64(sigB64.slice(0, -2))).toBeNull();
+    expect(signatureFromBase64(` ${sigB64}`)).toBeNull();
+    expect(signatureFromBase64(`${sigB64}\n`)).toBeNull();
+    // The data character before "==" carries four padding bits; setting one
+    // still decodes to the same bytes.
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const i = sigB64.length - 3;
+    const padded = sigB64.slice(0, i) + alphabet[alphabet.indexOf(sigB64[i]) ^ 1] + sigB64.slice(i + 1);
+    expect(atob(padded)).toBe(atob(sigB64));
+    expect(signatureFromBase64(padded)).toBeNull();
   });
 });
 
-describe("isExpired", () => {
-  const now = Date.parse("2026-01-01T00:00:00.000Z");
-  it("past / at-deadline / unparseable are expired; future is not", () => {
-    expect(isExpired("2025-12-31T23:59:59.000Z", now)).toBe(true);
-    expect(isExpired("2026-01-01T00:00:00.000Z", now)).toBe(true); // <= now
-    expect(isExpired("2026-01-01T00:00:01.000Z", now)).toBe(false);
-    expect(isExpired("not-a-date", now)).toBe(true);
+describe("isValidAmount — the quoted, atomic form", () => {
+  it("accepts a non-negative integer string", () => {
+    for (const ok of ["0", "1", "500000000", "123456789012345678901234567890"])
+      expect(isValidAmount(ok)).toBe(true);
+  });
+  it("rejects a decimal — that is the ledger's unit, not the quote's", () => {
+    for (const bad of ["0.01", "10.1234567890", "1."]) expect(isValidAmount(bad)).toBe(false);
+  });
+  it("rejects malformed amounts", () => {
+    for (const bad of ["", ".5", "abc", "-1", "1e3", "1,5", " 1 "])
+      expect(isValidAmount(bad)).toBe(false);
+  });
+
+  it("is bounded at Daml's precision, so BigInt never sees a huge input", () => {
+    // BigInt parsing is superlinear and this runs on unauthenticated input.
+    // 38 digits is Numeric's precision, so nothing longer can exist on ledger.
+    expect(isValidAmount("9".repeat(38))).toBe(true);
+    expect(isValidAmount("9".repeat(39))).toBe(false);
+    expect(isValidAmount("9".repeat(3_000_000))).toBe(false);
+  });
+});
+
+describe("isValidLedgerAmount — the on-ledger Decimal", () => {
+  it("accepts decimals up to 10 places", () => {
+    for (const ok of ["0", "1", "0.01", "10.1234567890"]) expect(isValidLedgerAmount(ok)).toBe(true);
+  });
+  it("rejects malformed amounts", () => {
+    for (const bad of ["", "1.", ".5", "1.12345678901", "abc", "-1", "1e3", "1,5"])
+      expect(isValidLedgerAmount(bad)).toBe(false);
+  });
+
+  it("bounds the integer part too, not just the fraction", () => {
+    // 28 integer digits + 10 fractional = Numeric 10's 38 places.
+    expect(isValidLedgerAmount("9".repeat(28) + ".5")).toBe(true);
+    expect(isValidLedgerAmount("9".repeat(29) + ".5")).toBe(false);
+    expect(isValidLedgerAmount("9".repeat(3_000_000))).toBe(false);
   });
 });
 
 describe("canton network-id guard", () => {
   it("accepts canton:… and rejects other CAIP-2 / non-strings", () => {
+    expect(isCantonNetworkId("canton:devnet")).toBe(true);
+    expect(isCantonNetworkId("canton:mainnet")).toBe(true);
+    // Shape only. The guard does not know which names are registered —
+    // that the network is one this deployment settles is the verifier's job.
     expect(isCantonNetworkId("canton:1220ab")).toBe(true);
     expect(isCantonNetworkId("eip155:1")).toBe(false);
     expect(isCantonNetworkId("canton:")).toBe(false);
     expect(isCantonNetworkId(123)).toBe(false);
-    expect(parseCantonNetworkId("canton:1220ab")).toBe("canton:1220ab");
+    expect(parseCantonNetworkId("canton:devnet")).toBe("canton:devnet");
     expect(() => parseCantonNetworkId("eip155:1")).toThrow();
   });
 });
 
 describe("shape guards + scheme/network match", () => {
   const requirements = {
-    scheme: "exact-canton",
-    network: "canton:1220x",
-    maxAmountRequired: "0.01",
+    scheme: "exact",
+    network: "canton:devnet",
+    amount: "100000000",
     payTo: "merchant::1220x",
     resource: "/r",
-    nonce: "n",
-    validBefore: "2026-01-01T00:00:00.000Z",
-    asset: { instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
+    maxTimeoutSeconds: 60,
+    asset: "CC",
+    extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   } as CantonPaymentRequirements;
   const inner = {
+    assetTransferMethod: "transfer-factory",
     payer: "alice::1220x",
     preparedTransaction: "b",
-    preparedTransactionHash: "h",
-    partySignature: "s",
-    requirementsHash: "rh",
+    preparedTxHash: "h",
+    signature: "s",
     publicKey: "cHVibGljS2V5",
     hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
   };
   const payload = {
     x402Version: 2,
-    scheme: "exact-canton",
-    network: "canton:1220x",
+    scheme: "exact",
+    network: "canton:devnet",
     payload: inner,
   } as unknown as CantonPaymentPayload;
 
@@ -141,21 +209,22 @@ describe("shape guards + scheme/network match", () => {
     expect(isCantonPaymentRequirements({})).toBe(false);
     expect(isCantonPaymentInner(inner)).toBe(true);
     expect(isCantonPaymentInner({})).toBe(false);
-    // publicKey + hashingSchemeVersion are required fields — missing either is rejected.
+    // publicKey is required; hashingSchemeVersion is optional (the spec reads an
+    // absent one as V2).
     expect(isCantonPaymentInner({ ...inner, publicKey: undefined })).toBe(false);
-    expect(isCantonPaymentInner({ ...inner, hashingSchemeVersion: undefined })).toBe(false);
+    expect(isCantonPaymentInner({ ...inner, hashingSchemeVersion: undefined })).toBe(true);
     expect(isX402PaymentPayload(payload)).toBe(true);
     // Loose: accepts any non-empty scheme (per-scheme inner validated elsewhere).
     expect(
       isX402PaymentPayload({
         x402Version: 2,
         scheme: "batch-settlement-canton",
-        network: "canton:1220x",
+        network: "canton:devnet",
         payload: { ethereumTxHash: "0x" },
       }),
     ).toBe(true);
-    expect(isX402PaymentPayload({ x402Version: 2, scheme: "", network: "canton:1220x", payload: {} })).toBe(false);
-    expect(isX402PaymentPayload({ x402Version: 1, scheme: "exact-canton", network: "n", payload: {} })).toBe(false);
+    expect(isX402PaymentPayload({ x402Version: 2, scheme: "", network: "canton:devnet", payload: {} })).toBe(false);
+    expect(isX402PaymentPayload({ x402Version: 1, scheme: "exact", network: "n", payload: {} })).toBe(false);
     expect(isX402PaymentPayload({})).toBe(false);
     expect(isCantonVerifyRequest({ x402Version: 2, paymentPayload: payload, paymentRequirements: requirements })).toBe(true);
     expect(isCantonVerifyRequest({ x402Version: 2 })).toBe(false);

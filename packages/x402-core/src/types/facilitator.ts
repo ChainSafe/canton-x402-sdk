@@ -4,26 +4,22 @@ import {
   CantonPaymentRequirementsSchema,
   X402PaymentRequirementsEnvelopeSchema,
 } from "./requirements";
-import type { AssetSpec, NetworkId, X402Version } from "./common";
+import type { NetworkId, X402Version } from "./common";
 import type { CantonPaymentInner, X402PaymentPayload } from "./payment";
 import type { X402PaymentRequirements } from "./requirements";
 
 /**
  * Generic request body for POST /v2/verify and /v2/settle — payload + requirements,
  * parameterized by the same scheme seams. Generic → type-only; the concrete
- * exact-canton request below is schema-first.
+ * canton-exact request below is schema-first.
  */
-export interface X402Request<
-  TInner = CantonPaymentInner,
-  TAsset = AssetSpec,
-  TExtra = Record<string, unknown>,
-> {
+export interface X402Request<TInner = CantonPaymentInner, TExtra = Record<string, unknown>> {
   x402Version: X402Version;
   paymentPayload: X402PaymentPayload<TInner>;
-  paymentRequirements: X402PaymentRequirements<TAsset, TExtra>;
+  paymentRequirements: X402PaymentRequirements<TExtra>;
 }
 
-/** exact-canton verify/settle request. Settle takes the identical envelope. */
+/** canton-exact verify/settle request. Settle takes the identical envelope. */
 export const VerifyRequestSchema = v.object({
   x402Version: v.literal(2),
   paymentPayload: CantonPaymentPayloadSchema,
@@ -32,7 +28,7 @@ export const VerifyRequestSchema = v.object({
 export type VerifyRequest = v.InferOutput<typeof VerifyRequestSchema>;
 export type SettleRequest = VerifyRequest;
 
-/** exact-canton verify/settle request guard + parser (schema-derived, concrete). */
+/** canton-exact verify/settle request guard + parser (schema-derived, concrete). */
 export function isCantonVerifyRequest(x: unknown): x is VerifyRequest {
   return v.is(VerifyRequestSchema, x);
 }
@@ -45,7 +41,7 @@ export function parseCantonVerifyRequest(input: unknown): VerifyRequest {
  * only — x402 v2, a payment envelope, and the requirements fields shared by every
  * scheme. Scheme-agnostic: a multi-scheme dispatcher validates/parses the envelope
  * with this, then the per-scheme verifier checks the concrete inner (use
- * {@link isCantonVerifyRequest} for exact-canton).
+ * {@link isCantonVerifyRequest} for canton-exact).
  */
 const X402RequestEnvelopeSchema = v.looseObject({
   x402Version: v.literal(2),
@@ -69,25 +65,39 @@ export function parseX402Request(input: unknown): X402Request<unknown> {
  */
 export interface SchemeVerifier {
   readonly schemeId: string;
-  /** The concrete network this verifier is bound to, e.g. `canton:<synchronizer>`. */
+  /** The concrete network this verifier is bound to, e.g. `canton:devnet`. */
   readonly networkId: NetworkId;
   verify(
     payload: X402PaymentPayload<unknown>,
     requirements: X402PaymentRequirements<unknown>,
-  ): VerifyResponse;
+  ): Promise<VerifyResponse>;
 }
 
 export const VerifyInvalidReasonSchema = v.picklist([
   "scheme_mismatch",
   "network_mismatch",
-  "requirements_expired",
+  /**
+   * Nothing produces this any more: the payload carries no `requirementsHash`
+   * to check. Kept pending #98, which reworks these codes against the spec's
+   * own `invalid_exact_canton_*` vocabulary — not because anything still emits
+   * it. `requirements_expired` went the other way, with the field it named.
+   */
   "requirements_hash_mismatch",
   "bad_fingerprint",
   "bad_signature",
+  "prepared_transaction_hash_mismatch",
+  "invalid_prepared_transaction_structure",
   "nonce_replayed",
   "missing_public_key",
   /** The signed prepared transaction does not transfer what the requirements demand. */
   "transfer_mismatch",
+  /**
+   * The signed transfer's own `executeBefore` has passed, is about to, or is
+   * missing — so it cannot settle, and the client should prepare another. The
+   * only expiry left: a quote no longer goes stale on its own, because the
+   * deadline that decides is the one inside what the payer signed.
+   */
+  "transfer_expired",
   "internal_error",
 ]);
 export type VerifyInvalidReason = v.InferOutput<typeof VerifyInvalidReasonSchema>;
@@ -122,7 +132,7 @@ export const SettleErrorReasonSchema = v.picklist([
   "unauthorized",
   "scheme_mismatch",
   "network_mismatch",
-  "requirements_expired",
+  /** As in {@link VerifyInvalidReasonSchema}: unproducible, kept pending #98. */
   "requirements_hash_mismatch",
   "bad_fingerprint",
   "bad_signature",

@@ -53,7 +53,7 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
 
 4. **Find your network and asset**
 
-   Call `GET $FACILITATOR_URL/v2/supported` once — the `exact-canton` entry
+   Call `GET $FACILITATOR_URL/v2/supported` once — the `exact` entry
    in its `kinds` array carries the `network` id this facilitator settles on
    and `extra.asset.instrumentId.admin`, the DSO party that admins Amulet. You
    pass both to the middleware below. The integration panel already has them,
@@ -69,9 +69,11 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
 
 6. **Raise your server's max header size**
 
-   The `X-PAYMENT` header runs to tens of KB — past Node's ~16 KB default — so
-   create the server with a larger `maxHeaderSize`, or the paid retry dies
-   with `431 Request Header Fields Too Large` before your handler ever runs.
+   The `X-PAYMENT` header runs to about 10 KB for a typical transfer — much of
+   Node's ~16 KB default, which covers all of a request's headers together — so
+   create the server with a larger `maxHeaderSize`, or a paid retry with a few
+   more headers dies with `431 Request Header Fields Too Large` before your
+   handler ever runs.
 
 ### Putting it together
 

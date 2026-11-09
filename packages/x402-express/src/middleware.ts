@@ -1,11 +1,14 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
-import { randomUUID } from "node:crypto";
 import {
+  ASSET_TRANSFER_METHOD,
+  assetSymbol,
+  isCantonPaymentRequirements,
   isValidAmount,
   decodePaymentHeader,
   type AssetSpec,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
+  type X402PaymentRequirements,
   type SettleResponse,
   type VerifyResponse,
 } from "@chainsafe/x402-core";
@@ -15,40 +18,58 @@ import { FacilitatorError, type FacilitatorClient } from "@chainsafe/x402-client
 export type Resolvable<T> = T | ((req: Request) => T | Promise<T>);
 
 /**
- * Declarative requirements: the middleware fills in `validBefore` (and `nonce`,
- * unless you supply a generator) and applies defaults. Fields may be a fixed value
- * or a per-request resolver.
+ * Declarative requirements: the middleware applies the defaults. Fields may be a
+ * fixed value or a per-request resolver.
  */
 export interface RequirementsSpec {
   /** Merchant party receiving payment. */
   payTo: Resolvable<string>;
   /** Asset to charge in. */
   asset: Resolvable<AssetSpec>;
-  /** scheme+network id, e.g. `canton:1220…`. */
+  /** Network id — on Canton a `canton:<name>` from x402-core's networks. */
   network: Resolvable<string>;
-  /** Price (decimal string). */
+  /**
+   * Price in **atomic units**, as an integer string: 1 CC = 1e10, so
+   * `"500000000"` is 0.05 CC. The same unit the wire carries — the middleware
+   * does not convert, so a quote means the same thing here as in a
+   * {@link RequirementsBuilder} or in an echoed requirement.
+   */
   amount: Resolvable<string>;
-  /** Scheme id. Default `exact-canton`. */
+  /** Scheme id. Default `exact`. */
   scheme?: Resolvable<string>;
   /** Resource URL. Default: the request's absolute URL. */
   resource?: Resolvable<string>;
   /** Human description. Default: `Access to <path>`. */
   description?: Resolvable<string>;
-  /** Validity window in seconds for the built `validBefore`. Default 300. */
-  validForSeconds?: Resolvable<number>;
   /**
-   * Generate (and, if you want, persist) the challenge nonce for this request —
-   * e.g. record it merchant-side for reconciliation. Called once per challenge, so
-   * it MUST return a fresh, unique value each time. Omit to let the middleware
-   * generate a random UUID. (Function-only by design: a static value would reuse
-   * one nonce across challenges.)
+   * Seconds the client has to complete payment. Default 60. Advisory: nothing
+   * refuses a payment for exceeding it.
    */
-  nonce?: (req: Request) => string | Promise<string>;
+  maxTimeoutSeconds?: Resolvable<number>;
+  /**
+   * Seconds of life the payer gives the transfer it signs. Default 120. Unlike
+   * `maxTimeoutSeconds` this one reaches the ledger, as the transfer's
+   * `executeBefore`, and the verifier refuses a transfer already inside its
+   * last few seconds. It is the only deadline left in the protocol.
+   */
+  executeBeforeSeconds?: Resolvable<number>;
+  /**
+   * Generate (and, if you want, persist) the merchant reference for this
+   * challenge — an order or payment id to reconcile against. Called once per
+   * challenge, so it SHOULD return a value that identifies this one. Quoting a
+   * memo BINDS it: the payer must sign the identical value or verification
+   * refuses the payment, which is what makes it usable as a reconciliation key
+   * and as a replay key. UTF-8, at most 256 bytes. Omit it to quote none.
+   *
+   * (Function-only by design: a static value would tag every payment alike,
+   * which is the one thing reference data must not do.)
+   */
+  memo?: (req: Request) => string | Promise<string>;
 }
 
 /**
- * Full control: build the entire `PaymentRequirements` per request (you own
- * `nonce` + `validBefore`).
+ * Full control: build the entire `PaymentRequirements` per request, `extra`
+ * included.
  */
 export type RequirementsBuilder = (
   req: Request,
@@ -62,6 +83,30 @@ export interface PaymentRequiredOptions {
   settle?: boolean;
   /** How to produce the PaymentRequirements: a declarative spec, or a full builder. */
   requirements: RequirementsSpec | RequirementsBuilder;
+  /**
+   * Your own say on a paid request, run after the echoed requirements pass
+   * merchant policy and before verify — so before any settle. Return a short
+   * reason to refuse it (answered as a `402` carrying that code), or nothing
+   * to let it through.
+   *
+   * This is where merchant state goes, because the middleware has none. It
+   * rebuilds the quote on every request, so it can tell you the payer echoed
+   * *a* memo, but not whether it is one you issued; it knows the price it
+   * quotes now, but not whether that order is still open. Those are questions
+   * only your records answer:
+   *
+   * ```ts
+   * checkPayment: async ({ requirements }) => {
+   *   const order = await orders.findByRef(requirements.extra.memo);
+   *   if (!order) return "policy_memo_unknown";
+   *   if (order.status !== "awaiting-payment") return "policy_order_closed";
+   * },
+   * ```
+   */
+  checkPayment?: (
+    payment: { payload: CantonPaymentPayload; requirements: CantonPaymentRequirements },
+    req: Request,
+  ) => string | undefined | Promise<string | undefined>;
   /** Extra `accepts[]` entries for the 402 body (e.g. an alternate scheme). */
   additionalAccepts?: (req: Request) => CantonPaymentRequirements[] | Promise<CantonPaymentRequirements[]>;
   /**
@@ -103,8 +148,9 @@ declare global {
   }
 }
 
-const DEFAULT_SCHEME = "exact-canton";
-const DEFAULT_VALIDITY_SECONDS = 300;
+const DEFAULT_SCHEME = "exact";
+const DEFAULT_MAX_TIMEOUT_SECONDS = 60;
+const DEFAULT_EXECUTE_BEFORE_SECONDS = 120;
 
 /** Internal control-flow signal: reject the request with a 402, echoing `requirements`. */
 class PaymentRejection extends Error {
@@ -133,10 +179,10 @@ class PaymentRejection extends Error {
  *   facilitator,
  *   settle: true,
  *   requirements: {
- *     network: "canton:1220…",
+ *     network: "canton:devnet",
  *     payTo: "merchant::1220…",
  *     asset: { instrumentId: { id: "Amulet", admin: "DSO::1220…" } },
- *     amount: "0.05", // or a per-request (req) => "0.05"
+ *     amount: "500000000", // atomic units — 1 CC = 1e10, so this is 0.05 CC
  *   },
  * }));
  */
@@ -148,14 +194,18 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
     let extraAccepts: CantonPaymentRequirements[] = [];
     try {
       const fresh = await buildRequirements(req, options);
-      extraAccepts = options.additionalAccepts ? await options.additionalAccepts(req) : [];
+      // Advertised in the same 402, so held to the same rule.
+      extraAccepts = options.additionalAccepts
+        ? (await options.additionalAccepts(req)).map(assertAtomicAmount)
+        : [];
 
       const header = req.header("X-PAYMENT");
       if (!header) throw new PaymentRejection("payment_required", fresh);
 
-      // The X-PAYMENT envelope carries the requirements the payload was signed
-      // against; verify against those (their requirementsHash binds to a specific
-      // nonce + validBefore), after checking them against merchant policy.
+      // The X-PAYMENT envelope carries the requirements the payload was built
+      // against; verify against those, after checking them against merchant
+      // policy. Nothing in the payload binds them on its own — what binds is
+      // the signed transfer the verifier decodes and compares to them.
       let payload: CantonPaymentPayload;
       let requirements: CantonPaymentRequirements;
       try {
@@ -167,10 +217,15 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       const policyError = validateEchoedRequirements(requirements, fresh);
       if (policyError) throw new PaymentRejection(policyError, fresh);
 
-      // On any rejection, advertise `fresh` (this request's current terms) — never
-      // the client's echoed requirements. The echoed copy differs from `fresh` in
-      // nonce + validBefore, so returning it would hand a retrying agent back a
-      // dead challenge (a replayed/expired nonce) and trap it in a loop.
+      // The merchant's own checks, on everything the payer sent. Placed here so
+      // a refusal costs no verify and, above all, no settle.
+      const refusal = await options.checkPayment?.({ payload, requirements }, req);
+      if (refusal) throw new PaymentRejection(refusal, fresh);
+
+      // On any rejection, advertise `fresh` (this request's current terms) —
+      // never the client's echoed requirements. Those are what the client just
+      // failed on, and a merchant that issues a memo per challenge would be
+      // handing a retrying agent back a reference it has already used.
       const verify = await facilitator.verify(payload, requirements);
       if (!verify.isValid) {
         const detail = verify.extensions?.detail;
@@ -225,26 +280,50 @@ async function buildRequirements(
   options: PaymentRequiredOptions,
 ): Promise<CantonPaymentRequirements> {
   const source = options.requirements;
-  if (typeof source === "function") return source(req);
+  if (typeof source === "function") return assertAtomicAmount(await source(req));
 
   const amount = await resolve(source.amount, req);
-  if (!isValidAmount(amount)) {
-    throw new Error(`paymentRequired: amount "${amount}" is not a valid decimal amount`);
-  }
-  const validForSeconds = source.validForSeconds
-    ? await resolve(source.validForSeconds, req)
-    : DEFAULT_VALIDITY_SECONDS;
-  return {
+  const instrument = await resolve(source.asset, req);
+  return assertAtomicAmount({
     scheme: await resolve(source.scheme ?? DEFAULT_SCHEME, req),
     network: await resolve(source.network, req),
-    maxAmountRequired: amount,
-    asset: await resolve(source.asset, req),
+    amount,
+    // The merchant declares the instrument; the spec's `asset` is only a
+    // symbol, so the full `{admin, id}` travels where a payer can read it.
+    asset: assetSymbol(instrument.instrumentId),
+    extra: {
+      assetTransferMethod: ASSET_TRANSFER_METHOD,
+      instrumentId: instrument.instrumentId,
+      executeBeforeSeconds: source.executeBeforeSeconds
+        ? await resolve(source.executeBeforeSeconds, req)
+        : DEFAULT_EXECUTE_BEFORE_SECONDS,
+      ...(source.memo ? { memo: await source.memo(req) } : {}),
+    },
     payTo: await resolve(source.payTo, req),
     resource: source.resource ? await resolve(source.resource, req) : absoluteUrl(req),
     description: source.description ? await resolve(source.description, req) : `Access to ${req.path}`,
-    nonce: source.nonce ? await source.nonce(req) : randomUUID(),
-    validBefore: new Date(Date.now() + validForSeconds * 1000).toISOString(),
-  };
+    maxTimeoutSeconds: source.maxTimeoutSeconds
+      ? await resolve(source.maxTimeoutSeconds, req)
+      : DEFAULT_MAX_TIMEOUT_SECONDS,
+  });
+}
+
+/**
+ * Every requirement this middleware advertises must carry an atomic amount.
+ *
+ * Checked here rather than in the declarative branch alone: a builder and
+ * `additionalAccepts` produce requirements too, and a decimal from either used
+ * to reach the 402 unchecked — then `BigInt(policy.amount)` threw on the paid
+ * retry and answered 500. Failing where the requirement is built names the
+ * merchant's own config instead.
+ */
+function assertAtomicAmount(r: CantonPaymentRequirements): CantonPaymentRequirements {
+  if (!isValidAmount(r.amount)) {
+    throw new Error(
+      `paymentRequired: amount "${r.amount}" is not an integer string of atomic units`,
+    );
+  }
+  return r;
 }
 
 /** Resolve a {@link Resolvable}: call it with the request if it's a function, else return it. */
@@ -254,24 +333,36 @@ async function resolve<T>(value: Resolvable<T>, req: Request): Promise<T> {
 
 /** Ensure client-echoed requirements are acceptable per merchant policy. */
 function validateEchoedRequirements(
-  echoed: CantonPaymentRequirements,
+  echoed: X402PaymentRequirements<unknown>,
   policy: CantonPaymentRequirements,
 ): string | null {
+  // The header is only ENVELOPE-validated on decode, and the envelope is a
+  // looseObject that does not require `extra`. decodePaymentHeader types the
+  // result optimistically as canton-exact; nothing has checked it. Narrow
+  // before reading a field, or a header without `extra` throws a TypeError and
+  // answers 500 instead of 402 — attacker-controlled input choosing our status
+  // code. This is also why the parameter is the envelope type, not the
+  // concrete one: the old signature asserted a shape no one had verified.
+  if (!isCantonPaymentRequirements(echoed)) return "policy_requirements_invalid";
   if (echoed.scheme !== policy.scheme) return "policy_scheme";
   if (echoed.network !== policy.network) return "policy_network";
   if (echoed.payTo !== policy.payTo) return "policy_payTo";
   // Bind the payment to THIS resource: without it, a payment minted for path A
   // (matching price/payTo/asset) could be replayed against path B.
   if (echoed.resource !== policy.resource) return "policy_resource";
-  if (echoed.asset.instrumentId.id !== policy.asset.instrumentId.id) return "policy_asset";
-  if (echoed.asset.instrumentId.admin !== policy.asset.instrumentId.admin) return "policy_asset";
-  // Validate the amount's FORMAT before comparing: Number("abc") is NaN and
-  // Number("Infinity") is Infinity, and both make the "<" test false — so a
-  // malformed amount would otherwise slip past the underpricing check.
-  if (!isValidAmount(echoed.maxAmountRequired)) return "policy_amount_invalid";
-  // The merchant priced this request; an echoed requirement must not undercut it.
-  if (Number(echoed.maxAmountRequired) < Number(policy.maxAmountRequired)) return "policy_underpriced";
-  if (Date.parse(echoed.validBefore) <= Date.now()) return "requirements_expired";
+  // The instrument, not the symbol: `asset` alone cannot say which registry
+  // issued it, so comparing symbols would admit a look-alike from another.
+  if (echoed.extra.instrumentId.id !== policy.extra.instrumentId.id) return "policy_asset";
+  if (echoed.extra.instrumentId.admin !== policy.extra.instrumentId.admin) return "policy_asset";
+  if (echoed.asset !== policy.asset) return "policy_asset";
+  // Validate the FORMAT before comparing. BigInt throws on "abc" — a 500 where
+  // a 402 belongs — and happily reads "0x10" as 16 and "" as 0, so a value the
+  // merchant never quoted would compare as a number.
+  if (!isValidAmount(echoed.amount)) return "policy_amount_invalid";
+  // BigInt, not Number: atomic units are 1e10 larger than the token amount, so
+  // anything over ~900k CC exceeds Number.MAX_SAFE_INTEGER and two different
+  // prices start comparing equal.
+  if (BigInt(echoed.amount) < BigInt(policy.amount)) return "policy_underpriced";
   return null;
 }
 

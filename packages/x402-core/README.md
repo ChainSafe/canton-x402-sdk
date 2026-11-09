@@ -16,12 +16,13 @@ npm install @chainsafe/x402-core
 
 ## What's in it
 
-- **Wire types** for the exact-canton x402 scheme — `CantonPaymentPayload`,
+- **Wire types** for the canton-exact x402 scheme — `CantonPaymentPayload`,
   `CantonPaymentRequirements`, and the verify / settle / supported request and
   response shapes (validated with [valibot](https://valibot.dev)).
-- **`requirementsHash()`** — the canonical hash that binds a payment to its
-  `PaymentRequirements`.
-- **Verify primitives** — `createExactCantonVerifier()` plus Ed25519 signature
+- **`requirementsHash()`** — the SHA-256 of a `PaymentRequirements`' RFC 8785
+  canonical form, a stable id for one requirements object. The payment payload
+  does not carry it.
+- **Verify primitives** — `createCantonExactVerifier()` plus Ed25519 signature
   and party-fingerprint helpers.
 - **Network presets & guards** — devnet/mainnet ids and validators such as
   `isX402Request` / `isCantonPaymentRequirements`.

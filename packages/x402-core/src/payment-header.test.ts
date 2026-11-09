@@ -4,28 +4,28 @@ import type { CantonPaymentPayload, CantonPaymentRequirements } from "./index";
 
 const payload: CantonPaymentPayload = {
   x402Version: 2,
-  scheme: "exact-canton",
-  network: "canton:1220x",
+  scheme: "exact",
+  network: "canton:devnet",
   payload: {
+    assetTransferMethod: "transfer-factory",
     payer: "alice::1220x",
     preparedTransaction: "b",
-    preparedTransactionHash: "h",
-    partySignature: "s",
-    requirementsHash: "rh",
+    preparedTxHash: "h",
+    signature: "s",
     publicKey: "pk",
     hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
   },
 };
 
 const requirements: CantonPaymentRequirements = {
-  scheme: "exact-canton",
-  network: "canton:1220x",
-  maxAmountRequired: "0.05",
-  asset: { instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
+  scheme: "exact",
+  network: "canton:devnet",
+  amount: "500000000",
+  asset: "CC",
+  extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   payTo: "merchant::1220x",
   resource: "/r",
-  nonce: "n",
-  validBefore: "2999-01-01T00:00:00.000Z",
+  maxTimeoutSeconds: 60,
 };
 
 describe("X-PAYMENT codec", () => {
@@ -35,10 +35,10 @@ describe("X-PAYMENT codec", () => {
     expect(decoded.requirements).toEqual(requirements);
   });
 
-  it("decodes any scheme's envelope — concrete inner/asset validation is the verifier's job", () => {
+  it("decodes any scheme's envelope — concrete inner validation is the verifier's job", () => {
     // Option A: decode validates the envelope (x402 shape + universal requirements),
-    // NOT the exact-canton inner. A well-formed envelope carrying another scheme's
-    // inner + asset must decode; the per-scheme verifier rejects it downstream.
+    // NOT the canton-exact inner. A well-formed envelope carrying another scheme's
+    // inner must decode; the per-scheme verifier rejects it downstream.
     const foreign = {
       payment: {
         x402Version: 2,
@@ -49,11 +49,10 @@ describe("X-PAYMENT codec", () => {
       requirements: {
         scheme: "batch-settlement-canton",
         network: "eip155:1",
-        maxAmountRequired: "1000000",
+        amount: "1000000",
         payTo: "0xC0ffee",
-        nonce: "n-bridge",
-        validBefore: "2999-01-01T00:00:00.000Z",
-        asset: { chainId: 1 },
+        maxTimeoutSeconds: 60,
+        asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       },
     };
     const decoded = decodePaymentHeader(btoa(JSON.stringify(foreign)));
@@ -85,7 +84,7 @@ describe("X-PAYMENT codec", () => {
     );
     expect(() =>
       decodePaymentHeader(
-        btoa(JSON.stringify({ payment: payload, requirements: { scheme: "exact-canton" } })),
+        btoa(JSON.stringify({ payment: payload, requirements: { scheme: "exact" } })),
       ),
     ).toThrow(/`requirements` slot/);
   });

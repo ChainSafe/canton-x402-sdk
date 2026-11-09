@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { createServer } from "node:http";
 import express, { type Express } from "express";
 import request from "supertest";
 import {
   encodePaymentHeader,
+  isCantonPaymentRequirements,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
 } from "@chainsafe/x402-core";
@@ -15,7 +17,7 @@ const baseOptions: PaymentRequiredOptions = {
     network: "canton:x",
     payTo: "merchant::x",
     asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
-    amount: "0.05",
+    amount: "500000000",
     // Fixed resource so the rebuilt policy matches the echoed header deterministically
     // (default is absoluteUrl(req), whose host/port vary per test run).
     resource: "https://f.example/paid",
@@ -45,30 +47,36 @@ function makeApp(opts: Partial<PaymentRequiredOptions> = {}): Express {
   return app;
 }
 
+const ECHOED_EXTRA = {
+  assetTransferMethod: "transfer-factory",
+  executeBeforeSeconds: 120,
+  instrumentId: { id: "Amulet", admin: "DSO::x" },
+};
+
 /** Build an `X-PAYMENT` header echoing acceptable requirements. */
 function paymentHeader(overrides: Record<string, unknown> = {}): string {
   const requirements = {
-    scheme: "exact-canton",
+    scheme: "exact",
     network: "canton:x",
-    maxAmountRequired: "0.05",
-    asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+    amount: "500000000",
+    asset: "CC",
+    extra: ECHOED_EXTRA,
     payTo: "merchant::x",
     resource: "https://f.example/paid",
     description: "Access",
-    nonce: "nonce-1",
-    validBefore: new Date(Date.now() + 300_000).toISOString(),
+    maxTimeoutSeconds: 60,
     ...overrides,
   } as unknown as CantonPaymentRequirements;
   const payload = {
     x402Version: 2,
-    scheme: "exact-canton",
+    scheme: "exact",
     network: "canton:x",
     payload: {
+      assetTransferMethod: "transfer-factory",
       payer: "alice::x",
       preparedTransaction: "b",
-      preparedTransactionHash: "h",
-      partySignature: "s",
-      requirementsHash: "rh",
+      preparedTxHash: "h",
+      signature: "s",
       publicKey: "pk",
       hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
     },
@@ -90,19 +98,24 @@ describe("paymentRequired", () => {
           network: "canton:x",
           payTo: "merchant::x",
           asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
-          amount: (req) => (req.method === "GET" ? "0.09" : "0.01"),
+          amount: (req) => (req.method === "GET" ? "900000000" : "100000000"),
         },
       }),
     );
     app.get("/paid", (_req, res) => res.json({ ok: true }));
     const res = await request(app).get("/paid");
     expect(res.status).toBe(402);
-    expect(res.body.accepts[0].maxAmountRequired).toBe("0.09");
+    expect(res.body.accepts[0].amount).toBe("900000000");
   });
 
-  it("uses a merchant-supplied nonce generator (so it can record it)", async () => {
+  it("catches an underpayment above Number.MAX_SAFE_INTEGER", async () => {
+    // Atomic units are 1e10 larger than the price, so a realistic CC amount can
+    // exceed what a double represents. 2^53+1 and 2^53 are distinct atomic
+    // amounts that collapse to the same double, so a Number compare reads the
+    // underpayment as equal and lets it through. ~900,719.93 CC.
+    const policy = "9007199254740993";
+    const echoed = "9007199254740992";
     stubFacilitator();
-    const seen: string[] = [];
     const app = express();
     app.use(
       "/paid",
@@ -112,19 +125,250 @@ describe("paymentRequired", () => {
           network: "canton:x",
           payTo: "merchant::x",
           asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
-          amount: "0.05",
-          nonce: () => {
-            const n = `merchant-nonce-${seen.length}`;
-            seen.push(n);
-            return n;
-          },
+          amount: policy,
+          resource: "https://f.example/paid",
+        },
+      }),
+    );
+    app.get("/paid", (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get("/paid").set("X-PAYMENT", paymentHeader({ amount: echoed }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_underpriced");
+  });
+
+  it("refuses an oversized echoed amount without parsing it", async () => {
+    // The echoed amount reaches BigInt before any signature is checked, and
+    // BigInt parsing is superlinear — ~300ms for three million digits against
+    // ~6ms for Number. Node's default 16KB header limit hides this, but our own
+    // docs tell merchants to raise maxHeaderSize for the Canton payload, so the
+    // server here is built the way we tell them to build it. The length bound
+    // in isValidAmount is what keeps this a cheap 402.
+    stubFacilitator();
+    const server = createServer({ maxHeaderSize: 4 * 1024 * 1024 }, makeApp());
+    const started = Date.now();
+    const res = await request(server)
+      .get("/paid")
+      .set("X-PAYMENT", paymentHeader({ amount: "9".repeat(1_000_000) }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_amount_invalid");
+    expect(Date.now() - started).toBeLessThan(2_000);
+    server.close();
+  });
+
+  it("rejects a decimal amount from a BUILDER, not just the declarative spec", async () => {
+    // The builder returned before the check, so a decimal reached the 402 and
+    // the paid retry then threw on BigInt(policy.amount) — a 500 for the
+    // merchant's own config, surfacing one request too late.
+    stubFacilitator();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: () =>
+          ({
+            scheme: "exact",
+            network: "canton:x",
+            amount: "0.05", // CC where atomic units are required
+            asset: "CC",
+            extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            maxTimeoutSeconds: 60,
+          }) as unknown as CantonPaymentRequirements,
+      }),
+    );
+    app.get("/paid", (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(500);
+    expect(res.body.details).toMatch(/atomic units/);
+  });
+
+  it("rejects a decimal amount in an additionalAccepts entry", async () => {
+    // Advertised in the same 402, so it is held to the same rule.
+    stubFacilitator();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        additionalAccepts: () =>
+          [{ ...JSON.parse(JSON.stringify(baseOptions.requirements)), amount: "0.10" }] as unknown as CantonPaymentRequirements[],
+      }),
+    );
+    app.get("/paid", (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(500);
+    expect(res.body.details).toMatch(/atomic units/);
+  });
+
+  it("rejects a decimal amount rather than quietly misreading it", async () => {
+    // One unit everywhere: a merchant who writes "0.05" meaning 0.05 CC is
+    // 1e10 out. The spec's unit is atomic, so the mistake is refused loudly
+    // instead of quoting 5e-12 CC.
+    stubFacilitator();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::x",
+          asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+          amount: "0.05", // CC, where atomic units are expected
         },
       }),
     );
     app.get("/paid", (_req, res) => res.json({ ok: true }));
     const res = await request(app).get("/paid");
-    expect(res.body.accepts[0].nonce).toBe("merchant-nonce-0");
-    expect(seen).toEqual(["merchant-nonce-0"]); // merchant observed/recorded it
+    expect(res.status).toBe(500);
+  });
+
+  it("advertises the reserved assetTransferMethod and a maxTimeoutSeconds", async () => {
+    // Both are required of the 402 now, and a merchant states neither — the
+    // method has one legal value and the timeout has a default.
+    stubFacilitator();
+    const app = express();
+    app.use("/paid", paymentRequired(baseOptions));
+    app.get("/paid", (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(402);
+    expect(res.body.accepts[0].extra.assetTransferMethod).toBe("transfer-factory");
+    expect(res.body.accepts[0].maxTimeoutSeconds).toBe(60);
+  });
+
+  it("takes maxTimeoutSeconds from the merchant, per request if it wants", async () => {
+    stubFacilitator();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::1220y",
+          asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+          amount: "500000000",
+          maxTimeoutSeconds: (req) => (req.path === "/slow" ? 600 : 30),
+        },
+      }),
+    );
+    app.get("/slow", (_req, res) => res.json({ ok: true }));
+    app.get("/fast", (_req, res) => res.json({ ok: true }));
+    expect((await request(app).get("/paid/slow")).body.accepts[0].maxTimeoutSeconds).toBe(600);
+    expect((await request(app).get("/paid/fast")).body.accepts[0].maxTimeoutSeconds).toBe(30);
+  });
+
+  it("quotes an executeBeforeSeconds, and a memo only when the merchant sets one", async () => {
+    stubFacilitator();
+    const app = express();
+    app.use("/paid", paymentRequired(baseOptions));
+    app.get("/paid", (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.body.accepts[0].extra.executeBeforeSeconds).toBe(120);
+    // Quoting a memo BINDS it (Rule 12), so one is never invented on the
+    // merchant's behalf — an unasked-for memo would refuse honest payments.
+    expect(res.body.accepts[0].extra).not.toHaveProperty("memo");
+  });
+
+  // Rule 12 compares the transfer against the requirements the PAYER echoed, so
+  // on its own it proves only that the payer agreed with itself: it can drop
+  // the memo and sign none, or echo any value and sign that. The middleware
+  // keeps no record of what it issued, so a merchant reconciling by memo says so.
+  describe("a quoted memo is only as good as the merchant's own check", () => {
+    const quoting = (over: Partial<PaymentRequiredOptions> = {}) =>
+      makeApp({
+        requirements: { ...(baseOptions.requirements as object), memo: () => "order-1" } as never,
+        ...over,
+      });
+
+    it.each([
+      ["dropped from the echo", {}],
+      ["one this merchant never issued", { memo: "someone-elses-order" }],
+    ])("is accepted on its own when %s", async (_, extra) => {
+      stubFacilitator();
+      await request(quoting())
+        .get("/paid")
+        .set("X-PAYMENT", paymentHeader({ extra: { ...ECHOED_EXTRA, ...extra } }))
+        .expect(200);
+    });
+
+    it("and refused when checkPayment says so", async () => {
+      stubFacilitator();
+      const app = quoting({
+        checkPayment: ({ requirements }) =>
+          requirements.extra.memo === "order-1" ? undefined : "policy_memo_unknown",
+      });
+      for (const extra of [{}, { memo: "someone-elses-order" }]) {
+        const res = await request(app)
+          .get("/paid")
+          .set("X-PAYMENT", paymentHeader({ extra: { ...ECHOED_EXTRA, ...extra } }));
+        expect(res.status).toBe(402);
+        expect(res.body.error).toBe("policy_memo_unknown");
+      }
+    });
+  });
+
+  describe("checkPayment", () => {
+    it("sees the payload and the echoed requirements, and refuses before settle", async () => {
+      // Before settle is the point: a refusal after it would have moved funds.
+      const fetchMock = stubFacilitator();
+      let seen: { payer?: string } = {};
+      const app = makeApp({
+        settle: true,
+        checkPayment: ({ payload }) => {
+          seen = { payer: payload.payload.payer };
+          return "policy_order_closed";
+        },
+      });
+      const res = await request(app).get("/paid").set("X-PAYMENT", paymentHeader());
+      expect(res.status).toBe(402);
+      expect(res.body.error).toBe("policy_order_closed");
+      expect(seen.payer).toBe("alice::x");
+      for (const [url] of fetchMock.mock.calls) expect(String(url)).not.toContain("/v2/settle");
+    });
+
+    it("lets the payment through when it returns nothing", async () => {
+      stubFacilitator();
+      await request(makeApp({ checkPayment: () => undefined }))
+        .get("/paid")
+        .set("X-PAYMENT", paymentHeader())
+        .expect(200);
+    });
+  });
+
+  it("asks the merchant for a memo per challenge, and records what it issued", async () => {
+    // Quoting a memo binds it (Rule 12), so it is the merchant's reconciliation
+    // key: generated AND recorded merchant-side, one call per challenge.
+    stubFacilitator();
+    const seen: string[] = [];
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::1220y",
+          asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+          amount: "500000000",
+          executeBeforeSeconds: 300,
+          memo: (req) => {
+            const m = `invoice-${seen.length}${req.path}`;
+            seen.push(m);
+            return m;
+          },
+        },
+      }),
+    );
+    app.get("/a", (_req, res) => res.json({ ok: true }));
+    const first = await request(app).get("/paid/a");
+    const second = await request(app).get("/paid/a");
+    expect(first.body.accepts[0].extra.executeBeforeSeconds).toBe(300);
+    expect(first.body.accepts[0].extra.memo).toBe("invoice-0/a");
+    expect(second.body.accepts[0].extra.memo).toBe("invoice-1/a");
+    expect(seen).toEqual(["invoice-0/a", "invoice-1/a"]); // merchant observed both
   });
 
   it("supports a full requirements builder function", async () => {
@@ -135,22 +379,23 @@ describe("paymentRequired", () => {
       paymentRequired({
         ...baseOptions,
         requirements: () => ({
-          scheme: "exact-canton",
+          scheme: "exact",
           network: "canton:x",
-          maxAmountRequired: "0.05",
-          asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+          amount: "500000000",
+          asset: "CC",
+          extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
           payTo: "merchant::x",
           resource: "/r",
           description: "d",
-          nonce: "custom-nonce",
-          validBefore: new Date(Date.now() + 300_000).toISOString(),
+          maxTimeoutSeconds: 60,
         }),
       }),
     );
     app.get("/paid", (_req, res) => res.json({ ok: true }));
     const res = await request(app).get("/paid");
     expect(res.status).toBe(402);
-    expect(res.body.accepts[0].nonce).toBe("custom-nonce");
+    // The builder owns the whole object: nothing is defaulted over it.
+    expect(res.body.accepts[0]).toMatchObject({ resource: "/r", description: "d" });
   });
 
   it("responds 402 with well-formed requirements when there is no X-PAYMENT", async () => {
@@ -160,9 +405,10 @@ describe("paymentRequired", () => {
     expect(res.body.x402Version).toBe(2);
     expect(res.body.error).toBe("payment_required");
     const req0 = res.body.accepts[0];
-    expect(req0).toMatchObject({ payTo: "merchant::x", maxAmountRequired: "0.05", network: "canton:x" });
-    expect(typeof req0.nonce).toBe("string");
-    expect(Date.parse(req0.validBefore)).toBeGreaterThan(Date.now());
+    expect(req0).toMatchObject({ payTo: "merchant::x", amount: "500000000", network: "canton:x" });
+    // Not a field list: the guard is what a payer runs, so a required field the
+    // middleware forgets to fill in fails here rather than at someone's client.
+    expect(isCantonPaymentRequirements(req0)).toBe(true);
   });
 
   it("verifies and lets a paid request through (verify-only by default, no settle)", async () => {
@@ -205,14 +451,21 @@ describe("paymentRequired", () => {
 
   it("hands back a FRESH challenge (not the dead echoed one) on nonce_replayed", async () => {
     stubFacilitator({ verify: { isValid: false, invalidReason: "nonce_replayed" } });
-    const res = await request(makeApp())
+    // The memo is what carries per-challenge identity now, so quoting one is
+    // what makes "fresh" observably different from "echoed".
+    let issued = 0;
+    const app = makeApp({
+      requirements: { ...(baseOptions.requirements as object), memo: () => `challenge-${++issued}` } as never,
+    });
+    const res = await request(app)
       .get("/paid")
-      .set("X-PAYMENT", paymentHeader({ nonce: "dead-nonce" }));
+      .set("X-PAYMENT", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "spent-memo" } }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("nonce_replayed");
-    // The echoed nonce is spent; accepts[] must advertise a new one so a retrying
-    // agent isn't looped on the dead challenge.
-    expect(res.body.accepts[0].nonce).not.toBe("dead-nonce");
+    // The echoed reference is spent; accepts[] must advertise a new one so a
+    // retrying agent isn't looped on the dead challenge.
+    expect(res.body.accepts[0].extra.memo).toBe("challenge-1");
+    expect(res.body.accepts[0].extra.memo).not.toBe("spent-memo");
   });
 
   it("settles when settle mode is enabled and sets X-PAYMENT-RESPONSE", async () => {
@@ -235,22 +488,89 @@ describe("paymentRequired", () => {
     stubFacilitator();
     const res = await request(makeApp())
       .get("/paid")
-      .set("X-PAYMENT", paymentHeader({ maxAmountRequired: "0.01" }));
+      .set("X-PAYMENT", paymentHeader({ amount: "100000000" }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_underpriced");
   });
 
   it("rejects a malformed echoed amount that would slip past the '<' check", async () => {
-    // Number("abc") is NaN and Number("Infinity") is Infinity — both make the
-    // underpricing comparison false, so the format must be validated first.
+    // BigInt throws on "abc", "Infinity" and "1e3" — a 500 where a 402 belongs.
+    // It also parses what it should not: "0x10" is 16, "0b11" is 3, " 5 " is 5
+    // and "" is 0, so an amount the merchant never quoted would compare as a
+    // number. The format check is what keeps all of it a 402.
     stubFacilitator();
-    for (const bad of ["abc", "Infinity", "1e3", " 5 "]) {
+    for (const bad of ["abc", "Infinity", "1e3", " 5 ", "0x10", "0b11", "0o17"]) {
       const res = await request(makeApp())
         .get("/paid")
-        .set("X-PAYMENT", paymentHeader({ maxAmountRequired: bad }));
+        .set("X-PAYMENT", paymentHeader({ amount: bad }));
       expect(res.status).toBe(402);
       expect(res.body.error).toBe("policy_amount_invalid");
     }
+  });
+
+  it("rejects an EMPTY echoed amount at decode, before policy", async () => {
+    // BigInt("") is 0, so this one matters — but the envelope's nonEmptyString
+    // catches it first, which is why the code is bad_payload and not
+    // policy_amount_invalid. Asserted so the earlier guard cannot quietly go.
+    stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set("X-PAYMENT", paymentHeader({ amount: "" }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("bad_payload");
+  });
+
+  it("rejects a look-alike instrument from another registry", async () => {
+    // The symbol is not the instrument. `asset` says "CC" either way, so the
+    // admin — the registry that issued it — is what has to be compared, or a
+    // merchant is paid in a token that merely shares a name.
+    stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set(
+        "X-PAYMENT",
+        paymentHeader({ extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::impostor" } } }),
+      );
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_asset");
+  });
+
+  it("rejects an echoed instrument id that is not the priced one", async () => {
+    // Symbol and admin left alone, so only the id comparison can catch this.
+    stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set(
+        "X-PAYMENT",
+        paymentHeader({ extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "DSO::x" } } }),
+      );
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_asset");
+  });
+
+  it("rejects an echoed symbol that is not the priced one", async () => {
+    // The instrument is left alone, so only the symbol comparison catches it.
+    // A merchant quoting CC must not be paid against a quote that says USDCx,
+    // even where the instrument underneath is the one it priced.
+    stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set("X-PAYMENT", paymentHeader({ asset: "USDCx" }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_asset");
+  });
+
+  it("answers 402, not 500, when the echoed requirements carry no `extra`", async () => {
+    // The header is only ENVELOPE-validated on decode, and the envelope is a
+    // looseObject that does not require `extra`. Reading `extra.instrumentId`
+    // without narrowing threw a TypeError, so attacker-controlled input chose
+    // our status code — and a 500 reads as a merchant bug, not a refusal.
+    stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set("X-PAYMENT", paymentHeader({ extra: undefined }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_requirements_invalid");
   });
 
   it("rejects a payment minted for a different resource (request↔payment binding)", async () => {
@@ -292,7 +612,7 @@ describe("paymentRequired", () => {
       const onReject = vi.fn();
       await request(makeApp({ onReject }))
         .get("/paid")
-        .set("X-PAYMENT", paymentHeader({ maxAmountRequired: "0.01" }));
+        .set("X-PAYMENT", paymentHeader({ amount: "100000000" }));
       expect(onReject.mock.calls[0][0]).toMatchObject({ status: 402, reason: "policy_underpriced" });
     });
 

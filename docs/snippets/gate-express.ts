@@ -32,7 +32,7 @@ app.use(
       network: NETWORK,
       payTo: PAY_TO,
       asset: amuletAsset(DSO_PARTY),
-      amount: "0.05",
+      amount: "500000000", // atomic units: 1 CC = 1e10, so this is 0.05 CC
       description: "Access to /paid",
     },
   }),
@@ -43,7 +43,8 @@ app.get("/paid", (req, res) => {
   res.json({ ok: true, payer: req.x402!.payer });
 });
 
-// Raise maxHeaderSize (step 6) or the paid retry 431s before the handler runs.
+// Raise maxHeaderSize (step 6): X-PAYMENT is about 10 KB, much of Node's 16 KB
+// default for all headers, so a paid retry can 431 before the handler runs.
 http
   .createServer({ maxHeaderSize: 4 * 1024 * 1024 }, app)
   .listen(3000, () => console.log("listening on :3000"));

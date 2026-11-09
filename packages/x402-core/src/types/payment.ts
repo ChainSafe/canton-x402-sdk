@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { ASSET_TRANSFER_METHOD } from "./common";
 import type { NetworkId, Scheme, X402Version } from "./common";
 
 /**
@@ -21,16 +22,32 @@ export type HashingSchemeVersion =
  * validator can't drift from (or under-check) the type.
  */
 export const CantonPaymentInnerSchema = v.object({
+  /**
+   * MUST be `transfer-factory`, the same literal as the requirements'
+   * `extra.assetTransferMethod`: the spec requires it in both places. Any other
+   * value fails the shape check.
+   */
+  assetTransferMethod: v.literal(ASSET_TRANSFER_METHOD),
   /** Paying Canton party ID. */
   payer: v.string(),
-  /** Base64-encoded opaque blob from /v2/interactive-submission/prepare. */
+  /**
+   * The prepared transaction from /v2/interactive-submission/prepare, as base64
+   * of exactly one gzip member ({@link gzipPreparedTransaction}): at most 8 KiB
+   * compressed and 64 KiB decompressed.
+   */
   preparedTransaction: v.string(),
-  /** Hex of the hash that was signed. */
-  preparedTransactionHash: v.string(),
-  /** Hex Ed25519 signature over preparedTransactionHash. */
-  partySignature: v.string(),
-  /** SHA-256 of the canonical (RFC-8785) PaymentRequirements. */
-  requirementsHash: v.string(),
+  /**
+   * The hash the payer signed: 32 bytes as lower-case hex, no multihash prefix.
+   * Non-empty here; the verifier checks the encoding itself.
+   */
+  preparedTxHash: v.pipe(v.string(), v.minLength(1)),
+  /**
+   * The payer's Ed25519 signature over `preparedTxHash`: 64 bytes as canonical
+   * standard base64. Base64, not hex — the spec's encoding, and the one the
+   * ledger's `partySignatures` takes, so the facilitator relays it unchanged.
+   * Non-empty here; the verifier checks the encoding itself.
+   */
+  signature: v.pipe(v.string(), v.minLength(1)),
   /**
    * Base64 32-byte Ed25519 public key. Required — the facilitator verifies the
    * signature against it and derives the party fingerprint from it (the party id's
@@ -39,11 +56,12 @@ export const CantonPaymentInnerSchema = v.object({
   publicKey: v.string(),
   /**
    * Canton interactive-submission hashing scheme the payload was prepared with.
-   * Required — the signature is bound to a hash computed with this version, so the
-   * facilitator's execute must use the same one. Validated as a string (the
+   * The signature is bound to a hash computed with this version, so the
+   * facilitator's execute must use the same one. Optional: the spec reads an
+   * absent value as {@link HashingSchemeVersion.V2}. Validated as a string (the
    * {@link HashingSchemeVersion} open union is a type-level nicety).
    */
-  hashingSchemeVersion: v.string(),
+  hashingSchemeVersion: v.optional(v.string()),
 });
 export type CantonPaymentInner = v.InferOutput<typeof CantonPaymentInnerSchema>;
 
@@ -61,7 +79,7 @@ export interface X402PaymentPayload<TInner = CantonPaymentInner> {
   payload: TInner;
 }
 
-/** exact-canton payload: the X-PAYMENT envelope carrying a {@link CantonPaymentInner}. */
+/** canton-exact payload: the X-PAYMENT envelope carrying a {@link CantonPaymentInner}. */
 export const CantonPaymentPayloadSchema = v.object({
   x402Version: v.literal(2),
   scheme: v.string(),
@@ -75,7 +93,7 @@ export type CantonPaymentPayload = v.InferOutput<typeof CantonPaymentPayloadSche
  * (the per-scheme verifier validates the inner `payload`), a network, and a
  * `payload` object. `looseObject` so extra envelope keys (e.g. the echoed
  * `paymentRequirements` the X-PAYMENT header carries) pass through. Scheme-agnostic
- * — use {@link isCantonPaymentInner} for the exact-canton inner.
+ * — use {@link isCantonPaymentInner} for the canton-exact inner.
  */
 export const X402PaymentEnvelopeSchema = v.looseObject({
   x402Version: v.literal(2),
@@ -88,7 +106,7 @@ export function isX402PaymentPayload(x: unknown): x is X402PaymentPayload<unknow
   return v.is(X402PaymentEnvelopeSchema, x);
 }
 
-/** exact-canton inner-payload guard + parser (schema-derived). */
+/** canton-exact inner-payload guard + parser (schema-derived). */
 export function isCantonPaymentInner(x: unknown): x is CantonPaymentInner {
   return v.is(CantonPaymentInnerSchema, x);
 }
@@ -96,7 +114,7 @@ export function parseCantonPaymentInner(input: unknown): CantonPaymentInner {
   return v.parse(CantonPaymentInnerSchema, input);
 }
 
-/** exact-canton payload guard + parser — the full envelope incl. the inner (schema-derived). */
+/** canton-exact payload guard + parser — the full envelope incl. the inner (schema-derived). */
 export function isCantonPaymentPayload(x: unknown): x is CantonPaymentPayload {
   return v.is(CantonPaymentPayloadSchema, x);
 }
