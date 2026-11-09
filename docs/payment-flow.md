@@ -18,8 +18,11 @@ server (step 4).
 
 1. **Client hits a gated route (402)**
 
-   Your route answers `402 Payment Required` with
-   `{ x402Version: 2, accepts: [...] }`. Each entry carries `scheme`,
+   Your route answers `402 Payment Required` with the spec's `PaymentRequired`,
+   `{ x402Version: 2, resource, accepts: [...] }`, base64-encoded in the
+   `PAYMENT-REQUIRED` header and as the body. `resource` names what is being
+   paid for: the request URL and the route's description. Each `accepts` entry
+   carries `scheme`,
    `network`, `amount`, `asset`, `extra.assetTransferMethod`,
    `extra.instrumentId`, `extra.executeBeforeSeconds` (120 by default, and
    optionally an `extra.memo`), `payTo` (your Canton party), `resource` and a

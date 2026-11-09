@@ -6,11 +6,13 @@ import {
   isCantonPaymentRequirements,
   isValidAmount,
   decodePaymentHeader,
+  encodePaymentRequiredHeader,
   type AssetSpec,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
   type SettleResponse,
   type VerifyResponse,
+  type X402PaymentRequiredResponse,
 } from "@chainsafe/x402-core";
 import { FacilitatorError, type FacilitatorClient } from "@chainsafe/x402-client";
 
@@ -168,7 +170,9 @@ class PaymentRejection extends Error {
 /**
  * Express middleware that gates a route behind an x402 payment.
  *
- * - No/invalid `X-PAYMENT` → `402` with `{ x402Version, accepts: [requirements] }`.
+ * - No/invalid `X-PAYMENT` → `402` with the spec's `PaymentRequired`,
+ *   `{ x402Version, resource, accepts: [requirements] }`, in the
+ *   `PAYMENT-REQUIRED` header and as the body.
  * - Valid `X-PAYMENT` → verify (and optionally settle) via the facilitator, then
  *   attach `req.x402` and call `next()`.
  *
@@ -384,6 +388,12 @@ function validateEchoedRequirements(
   return null;
 }
 
+/**
+ * Answer 402 with the spec's `PaymentRequired`: base64-encoded in the
+ * `PAYMENT-REQUIRED` header, where the HTTP transport puts it, and as the body,
+ * where clients of this middleware already read it. `details` is the body's
+ * alone; the spec object has no such field.
+ */
 function respond402(
   res: Response,
   requirements: CantonPaymentRequirements,
@@ -391,12 +401,19 @@ function respond402(
   details: string | undefined,
   additional: CantonPaymentRequirements[],
 ): void {
-  res.status(402).json({
+  const paymentRequired: X402PaymentRequiredResponse = {
     x402Version: 2,
+    // The resource this request's terms were quoted for, so the top level says
+    // what each entry's `resource` and `description` say.
+    resource: {
+      url: requirements.resource,
+      ...(requirements.description ? { description: requirements.description } : {}),
+    },
     accepts: additional.length > 0 ? [requirements, ...additional] : [requirements],
     error,
-    ...(details ? { details } : {}),
-  });
+  };
+  res.setHeader("PAYMENT-REQUIRED", encodePaymentRequiredHeader(paymentRequired));
+  res.status(402).json({ ...paymentRequired, ...(details ? { details } : {}) });
 }
 
 function absoluteUrl(req: Request): string {

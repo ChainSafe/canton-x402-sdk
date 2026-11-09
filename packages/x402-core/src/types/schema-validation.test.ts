@@ -9,6 +9,7 @@ import {
   parseCantonPaymentRequirements,
   isCantonVerifyRequest,
   isX402Request,
+  isCantonPaymentRequiredResponse,
 } from "../index";
 import type { CantonPaymentInner } from "./payment";
 import type { CantonPaymentRequirements } from "./requirements";
@@ -239,5 +240,38 @@ describe("generic (loose) vs concrete (canton-exact) verify request", () => {
     expect(isX402Request({ ...cantonReq, paymentPayload: legacy })).toBe(false);
     expect(isCantonVerifyRequest({ ...cantonReq, paymentPayload: legacy })).toBe(false);
     expect(isX402Request({ x402Version: 2 })).toBe(false);
+  });
+});
+
+describe("PaymentRequired (the 402)", () => {
+  const paymentRequired = {
+    x402Version: 2,
+    resource: { url: "https://merchant.example/r", description: "A report" },
+    accepts: [requirements],
+    error: "payment_required",
+  };
+  const valid = isCantonPaymentRequiredResponse;
+
+  it("takes the spec's object, with extensions present, absent or null", () => {
+    expect(valid(paymentRequired)).toBe(true);
+    expect(valid({ ...paymentRequired, extensions: { "x-ext": { info: {} } } })).toBe(true);
+    expect(valid({ ...paymentRequired, extensions: null })).toBe(true);
+    // ResourceInfo fields this SDK does not know pass, as other servers may send them.
+    expect(valid({ ...paymentRequired, resource: { url: "https://merchant.example/r", x: 1 } })).toBe(true);
+    const { error: _omit, ...noError } = paymentRequired;
+    expect(valid(noError)).toBe(true);
+  });
+
+  it("requires a top-level resource with a url, as the spec does", () => {
+    const { resource: _omit, ...noResource } = paymentRequired;
+    expect(valid(noResource)).toBe(false);
+    for (const resource of [null, "https://merchant.example/r", {}, { url: "" }, { description: "no url" }]) {
+      expect(valid({ ...paymentRequired, resource })).toBe(false);
+    }
+  });
+
+  it("refuses another x402Version, and an extensions that is not an object", () => {
+    expect(valid({ ...paymentRequired, x402Version: 1 })).toBe(false);
+    expect(valid({ ...paymentRequired, extensions: "x" })).toBe(false);
   });
 });

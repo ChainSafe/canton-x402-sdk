@@ -5,12 +5,13 @@ import request from "supertest";
 import {
   decodePayloadTransfer,
   encodePaymentHeader,
+  isCantonPaymentRequiredResponse,
   isCantonPaymentRequirements,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
 } from "@chainsafe/x402-core";
 import { FacilitatorClient } from "@chainsafe/x402-client";
-import { paymentRequired, type PaymentRequiredOptions } from "./middleware";
+import { paymentRequired, type PaymentRequiredOptions, type RequirementsSpec } from "./middleware";
 
 // The real decoder, spied on so a test can stand in a decodable transfer without
 // building a prepared transaction: the fixture's `preparedTransaction` is not one.
@@ -423,6 +424,101 @@ describe("paymentRequired", () => {
     // Not a field list: the guard is what a payer runs, so a required field the
     // middleware forgets to fill in fails here rather than at someone's client.
     expect(isCantonPaymentRequirements(req0)).toBe(true);
+  });
+
+  describe("PAYMENT-REQUIRED", () => {
+    /** What a client does with the header: base64 → UTF-8 → JSON. */
+    const header = (res: { headers: Record<string, string> }): Record<string, unknown> =>
+      JSON.parse(Buffer.from(res.headers["payment-required"], "base64").toString("utf8"));
+
+    it("carries the spec's PaymentRequired, and the body is the same object", async () => {
+      stubFacilitator();
+      const res = await request(makeApp()).get("/paid");
+      expect(res.status).toBe(402);
+      const sent = header(res);
+      expect(isCantonPaymentRequiredResponse(sent)).toBe(true);
+      expect(sent).toEqual(res.body);
+      expect(Object.keys(sent).sort()).toEqual(["accepts", "error", "resource", "x402Version"]);
+    });
+
+    it("names the resource the terms were quoted for: the request URL and description by default", async () => {
+      stubFacilitator();
+      const app = express();
+      const { resource: _omit, ...spec } = baseOptions.requirements as RequirementsSpec;
+      app.use("/paid", paymentRequired({ ...baseOptions, requirements: spec }));
+      app.get("/paid", (_req, res) => res.json({ ok: true }));
+      const res = await request(app).get("/paid?item=7");
+      const { resource, accepts } = header(res) as { resource: Record<string, unknown>; accepts: CantonPaymentRequirements[] };
+      expect(resource.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/paid\?item=7$/);
+      expect(resource).toEqual({ url: accepts[0].resource, description: accepts[0].description });
+      expect(res.body.resource).toEqual(resource);
+    });
+
+    it("takes a builder's resource and description, and leaves description out when it has none", async () => {
+      stubFacilitator();
+      const built = {
+        scheme: "exact",
+        network: "canton:x",
+        amount: "500000000",
+        asset: "CC",
+        extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        payTo: "merchant::x",
+        resource: "https://merchant.example/report",
+        maxTimeoutSeconds: 60,
+      } as CantonPaymentRequirements;
+      for (const [requirements, expected] of [
+        [{ ...built, description: "A report" }, { url: "https://merchant.example/report", description: "A report" }],
+        [built, { url: "https://merchant.example/report" }],
+      ] as const) {
+        const app = express();
+        app.use("/paid", paymentRequired({ ...baseOptions, requirements: () => requirements }));
+        app.get("/paid", (_req, res) => res.json({ ok: true }));
+        expect(header(await request(app).get("/paid")).resource).toEqual(expected);
+      }
+    });
+
+    it("goes on a rejection's 402 too, with its code; details stay in the body", async () => {
+      stubFacilitator({ verify: { isValid: false, invalidReason: "transfer_mismatch", extensions: { detail: "amount" } } });
+      const res = await request(makeApp()).get("/paid").set("X-PAYMENT", paymentHeader());
+      expect(res.status).toBe(402);
+      expect(res.body).toMatchObject({ error: "transfer_mismatch", details: "amount" });
+      const sent = header(res);
+      expect(sent.error).toBe("transfer_mismatch");
+      expect(sent).not.toHaveProperty("details");
+      const { details: _omit, ...spec } = res.body;
+      expect(sent).toEqual(spec);
+      // A client reading the body with the guard still gets a PaymentRequired.
+      expect(isCantonPaymentRequiredResponse(res.body)).toBe(true);
+    });
+
+    it("lists additionalAccepts after this request's terms, as the body does", async () => {
+      stubFacilitator();
+      const alt = { ...JSON.parse(JSON.stringify(baseOptions.requirements)), amount: "700000000" };
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({ ...baseOptions, additionalAccepts: () => [alt] as unknown as CantonPaymentRequirements[] }),
+      );
+      app.get("/paid", (_req, res) => res.json({ ok: true }));
+      const res = await request(app).get("/paid");
+      const accepts = header(res).accepts as CantonPaymentRequirements[];
+      expect(accepts.map((a) => a.amount)).toEqual(["500000000", "700000000"]);
+      expect(accepts).toEqual(res.body.accepts);
+    });
+
+    it("is not sent when the answer is not a 402", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("down", { status: 503 })),
+      );
+      const failed = await request(makeApp()).get("/paid").set("X-PAYMENT", paymentHeader());
+      expect(failed.status).toBe(502);
+      expect(failed.headers).not.toHaveProperty("payment-required");
+      stubFacilitator();
+      const paid = await request(makeApp()).get("/paid").set("X-PAYMENT", paymentHeader());
+      expect(paid.status).toBe(200);
+      expect(paid.headers).not.toHaveProperty("payment-required");
+    });
   });
 
   it("verifies and lets a paid request through (verify-only by default, no settle)", async () => {

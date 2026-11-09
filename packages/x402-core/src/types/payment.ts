@@ -1,6 +1,6 @@
 import * as v from "valibot";
-import { ASSET_TRANSFER_METHOD } from "./common";
-import type { X402Version } from "./common";
+import { ASSET_TRANSFER_METHOD, PaymentExtensionsSchema, ResourceInfoSchema } from "./common";
+import type { PaymentExtensions, ResourceInfo, X402Version } from "./common";
 import { X402PaymentRequirementsEnvelopeSchema } from "./requirements";
 import type { X402PaymentRequirements } from "./requirements";
 
@@ -66,25 +66,6 @@ export const CantonPaymentInnerSchema = v.object({
   hashingSchemeVersion: v.optional(v.string()),
 });
 export type CantonPaymentInner = v.InferOutput<typeof CantonPaymentInnerSchema>;
-
-/**
- * x402 v2 `ResourceInfo`: what the payment is for. Only `url` is required. The
- * optional fields also take an explicit `null`, as other implementations send
- * it.
- */
-export const ResourceInfoSchema = v.looseObject({
-  url: v.pipe(v.string(), v.minLength(1)),
-  description: v.nullish(v.string()),
-  mimeType: v.nullish(v.string()),
-  serviceName: v.nullish(v.string()),
-  tags: v.nullish(v.array(v.string())),
-  iconUrl: v.nullish(v.string()),
-});
-export type ResourceInfo = v.InferOutput<typeof ResourceInfoSchema>;
-
-/** x402 v2 `extensions`: extension id → its data. Passed through, not interpreted. */
-export const PaymentExtensionsSchema = v.record(v.string(), v.unknown());
-export type PaymentExtensions = v.InferOutput<typeof PaymentExtensionsSchema>;
 
 /**
  * Generic x402 v2 payment envelope. `TInner` is the scheme-specific inner payload —

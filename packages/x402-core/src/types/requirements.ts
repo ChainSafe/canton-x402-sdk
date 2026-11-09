@@ -1,6 +1,11 @@
 import * as v from "valibot";
-import { ASSET_TRANSFER_METHOD, InstrumentIdSchema } from "./common";
-import type { NetworkId, Scheme, X402Version } from "./common";
+import {
+  ASSET_TRANSFER_METHOD,
+  InstrumentIdSchema,
+  PaymentExtensionsSchema,
+  ResourceInfoSchema,
+} from "./common";
+import type { NetworkId, PaymentExtensions, ResourceInfo, Scheme, X402Version } from "./common";
 
 /**
  * Generic PaymentRequirements — the merchant's 402 offer. `TExtra` is the one
@@ -141,10 +146,13 @@ export function isX402PaymentRequirements(x: unknown): x is X402PaymentRequireme
 }
 
 /**
- * The `402 Payment Required` response body — returned by the merchant/resource
- * server, listing the payment options the client may satisfy. The client picks
- * one of `accepts[]`, pays it, and retries the request with the `X-PAYMENT`
- * header. Produced by the merchant middleware; parsed by the auto-pay client.
+ * The x402 v2 `PaymentRequired` object a `402 Payment Required` answers with:
+ * one resource, and the ways to pay for it. The client picks one of
+ * `accepts[]`, pays it, and retries the request with the `X-PAYMENT` header.
+ *
+ * The HTTP transport carries it base64-encoded in the `PAYMENT-REQUIRED`
+ * response header ({@link encodePaymentRequiredHeader}). The merchant
+ * middleware sends it as the body too, with a `details` string beside it.
  *
  * Generic over the `accepts[]` element (`TRequirements`) so a mixed-scheme offer
  * (e.g. canton-exact + a bridge scheme) is expressible as a union; every other
@@ -152,19 +160,28 @@ export function isX402PaymentRequirements(x: unknown): x is X402PaymentRequireme
  */
 export interface X402PaymentRequiredResponse<TRequirements = CantonPaymentRequirements> {
   x402Version: X402Version;
+  /** What is being paid for. Required by the spec. */
+  resource: ResourceInfo;
   /** Payment options; the client satisfies exactly one of them. */
   accepts: TRequirements[];
   /** Optional machine-readable reason, e.g. "payment_required". */
   error?: string;
+  extensions?: PaymentExtensions | null;
 }
 
 /** canton-exact 402 response: `accepts[]` of {@link CantonPaymentRequirements}. */
 export const CantonPaymentRequiredResponseSchema = v.object({
   x402Version: v.literal(2),
+  resource: ResourceInfoSchema,
   accepts: v.array(CantonPaymentRequirementsSchema),
   error: v.optional(v.string()),
+  extensions: v.nullish(PaymentExtensionsSchema),
 });
 
 export type CantonPaymentRequiredResponse = v.InferOutput<
   typeof CantonPaymentRequiredResponseSchema
 >;
+
+export function isCantonPaymentRequiredResponse(x: unknown): x is CantonPaymentRequiredResponse {
+  return v.is(CantonPaymentRequiredResponseSchema, x);
+}
