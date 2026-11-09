@@ -72,11 +72,9 @@ describe("findTransferMismatch", () => {
     network: "canton:devnet",
     amount: "100000000",
     asset: "CC",
-    extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+    extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
     payTo: "merchant::1220dead",
     resource: "/api/resource",
-    nonce: "n-1",
-    validBefore: "2999-01-01T00:00:00.000Z",
     maxTimeoutSeconds: 60,
   };
   const ok: DecodedTransfer = {

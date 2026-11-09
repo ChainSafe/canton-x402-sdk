@@ -7,11 +7,9 @@ const requirements: CantonPaymentRequirements = {
   network: "canton:devnet",
   amount: "500000000",
   asset: "CC",
-  extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
+  extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   payTo: "merchant::1220x",
   resource: "/r",
-  nonce: "n",
-  validBefore: "2999-01-01T00:00:00.000Z",
   maxTimeoutSeconds: 60,
 };
 

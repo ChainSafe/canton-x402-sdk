@@ -25,10 +25,6 @@ export interface X402PaymentRequirements<TExtra = Record<string, unknown>> {
   /** Resource URL the wallet is paying for. */
   resource: string;
   description?: string;
-  /** Unique nonce; UUID v4 recommended. */
-  nonce: string;
-  /** ISO 8601 timestamp; facilitator rejects /settle after this. */
-  validBefore: string;
   /** Seconds the client has to complete payment. Required for every scheme. */
   maxTimeoutSeconds: number;
   /** Scheme-specific extra (the `TExtra` seam), e.g. the bridge's `cantonRecipient`. */
@@ -43,6 +39,14 @@ const nonEmptyString = v.pipe(v.string(), v.minLength(1));
  * `Infinity`, `0` and negatives, none of which are a time a client can be given.
  */
 const positiveSeconds = v.pipe(v.number(), v.integer(), v.minValue(1));
+
+/**
+ * The merchant's memo: UTF-8, at most 256 BYTES. Bytes, not characters — the
+ * limit is on what travels, and an emoji is four of them. The client copies it
+ * into the transfer's metadata verbatim, so an empty one would be a key with
+ * nothing under it.
+ */
+const memoString = v.pipe(v.string(), v.minLength(1), v.maxBytes(256));
 
 /**
  * The canton-exact `extra`. `looseObject`, so the keys the spec defines are
@@ -61,6 +65,19 @@ export const CantonRequirementsExtraSchema = v.looseObject({
    */
   assetTransferMethod: v.literal(ASSET_TRANSFER_METHOD),
   instrumentId: InstrumentIdSchema,
+  /**
+   * Seconds from request time. The client turns it into the transfer's absolute
+   * `executeBefore`, after which the signed transfer is no longer executable —
+   * so unlike `maxTimeoutSeconds` this one reaches the ledger, and the verifier
+   * refuses a transfer whose deadline is not still ahead of now (Rule 10).
+   */
+  executeBeforeSeconds: positiveSeconds,
+  /**
+   * Optional merchant reference. When set, the transfer's metadata MUST carry
+   * the identical value under `x402.memo` (Rule 12) — so quoting one makes it
+   * part of what the payer signs, not a hint.
+   */
+  memo: v.optional(memoString),
 });
 export type CantonRequirementsExtra = v.InferOutput<typeof CantonRequirementsExtraSchema>;
 
@@ -81,8 +98,6 @@ export const CantonPaymentRequirementsSchema = v.object({
   payTo: nonEmptyString,
   resource: nonEmptyString,
   description: v.optional(v.string()),
-  nonce: nonEmptyString,
-  validBefore: nonEmptyString,
   maxTimeoutSeconds: positiveSeconds,
   extra: CantonRequirementsExtraSchema,
 });
@@ -110,8 +125,6 @@ export const X402PaymentRequirementsEnvelopeSchema = v.looseObject({
   network: nonEmptyString,
   amount: nonEmptyString,
   payTo: nonEmptyString,
-  nonce: nonEmptyString,
-  validBefore: nonEmptyString,
   asset: nonEmptyString,
   maxTimeoutSeconds: positiveSeconds,
 });

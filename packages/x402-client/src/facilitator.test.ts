@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import type { CantonPaymentPayload, CantonPaymentRequirements } from "@chainsafe/x402-core";
 import { FacilitatorClient, FacilitatorError } from "./facilitator";
 
-const requirements = { scheme: "exact", network: "canton:x", nonce: "n" } as unknown as CantonPaymentRequirements;
+const requirements = { scheme: "exact", network: "canton:x", payTo: "merchant::x" } as unknown as CantonPaymentRequirements;
 const payload = { x402Version: 2, accepted: requirements, payload: {} } as unknown as CantonPaymentPayload;
 
 const json = (body: unknown, status = 200, headers?: Record<string, string>) =>
@@ -22,7 +22,7 @@ describe("FacilitatorClient", () => {
     expect(JSON.parse(String(init?.body))).toMatchObject({
       x402Version: 2,
       paymentPayload: { accepted: { scheme: "exact", network: "canton:x" } },
-      paymentRequirements: { nonce: "n" },
+      paymentRequirements: { payTo: "merchant::x" },
     });
   });
 

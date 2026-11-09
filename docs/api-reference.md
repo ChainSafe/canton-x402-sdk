@@ -70,7 +70,7 @@ curl -sS "$FACILITATOR_URL/v2/supported"
 
 ### What it does
 
-Runs the checks settle runs before it reserves the nonce, and writes nothing to
+Runs the checks settle runs before it reserves the payment, and writes nothing to
 the ledger. It is an optional dry run: `/v2/settle` re-verifies from scratch, so
 calling verify first buys you a clean rejection before you commit, not a
 guarantee.
@@ -107,13 +107,12 @@ guarantee.
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
-      "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" }
+      "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
+      "executeBeforeSeconds": 120
     },
     "payTo": "merchant::1220…",
     "resource": "https://api.example.com/paid",
     "description": "Access to /paid",
-    "nonce": "3f1c…",
-    "validBefore": "2026-08-14T13:05:00.000Z",
     "maxTimeoutSeconds": 60
   }
 }
@@ -130,11 +129,12 @@ guarantee.
 | `amount`                                    | Integer string of atomic units — 1 CC = 1e10, so `"500000000"` is 0.05 CC. **Exact**, not a floor: the transfer must move this amount, and an overpayment is rejected.                                                                                                       |
 | `payTo`                                     | Must be a party your API key owns. Otherwise verify answers `transfer_mismatch` and settle answers `unauthorized`.                                                                                                                                                             |
 | `resource`                                  | Required — the URL being paid for.                                                                                                                                                                                                                                             |
-| `nonce`, `validBefore`                      | Required and non-empty; `validBefore` is ISO 8601 and settle refuses a quote past it.                                                                                                                                                                                          |
 | `asset`                                     | A symbol — `"CC"` for Canton Coin, or a registry token's own. The instrument it names is `extra.instrumentId`.
 | `extra.instrumentId`                        | Required `{admin, id}`: `asset` alone cannot say which registry issued the instrument, and the facilitator binds the transfer against this.
 | `maxTimeoutSeconds`                         | Required — seconds the client has to complete payment. A whole number of at least 1; `0`, a negative, a fraction and `Infinity` are all refused.
 | `extra.assetTransferMethod`                 | Required, and MUST be `"transfer-factory"`. A reserved protocol key, so any other value is refused rather than carried through as scheme data.
+| `extra.executeBeforeSeconds`                | Required — seconds from request time. The client turns it into the transfer's `executeBefore`; verification refuses a transfer whose deadline is not still at least 5 seconds ahead (`transfer_expired`).
+| `extra.memo`                                | Optional, UTF-8, at most 256 **bytes**. Binds in both directions: the transfer's `x402.memo` must equal it exactly, and a transfer carrying one when you quoted none is refused too — `x402.memo` is the scheme's key, not the payer's. Either way the refusal is `transfer_mismatch` with detail `memo`.
 | `description`                               | Optional.                                                                                                                                                                                                                                                                      |
 
 ### Response 200 — accepted
@@ -156,9 +156,9 @@ guarantee.
 
 ### `invalidReason` values
 
-`scheme_mismatch`, `network_mismatch`, `requirements_expired`,
-`requirements_hash_mismatch`, `bad_fingerprint`, `bad_signature`,
-`nonce_replayed`, `missing_public_key`, `transfer_mismatch`, `internal_error`
+`scheme_mismatch`, `network_mismatch`, `requirements_hash_mismatch`,
+`bad_fingerprint`, `bad_signature`, `nonce_replayed`, `missing_public_key`,
+`transfer_mismatch`, `transfer_expired`, `internal_error`
 
 A body that is not a well-formed request answers `400` with
 `invalidReason: "bad_request"`, and an unexpected fault answers `500` with
@@ -192,12 +192,11 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
-      "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" }
+      "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
+      "executeBeforeSeconds": 120
     },
     "payTo": "merchant::1220…",
     "resource": "https://api.example.com/paid",
-    "nonce": "3f1c…",
-    "validBefore": "2026-08-14T13:05:00.000Z",
     "maxTimeoutSeconds": 60
   }
 }
@@ -212,7 +211,7 @@ JSON
 
 ### What it does
 
-Re-runs verify, reserves the nonce so a concurrent replay cannot spend it, and
+Re-runs verify, reserves the payment so a concurrent replay cannot spend it, and
 submits the payer-signed transaction to Canton. Returns the on-ledger update id.
 
 ### Request headers
@@ -247,13 +246,12 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
-      "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" }
+      "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
+      "executeBeforeSeconds": 120
     },
     "payTo": "merchant::1220…",
     "resource": "https://api.example.com/paid",
     "description": "Access to /paid",
-    "nonce": "3f1c…",
-    "validBefore": "2026-08-14T13:05:00.000Z",
     "maxTimeoutSeconds": 60
   }
 }
@@ -270,7 +268,7 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
   "transaction": "1220a3f…",
   "completionOffset": "42",
   "payer": "buyer::1220…",
-  "extensions": { "settledAmount": "0.05", "nonce": "3f1c…" }
+  "extensions": { "settledAmount": "0.05" }
 }
 ```
 
@@ -287,9 +285,8 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
 ### `errorReason` values
 
 `bad_request`, `unauthorized`, `scheme_mismatch`, `network_mismatch`,
-`requirements_expired`, `requirements_hash_mismatch`, `bad_fingerprint`,
-`bad_signature`, `nonce_replayed`, `execution_failed`, `timeout`,
-`facilitator_error`
+`requirements_hash_mismatch`, `bad_fingerprint`, `bad_signature`,
+`nonce_replayed`, `execution_failed`, `timeout`, `facilitator_error`
 
 Every refusal above answers `400`. An unexpected fault answers `500`, and a
 facilitator that is temporarily out of capacity answers `503` with a

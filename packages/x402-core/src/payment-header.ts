@@ -6,14 +6,15 @@
 // `X-PAYMENT` is base64(JSON) of the x402 v2 PaymentPayload, nothing around it:
 //
 //   { "x402Version": 2,
-//     "accepted": { "scheme": "exact", "network": "canton:devnet", "nonce": "…", … },
+//     "accepted": { "scheme": "exact", "network": "canton:devnet", "amount": "…", "payTo": "…", … },
 //     "payload":  { "preparedTransaction": "…", "signature": "…", … } }
 //
 // `accepted` is the `accepts[]` entry the payer chose, so the requirements the
 // payment was built against travel inside it. Verification is stateless: the
-// facilitator checks the signed transfer and the expiry against one specific
-// requirements object (its exact nonce + validBefore), and that is the one the
-// merchant forwards, after validating it against its own policy.
+// facilitator checks the signed transfer against one specific requirements
+// object — its receiver, instrument, amount and memo — so that object must
+// travel back with the payment. The merchant validates it against its own
+// policy before forwarding it.
 //
 // Isomorphic on purpose (browser + node): base64 via btoa/atob, UTF-8 via
 // TextEncoder/TextDecoder — no Node Buffer.

@@ -62,7 +62,7 @@ const { paymentRequired } = require("@chainsafe/x402-express");
 
 1. **Unpaid request** (no/invalid `X-PAYMENT`) → `402` with
    `{ x402Version: 2, accepts: [requirements] }`. Requirements are built from your
-   options with a generated `nonce` and a `validBefore` TTL.
+   options, with the defaults filled in.
 2. **Paid request** → the `X-PAYMENT` header is decoded to a payment, which carries
    the requirements it was built against as `accepted`. Those are checked against
    your policy, then sent to the facilitator's `/v2/verify`.
@@ -93,9 +93,22 @@ units throughout — the same unit the wire carries.
 
 ### `requirements`
 
-Either a **declarative spec** — `{ payTo, asset, network, amount, scheme?, resource?, description?, validForSeconds?, maxTimeoutSeconds?, nonce? }`, where the middleware fills in `validBefore` (from `validForSeconds`, default 300), `maxTimeoutSeconds` (default 60) and `extra.assetTransferMethod`, and every field may be a fixed value **or** a `(req) => value` resolver — or a **builder** `(req) => CantonPaymentRequirements` for full control (you own `nonce`, `validBefore`, `maxTimeoutSeconds` and `extra`).
+Either a **declarative spec** — `{ payTo, asset, network, amount, scheme?, resource?, description?, maxTimeoutSeconds?, executeBeforeSeconds?, memo? }`, where the middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120), and every field may be a fixed value **or** a `(req) => value` resolver — or a **builder** `(req) => CantonPaymentRequirements` for full control (you own `maxTimeoutSeconds` and the whole of `extra`).
 
-`nonce` is special: it's a **function only** (`(req) => string | Promise<string>`), called once per challenge, so a merchant can generate *and record* it (e.g. persist for reconciliation). Omit it to let the middleware generate a random UUID.
+`memo` is special: it's a **function only** (`(req) => string | Promise<string>`), called once per challenge, so a merchant can generate *and record* it (e.g. an order id persisted for reconciliation). Omit it to quote none. Quoting one **binds** it — the payer must sign the identical value into the transfer.
+
+That proves less than it looks, though: the scheme compares the transfer against the requirements the **payer** echoed, so a payer can echo no memo and sign none, or echo any value and sign that. The middleware keeps no record of what it issued, so it cannot tell. If you reconcile *on* the memo, use `checkPayment` — your own say on a paid request, with everything the payer sent, run after merchant policy and **before verify, so before any settle**. Return a short reason to refuse (answered as a 402 carrying that code), or nothing to accept:
+
+```ts
+checkPayment: async ({ payload, requirements }) => {
+  const order = await orders.findByRef(requirements.extra.memo);
+  if (!order) return "policy_memo_unknown";
+  if (order.status !== "awaiting-payment") return "policy_order_closed";
+  if (!(await allowed(payload.payload.payer))) return "policy_payer_blocked";
+},
+```
+
+It is not memo-specific — it is where any check needing your own records belongs.
 
 ## `req.x402`
 
