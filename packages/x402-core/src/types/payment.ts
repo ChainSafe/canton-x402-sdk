@@ -19,7 +19,7 @@ export type HashingSchemeVersion =
   | (string & {});
 
 /**
- * The inner payload that a wallet packs into the X-PAYMENT header. Schema-first:
+ * The inner payload that a wallet packs into the `PAYMENT-SIGNATURE` header. Schema-first:
  * the guard/parse and the type both derive from this one definition, so the
  * validator can't drift from (or under-check) the type.
  */
@@ -88,7 +88,7 @@ export interface X402PaymentPayload<TInner = CantonPaymentInner, TExtra = Record
   extensions?: PaymentExtensions | null;
 }
 
-/** canton-exact payload: the X-PAYMENT envelope carrying a {@link CantonPaymentInner}. */
+/** canton-exact payload: the payment envelope carrying a {@link CantonPaymentInner}. */
 export const CantonPaymentPayloadSchema = v.object({
   x402Version: v.literal(2),
   accepted: X402PaymentRequirementsEnvelopeSchema,

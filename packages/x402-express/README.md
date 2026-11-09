@@ -60,21 +60,25 @@ const { paymentRequired } = require("@chainsafe/x402-express");
 
 ## How it works
 
-1. **Unpaid request** (no/invalid `X-PAYMENT`) → `402` with the spec's
+1. **Unpaid request** (no payment, or an invalid one) → `402` with the spec's
    `PaymentRequired`, `{ x402Version: 2, resource, accepts: [requirements] }`,
    base64-encoded in the `PAYMENT-REQUIRED` header and as the body. Requirements
    are built from your options, with the defaults filled in, and `resource` is
    the URL and description they were quoted for.
-2. **Paid request** → the `X-PAYMENT` header is decoded to a payment, which carries
-   the requirements it was built against as `accepted`. Those are checked against
-   your policy, then sent to the facilitator's `/v2/verify`.
+2. **Paid request** → the `PAYMENT-SIGNATURE` header is decoded to a payment,
+   which carries the requirements it was built against as `accepted`. Those are
+   checked against your policy, then sent to the facilitator's `/v2/verify`.
+   `X-PAYMENT`, the name this SDK used before the spec's, is still read when
+   `PAYMENT-SIGNATURE` is absent or empty, though only for a payment of this
+   shape: a 0.1.x payer sends the older one, which is `bad_payload` either way.
 3. On a valid verify (and a successful `/v2/settle` when `settle: true`), the
    payer is attached to `req.x402` and `next()` is called. Settlement's ledger
    transaction id is returned in the `X-PAYMENT-RESPONSE` response header.
 
 A browser page on another origin can read `PAYMENT-REQUIRED` and
 `X-PAYMENT-RESPONSE` only if your CORS setup lists them in
-`Access-Control-Expose-Headers`.
+`Access-Control-Expose-Headers`, and can send `PAYMENT-SIGNATURE` only if the
+preflight allows it in `Access-Control-Allow-Headers`.
 
 Verification uses the requirements the payment carries as **`accepted`**, not
 freshly-rebuilt ones, since a memo is issued per challenge and the payer signed

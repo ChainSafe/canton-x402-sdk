@@ -23,7 +23,7 @@ UI  ──apply──▶  mortgage-backend ──GET /v1/credit-score──▶  
                        │                                        │ 402  (0.05 CC)
                        │◀───────────────── 402 ─────────────────┘
                        │ CantonX402Payer signs a 0.05 CC transfer
-                       │──── retry with X-PAYMENT header ──────▶ verify + settle (facilitator)
+                       │──── retry with PAYMENT-SIGNATURE ─────▶ verify + settle (facilitator)
                        │◀──── 200 report + X-PAYMENT-RESPONSE ───┘
                        │ apply lending policy (score / LTV)
 UI ◀── decision + on-chain receipt (updateId) ──┘
@@ -118,7 +118,7 @@ lending policy (`APPROVE_MIN_SCORE`, `MAX_LOAN`, `MAX_LTV`).
 
 ## Notes / gotchas (learned running this on LocalNet)
 
-- **Large `X-PAYMENT` header.** The Canton payment payload (the gzipped prepared tx with its
+- **Large `PAYMENT-SIGNATURE` header.** The Canton payment payload (the gzipped prepared tx with its
   disclosed contracts) makes the header about 10 KB, much of Node's default 16 KB limit for
   all headers together — so a merchant server should raise `maxHeaderSize` or a paid request
   with a few more headers is rejected with **431**. The

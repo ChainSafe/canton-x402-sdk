@@ -32,7 +32,7 @@ const payload: CantonPaymentPayload = {
   },
 };
 
-describe("X-PAYMENT codec", () => {
+describe("PAYMENT-SIGNATURE codec", () => {
   it("round-trips the payment, with the requirements it was built against as `accepted`", () => {
     const decoded = decodePaymentHeader(encodePaymentHeader(payload));
     expect(decoded).toEqual(payload);

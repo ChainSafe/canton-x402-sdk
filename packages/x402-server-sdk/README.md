@@ -60,7 +60,7 @@ const payer = new CantonX402Payer({
 
 // 3. On a 402, authorize against the advertised requirements → get the payload.
 const payload = await payer.authorize(requirements); // CantonPaymentRequirements from the 402
-// hand `payload` to the merchant/facilitator (e.g. via the X-PAYMENT header)
+// hand `payload` to the merchant/facilitator (e.g. via the PAYMENT-SIGNATURE header)
 ```
 
 ### Auth by environment
@@ -136,7 +136,7 @@ refuses it. The payer doesn't track in-flight requests.
 
 `createX402Fetch(payer)` wraps `fetch` so payments are transparent: it calls the
 resource, and on a `402` reads the accepted requirements, pays via the payer, and
-retries with the `X-PAYMENT` header. Non-402 responses — and 402s the payer can't
+retries with the `PAYMENT-SIGNATURE` header. Non-402 responses — and 402s the payer can't
 satisfy — pass through unchanged.
 
 ```ts
