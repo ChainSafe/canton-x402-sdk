@@ -4,6 +4,7 @@ import {
   CantonPaymentRequirementsSchema,
   X402PaymentRequirementsEnvelopeSchema,
 } from "./requirements";
+import { InstrumentIdSchema } from "./common";
 import type { NetworkId, X402Version } from "./common";
 import type { CantonPaymentInner, X402PaymentPayload } from "./payment";
 import type { X402PaymentRequirements } from "./requirements";
@@ -180,3 +181,47 @@ export const SupportedResponseSchema = v.object({
   kinds: v.array(SupportedKindSchema),
 });
 export type SupportedResponse = v.InferOutput<typeof SupportedResponseSchema>;
+
+/**
+ * One instrument a deployment settles, as `kinds[].extra.instruments[]` carries
+ * it.
+ *
+ * `admin` repeats `instrumentId.admin`: the registered scheme names the admin
+ * party at the top level, and the Splice instrument id carries it too. Both are
+ * read, and {@link selectCantonDeployments} refuses a response where the two
+ * disagree, since it is then inconsistent about who validates the holding.
+ */
+export const SupportedInstrumentSchema = v.looseObject({
+  admin: v.optional(v.string()),
+  instrumentId: v.optional(InstrumentIdSchema),
+  /** Display symbol, e.g. `CC`. */
+  symbol: v.optional(v.string()),
+});
+export type SupportedInstrument = v.InferOutput<typeof SupportedInstrumentSchema>;
+
+/**
+ * The canton-exact reading of `kinds[].extra`.
+ *
+ * `extra` is Optional and scheme-defined in x402 v2 §7.3, so what is in there is
+ * this scheme's business. Every field is optional and unknown keys pass: a
+ * conforming facilitator may omit any of this, and `extra` is where other
+ * deployments put their own keys. Nothing here is trusted to exist — the reader
+ * says so when something it needs is missing, instead of taking `undefined` for
+ * a value.
+ */
+export const CantonSupportedExtraSchema = v.looseObject({
+  /** Asset transfer methods this deployment speaks, e.g. `transfer-factory`. */
+  transferMethods: v.optional(v.array(v.string())),
+  /** The synchronizer it submits to — the id a payer prepares against. */
+  synchronizerId: v.optional(v.string()),
+  /** How a prepared transaction travels, e.g. `inline`. */
+  carriages: v.optional(v.array(v.string())),
+  instruments: v.optional(v.array(SupportedInstrumentSchema)),
+});
+export type CantonSupportedExtra = v.InferOutput<typeof CantonSupportedExtraSchema>;
+
+/** Read one kind's `extra` as canton-exact. `{}` when it is absent or malformed. */
+export function cantonSupportedExtra(kind: SupportedKind): CantonSupportedExtra {
+  const parsed = v.safeParse(CantonSupportedExtraSchema, kind.extra ?? {});
+  return parsed.success ? parsed.output : {};
+}
