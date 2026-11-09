@@ -39,7 +39,19 @@ export interface DecodedTransfer {
   amount: string;
   /** Instrument moved — must equal `requirements.extra.instrumentId`. */
   instrumentId: { id: string; admin: string };
+  /**
+   * `executeBefore` as Daml `Time` — microseconds since the epoch. The transfer
+   * is unexecutable after it, so Rule 10 refuses one that is not still ahead of
+   * now by a margin. Microseconds, not milliseconds, and `bigint` because the
+   * value is a 64-bit integer the wire carries exactly.
+   */
+  executeBeforeMicros?: bigint;
+  /** `meta.values["x402.memo"]`, when the payer committed one (Rule 12). */
+  memo?: string;
 }
+
+/** The metadata key the scheme reserves for the merchant's memo. */
+const MEMO_KEY = "x402.memo";
 
 const TRANSFER_CHOICE = "TransferFactory_Transfer";
 
@@ -104,10 +116,15 @@ function nodeIdOf(id: string): string {
   return id;
 }
 
-/** A decoded Daml `Value`: either a scalar string (party/text/numeric) or a record. */
+/**
+ * A decoded Daml `Value` — the oneof members this walker reads: a scalar string
+ * (party/text/numeric), a record, a `Time`, or a `TextMap`.
+ */
 interface ValueNode {
   str?: string;
   record?: RecordFieldNode[];
+  micros?: bigint;
+  textMap?: Map<string, ValueNode>;
 }
 interface RecordFieldNode {
   label: string;
@@ -187,7 +204,15 @@ function assertSingleField(bytes: Uint8Array): void {
   if (fields !== 1) throw new Error(`a oneof holds ${fields} members`);
 }
 
-/** Decode a Daml `Value` message (only the string scalars + nested record). */
+/**
+ * Decode a Daml `Value` message: the string scalars, a nested record, a `Time`
+ * and a `TextMap`.
+ *
+ * `Time` is the one member that is NOT length-delimited. Daml serialises it as
+ * a protobuf SFIXED64 — wire type 1, eight little-endian bytes — so a reader
+ * that only looks at wire-type-2 members skips the deadline entirely and reads
+ * it back as absent.
+ */
 function readValue(bytes: Uint8Array): ValueNode {
   assertSingleField(bytes);
   const r = new StrictReader(bytes);
@@ -198,11 +223,53 @@ function readValue(bytes: Uint8Array): ValueNode {
     const wt = tag & 7;
     if ((field === 6 || field === 7 || field === 8) && wt === 2) {
       out.str = r.string(); // numeric | party | text
+    } else if (field === 5 && wt === 1) {
+      out.micros = readSFixed64(r); // timestamp (Daml `Time`, µs)
+    } else if (field === 12 && wt === 2) {
+      out.textMap = readTextMap(r.bytes()); // text_map
     } else if (field === 14 && wt === 2) {
       out.record = readRecordFields(r.bytes()); // record
     } else {
       r.skipType(wt);
     }
+  }
+  return out;
+}
+
+/** Eight little-endian bytes as a signed 64-bit integer. */
+function readSFixed64(r: StrictReader): bigint {
+  if (r.pos + 8 > r.len) throw new Error("truncated sfixed64");
+  let unsigned = 0n;
+  for (let i = 7; i >= 0; i--) unsigned = (unsigned << 8n) | BigInt(r.buf[r.pos + i]);
+  r.skip(8);
+  return unsigned >= 1n << 63n ? unsigned - (1n << 64n) : unsigned;
+}
+
+/**
+ * Decode a `TextMap{1: repeated Entry{1: key, 2: value}}`.
+ *
+ * A repeated key is refused rather than resolved. Two entries are two answers
+ * to what the payer committed to, and any last-wins rule lets a producer show
+ * one value to a reader and another to the engine.
+ */
+function readTextMap(bytes: Uint8Array): Map<string, ValueNode> {
+  const out = new Map<string, ValueNode>();
+  for (const entry of subMessages(bytes, 1)) {
+    assertCanonical(entry, [1, 2]);
+    const r = new StrictReader(entry);
+    let key: string | undefined;
+    let value: ValueNode = {};
+    while (r.pos < r.len) {
+      const tag = r.uint32();
+      const field = tag >>> 3;
+      const wt = tag & 7;
+      if (field === 1 && wt === 2) key = r.string();
+      else if (field === 2 && wt === 2) value = readValue(r.bytes());
+      else r.skipType(wt);
+    }
+    if (key === undefined) continue;
+    if (out.has(key)) throw new Error(`text map repeats the key ${key}`);
+    out.set(key, value);
   }
   return out;
 }
@@ -290,9 +357,16 @@ function readTransfer(chosenValue: Uint8Array): DecodedTransfer | null {
   const instr = pick(transfer, "instrumentId", 3)?.record;
   const id = instr && pick(instr, "id", 0)?.str;
   const admin = instr && pick(instr, "admin", 1)?.str;
+  // Declaration order after the four above: requestedAt, executeBefore,
+  // inputHoldingCids, meta.
+  const executeBeforeMicros = pick(transfer, "executeBefore", 5)?.micros;
+  // `meta` is a Metadata RECORD whose single field `values` holds the TextMap —
+  // not a TextMap directly.
+  const meta = pick(transfer, "meta", 7)?.record;
+  const memo = meta && pick(meta, "values", 0)?.textMap?.get(MEMO_KEY)?.str;
 
   if (!sender || !receiver || !amount || !id || !admin) return null;
-  return { sender, receiver, amount, instrumentId: { id, admin } };
+  return { sender, receiver, amount, instrumentId: { id, admin }, executeBeforeMicros, memo };
 }
 
 /**

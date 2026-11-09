@@ -39,7 +39,8 @@ const gzipped = (protobufB64: string): string =>
   gzipPreparedTransaction(Buffer.from(protobufB64, "base64"));
 
 // A deterministic payer keypair + a well-formed, correctly-signed payload for it.
-async function buildSignedFixture() {
+async function buildSignedFixture(overrides: { executeBeforeSeconds?: number; memo?: string } = {}) {
+  const executeBeforeSeconds = overrides.executeBeforeSeconds ?? 120;
   const seed = new Uint8Array(32).fill(3);
   const privateKey = toB64(seed);
   const pub = getPublicKey(seed);
@@ -52,11 +53,14 @@ async function buildSignedFixture() {
     network: NETWORK,
     amount: "100000000",
     asset: "CC",
-    extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220dso" } },
+    extra: {
+      assetTransferMethod: "transfer-factory",
+      executeBeforeSeconds,
+      instrumentId: { id: "Amulet", admin: "DSO::1220dso" },
+      ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
+    },
     payTo: "merchant::1220merch",
     resource: "/api/resource",
-    nonce: "550e8400-e29b-41d4-a716-446655440000",
-    validBefore: "2999-01-01T00:00:00.000Z",
     maxTimeoutSeconds: 60,
   };
 
@@ -64,11 +68,15 @@ async function buildSignedFixture() {
   // requirements (payer → payTo, the required Amulet, the required amount),
   // gzipped as the payload carries it. The transfer carries an on-ledger
   // Decimal; the quote is in atomic units.
+  // Its deadline is the quoted horizon from now, as a real payer computes it.
+  const executeBeforeMicros = BigInt(Date.now() + executeBeforeSeconds * 1000) * 1000n;
   const protobuf = encodePreparedTransaction({
     sender: payer,
     receiver: requirements.payTo,
     amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
     instrumentId: requirements.extra.instrumentId,
+    executeBeforeMicros,
+    ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
   });
   const preparedTransaction = gzipped(protobuf);
   const preparedTxHash = await computePreparedTransactionHash(
@@ -97,6 +105,7 @@ async function buildSignedFixture() {
     payer,
     privateKey,
     signatureHex,
+    executeBeforeMicros,
     seedB64: toB64(seed),
     protobuf,
   };
@@ -113,6 +122,36 @@ function withPaddingBitSet(signature: string): string {
   const i = signature.length - 3;
   const flipped = BASE64_ALPHABET[BASE64_ALPHABET.indexOf(signature[i]) ^ 1];
   return signature.slice(0, i) + flipped + signature.slice(i + 1);
+}
+
+/**
+ * The same payment with the transfer re-encoded at a different deadline.
+ * Rehashed and re-signed, because the signature is bound to the transaction
+ * now — without that these would fail at the hash check and never reach
+ * Rule 10, passing for the wrong reason.
+ */
+async function reDeadline(
+  fixture: Awaited<ReturnType<typeof buildSignedFixture>>,
+  executeBeforeMicros: bigint | undefined,
+): Promise<CantonPaymentPayload> {
+  const { payload, requirements, payer, privateKey } = fixture;
+  const protobuf = encodePreparedTransaction({
+    sender: payer,
+    receiver: requirements.payTo,
+    amount: atomicToLedger(requirements.amount, 10) as string,
+    instrumentId: requirements.extra.instrumentId,
+    ...(executeBeforeMicros === undefined ? {} : { executeBeforeMicros }),
+  });
+  const preparedTxHash = await computePreparedTransactionHash(protobuf, HashingSchemeVersion.V2);
+  return {
+    ...payload,
+    payload: {
+      ...payload.payload,
+      preparedTransaction: gzipped(protobuf),
+      preparedTxHash,
+      signature: signatureToBase64(signHash(preparedTxHash, privateKey)),
+    },
+  };
 }
 
 describe("cantonExactVerifier", () => {
@@ -187,17 +226,6 @@ describe("cantonExactVerifier", () => {
       { ...requirements, network: other },
     );
     expect(result).toMatchObject({ isValid: false, invalidReason: "network_mismatch" });
-  });
-
-  it("rejects expired requirements, naming the transfer's sender as the payer", async () => {
-    // The transfer is decoded first, so even this early refusal names the payer.
-    const { payload, requirements, payer } = await buildSignedFixture();
-    const expired = { ...requirements, validBefore: "2000-01-01T00:00:00.000Z" };
-    expect(await verifier.verify(payload, expired)).toEqual({
-      isValid: false,
-      invalidReason: "requirements_expired",
-      payer,
-    });
   });
 
   it("ignores a requirementsHash an older payer still sends, right or wrong", async () => {
@@ -431,6 +459,57 @@ describe("cantonExactVerifier", () => {
     expect(await verifier.verify(p, requirements)).toMatchObject({
       isValid: false,
       invalidReason: "internal_error",
+    });
+  });
+
+  it("refuses a transfer whose deadline has passed, or is about to (Rule 10)", async () => {
+    // The margin exists because settling is not instantaneous: accepting at
+    // T-1ms guarantees the wasted relay it is meant to avoid.
+    const fixture = await buildSignedFixture();
+    const nowMicros = BigInt(Date.now()) * 1000n;
+    for (const micros of [nowMicros - 60_000_000n, nowMicros, nowMicros + 1_000_000n]) {
+      expect(await verifier.verify(await reDeadline(fixture, micros), fixture.requirements)).toMatchObject({
+        isValid: false,
+        invalidReason: "transfer_expired",
+      });
+    }
+  });
+
+  it("refuses a transfer that carries no deadline at all", async () => {
+    // Not "no deadline, therefore fine": a real transfer always has one, and
+    // reading an absent field as unlimited would make Rule 10 skippable by
+    // leaving the field out.
+    const fixture = await buildSignedFixture();
+    expect(await verifier.verify(await reDeadline(fixture, undefined), fixture.requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "transfer_expired",
+    });
+  });
+
+  it("binds the memo when the merchant quotes one (Rule 12)", async () => {
+    const quoted = await buildSignedFixture({ memo: "invoice-2024-001" });
+    expect(await verifier.verify(quoted.payload, quoted.requirements)).toMatchObject({ isValid: true });
+
+    // Signed a different memo, or none, against requirements that quote one.
+    for (const memo of ["invoice-2024-002", undefined]) {
+      const other = await buildSignedFixture(memo === undefined ? {} : { memo });
+      expect(await verifier.verify(other.payload, quoted.requirements)).toMatchObject({
+        invalidReason: "transfer_mismatch",
+        extensions: { detail: "memo" },
+      });
+    }
+  });
+
+  it("refuses a memo the merchant did not quote", async () => {
+    // `x402.memo` is the scheme's key, not the payer's. Letting a payer name an
+    // order the merchant never quoted lets a cheap payment reconcile against an
+    // expensive one, for any merchant that matches ledger payments by memo.
+    const { requirements } = await buildSignedFixture();
+    const withMemo = await buildSignedFixture({ memo: "someone else's order" });
+    expect(await verifier.verify(withMemo.payload, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      extensions: { detail: "memo" },
     });
   });
 

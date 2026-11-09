@@ -12,11 +12,9 @@ const requirements = {
   network: "canton:x",
   amount: "500000000",
   asset: "CC",
-  extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::x" } },
+  extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
   payTo: "merchant::x",
   resource: "https://api.example/paid",
-  nonce: "n1",
-  validBefore: "2999-01-01T00:00:00.000Z",
   maxTimeoutSeconds: 60,
 } as CantonPaymentRequirements;
 
@@ -86,7 +84,7 @@ describe("createX402Fetch", () => {
   });
 
   it("uses a custom select to choose which payer pays which requirement", async () => {
-    const alt = { ...requirements, scheme: "exact-evm", nonce: "n2" } as CantonPaymentRequirements;
+    const alt = { ...requirements, scheme: "exact-evm" } as CantonPaymentRequirements;
     const payer = makePayer();
     const fetchMock = makeFetch({ body402: { x402Version: 2, accepts: [alt, requirements] } });
     const f = createX402Fetch(payer, {

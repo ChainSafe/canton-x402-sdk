@@ -1,7 +1,6 @@
 import {
   ASSET_TRANSFER_METHOD,
   EXACT_SCHEME_ID,
-  isExpired,
   WIRE_DECIMALS,
   atomicToLedger,
   signHash,
@@ -86,19 +85,25 @@ export class CantonX402Payer implements X402Payer {
     if (ledgerAmount === null) {
       throw new Error(`x402: invalid amount "${requirements.amount}" (expected atomic units)`);
     }
-    if (isExpired(requirements.validBefore)) {
-      throw new Error(`x402: requirements expired at ${requirements.validBefore}`);
-    }
-
     const { sdk, key } = this.opts;
 
     // 1. Build the Token Standard transfer (routes the TransferFactory via the registry).
+    //    `expirationDate` becomes the transfer's `executeBefore`. Left unset the
+    //    wallet SDK picks 24 hours, which the quoted horizon is meant to replace
+    //    — and the verifier checks what the transfer carries, not what was quoted.
+    //    The memo travels under the scheme's own key: the SDK's `memo` parameter
+    //    writes `splice.lfdecentralizedtrust.org/reason`, a different one, so
+    //    both can be present without either standing in for the other.
     const [command, disclosed] = await sdk.token.transfer.create({
       sender: key.partyId,
       recipient: requirements.payTo,
       amount: ledgerAmount,
       instrumentId: requirements.extra.instrumentId.id,
       registryUrl,
+      expirationDate: new Date(Date.now() + requirements.extra.executeBeforeSeconds * 1000),
+      ...(requirements.extra.memo === undefined
+        ? {}
+        : { meta: { values: { "x402.memo": requirements.extra.memo } } }),
     });
 
     // 2. Prepare (interactive submission) → prepared tx + hash to sign.

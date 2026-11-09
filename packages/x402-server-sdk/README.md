@@ -123,8 +123,9 @@ interface X402Payer {
   facilitator takes the transfer's sender, and checks the key's fingerprint against it.
 
 `CantonX402Payer` is stateless: double-settle is prevented by the facilitator (it
-rejects a reused `nonce`) and Canton (it dedupes execute by a submissionId derived
-from the prepared-tx hash), so the payer doesn't track in-flight requests.
+rejects a reused memo, when the merchant quotes one) and by Canton itself: a
+replayed transfer names input holdings that are already spent, so the ledger
+refuses it. The payer doesn't track in-flight requests.
 
 ## Auto-pay fetch
 

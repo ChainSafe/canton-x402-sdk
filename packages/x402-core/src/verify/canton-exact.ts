@@ -2,7 +2,7 @@
 // scheme `exact` on a `canton:*` network. Composes the scheme-agnostic checks in
 // ./common with Ed25519 signature verification, the Canton key-fingerprint
 // derivation, and the canton-id / canton-payload shape guards. Pure and
-// stateless — the stateful guards (nonce replay) and on-chain execution stay in
+// stateless — the stateful guards (replay) and on-chain execution stay in
 // the facilitator, which composes this verifier's result.
 
 import {
@@ -25,7 +25,6 @@ import type { X402PaymentPayload } from "../types/payment";
 import type { X402PaymentRequirements } from "../types/requirements";
 import {
   isValidAmount,
-  isExpired,
   ledgerToAtomic,
   WIRE_DECIMALS,
 } from "./common";
@@ -107,6 +106,19 @@ export function signHash(hashHex: string, privateKeyBase64: string): string {
   return bytesToHex(ed25519Sign(hexToBytes(hashHex), seed));
 }
 
+/**
+ * How much future an `executeBefore` must have left to be worth accepting.
+ * Settling is not instantaneous, so a transfer expiring inside this window is
+ * one the ledger refuses after the work of relaying it has been done.
+ */
+const EXECUTE_BEFORE_MARGIN_MICROS = 5_000_000n;
+
+/** Rule 10: the deadline must be ahead of now by the margin. Absent counts as expired. */
+function isTransferExpired(executeBeforeMicros: bigint | undefined, now: number = Date.now()): boolean {
+  if (executeBeforeMicros === undefined) return true;
+  return executeBeforeMicros <= BigInt(now) * 1000n + EXECUTE_BEFORE_MARGIN_MICROS;
+}
+
 // ─── payload encodings ──────────────────────────────────────────────────────
 // The payload carries `preparedTxHash` as lower-case hex and `signature` as
 // base64, which are the spec's encodings. signHash / verifySignature stay in hex
@@ -178,7 +190,7 @@ function fail(reason: VerifyInvalidReason, payer?: string): VerifyResponseInvali
 /**
  * The pure canton-exact verification, factored out of the facilitator's
  * `V2CantonExact.verify`. Runs the stateless checks in order; the facilitator's
- * stateful checks (nonce replay, min-amount FX policy) and the on-chain execute
+ * stateful checks (replay, min-amount FX policy) and the on-chain execute
  * compose on top of a successful result here.
  */
 async function verifyCantonExact(
@@ -229,9 +241,7 @@ async function verifyCantonExact(
     return { isValid: false, invalidReason: "transfer_mismatch", extensions: { detail: "undecodable" } };
   }
   const payer = transfer.sender;
-  // 7. expiry
-  if (isExpired(requirements.validBefore)) return fail("requirements_expired", payer);
-  // 8. public key well-formed (32-byte Ed25519). Malformed key bytes are
+  // 7. public key well-formed (32-byte Ed25519). Malformed key bytes are
   //    indistinguishable from "no usable key" here → missing_public_key.
   let derivedFingerprint: string;
   try {
@@ -239,14 +249,14 @@ async function verifyCantonExact(
   } catch {
     return fail("missing_public_key", payer);
   }
-  // 9. the key must be the sender's: its fingerprint must match the sender
+  // 8. the key must be the sender's: its fingerprint must match the sender
   //    party's `::<fingerprint>` suffix. Without this, any key could sign a
   //    transfer that names another party as the sender.
   const partySuffix = payer.split("::")[1];
   if (!partySuffix || derivedFingerprint.toLowerCase() !== partySuffix.toLowerCase()) {
     return fail("bad_fingerprint", payer);
   }
-  // 10. Validate the prepared-transaction hash and signature encodings.
+  // 9. Validate the prepared-transaction hash and signature encodings.
   //    `signature` is canonical base64, while `preparedTxHash` is canonical
   //    lowercase hex. The hash is keyed on the facilitator's submissionId,
   //    so alternate spellings of the same bytes are refused.
@@ -255,7 +265,7 @@ async function verifyCantonExact(
     return fail("bad_signature", payer);
   }
 
-  // 11. An absent hashingSchemeVersion means V2.
+  // 10. An absent hashingSchemeVersion means V2.
   const hashingSchemeVersion =
     inner.hashingSchemeVersion ?? HashingSchemeVersion.V2;
 
@@ -263,7 +273,7 @@ async function verifyCantonExact(
     return fail("internal_error", payer);
   }
 
-  // 12. Derive the trusted hash from the validated prepared transaction.
+  // 11. Derive the trusted hash from the validated prepared transaction.
   let computedHash: string;
   try {
     computedHash = await computePreparedTransactionHash(
@@ -279,17 +289,17 @@ async function verifyCantonExact(
     };
   }
 
-  // 13. The supplied hash must describe this exact transaction.
+  // 12. The supplied hash must describe this exact transaction.
   if (computedHash.toLowerCase() !== inner.preparedTxHash.toLowerCase()) {
     return fail("prepared_transaction_hash_mismatch", payer);
   }
 
-  // 14. Verify the payload's base64 signature against the trusted hash.
+  // 13. Verify the payload's base64 signature against the trusted hash.
   if (!verifySignature(computedHash, signatureHex, inner.publicKey)) {
     return fail("bad_signature", payer);
   }
 
-  // 15. The signed transfer must actually move what the requirements demand.
+  // 14. The signed transfer must actually move what the requirements demand.
   //     This is the payload's one binding to the requirements: the signature
   //     covers the prepared transaction, so checking receiver/instrument/amount
   //     rejects a valid signature over a divergent transfer (e.g. to another
@@ -302,6 +312,13 @@ async function verifyCantonExact(
       payer,
       extensions: { detail: mismatch },
     };
+  }
+  // 15. the transfer must still be executable. An absent deadline counts as
+  //     expired: `executeBefore` is not optional in a real transfer, and
+  //     reading a missing one as "no deadline" would make the check skippable
+  //     by leaving the field out.
+  if (isTransferExpired(transfer.executeBeforeMicros)) {
+    return fail("transfer_expired", payer);
   }
   return { isValid: true, payer };
 }
@@ -322,7 +339,7 @@ export function decodePayloadTransfer(preparedTransaction: string): DecodedTrans
 /**
  * Check a decoded transfer against the requirements. Returns `null` when the
  * transfer satisfies them, or a short field detail (`"receiver" | "instrument" |
- * "amount"`) naming the first divergence — surfaced in the
+ * "amount" | "memo"`) naming the first divergence — surfaced in the
  * `transfer_mismatch` response's `extensions.detail`. The amount must be EQUAL,
  * not merely sufficient (Rule 4), and the two sides are in different units — the
  * transfer carries an on-ledger Decimal, the requirements an atomic integer at
@@ -331,9 +348,17 @@ export function decodePayloadTransfer(preparedTransaction: string): DecodedTrans
 export function findTransferMismatch(
   transfer: DecodedTransfer,
   requirements: CantonPaymentRequirements,
-): "receiver" | "instrument" | "amount" | null {
+): "receiver" | "instrument" | "amount" | "memo" | null {
   // No sender check: the sender is the payer by definition (spec Rule 8), and
   // the verifier has already bound the signing key to it by fingerprint.
+  // Rule 12, both ways. The spec only requires the check when the merchant
+  // quotes a memo, but `x402.memo` is a key the scheme reserves, not the
+  // payer's own namespace — its own references go under its own key, which is
+  // where the wallet SDK already writes them. So an unquoted transfer must
+  // carry no memo either: a merchant that reconciles ledger payments by memo
+  // would otherwise credit whichever order a payer chose to name, paying a
+  // cheap resource to settle an expensive one.
+  if (transfer.memo !== requirements.extra.memo) return "memo";
   if (transfer.receiver !== requirements.payTo) return "receiver";
   // From `extra`, not `asset`: the latter is only a symbol, which cannot say
   // which registry issued the instrument.
