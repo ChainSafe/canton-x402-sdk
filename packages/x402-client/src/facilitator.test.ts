@@ -107,3 +107,162 @@ describe("FacilitatorClient", () => {
     expect(init?.headers).not.toHaveProperty("Authorization");
   });
 });
+
+describe("FacilitatorClient /v2/supported cache", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  const kinds = (network: string) => ({ kinds: [{ x402Version: 2, scheme: "exact", network }] });
+
+  it("serves a second call from cache instead of fetching again", async () => {
+    const fetchMock = vi.fn(async () => json(kinds("canton:one")));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FacilitatorClient("https://f.example");
+
+    const first = await client.supported();
+    const second = await client.supported();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(second).toEqual(first);
+  });
+
+  it("fetches again once the TTL has passed", async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    const fetchMock = vi.fn(async () => json(kinds(`canton:${++n}`)));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FacilitatorClient("https://f.example", { supportedTtlMs: 1_000 });
+
+    expect((await client.supported()).kinds[0].network).toBe("canton:1");
+    vi.advanceTimersByTime(999);
+    expect((await client.supported()).kinds[0].network).toBe("canton:1");
+    vi.advanceTimersByTime(2);
+    expect((await client.supported()).kinds[0].network).toBe("canton:2");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("fetches every time when the TTL is zero", async () => {
+    const fetchMock = vi.fn(async () => json(kinds("canton:one")));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FacilitatorClient("https://f.example", { supportedTtlMs: 0 });
+
+    await client.supported();
+    await client.supported();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("refresh: true bypasses a cache entry that is still fresh", async () => {
+    let n = 0;
+    const fetchMock = vi.fn(async () => json(kinds(`canton:${++n}`)));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FacilitatorClient("https://f.example");
+
+    expect((await client.supported()).kinds[0].network).toBe("canton:1");
+    expect((await client.supported({ refresh: true })).kinds[0].network).toBe("canton:2");
+    // ...and the refreshed value replaces what the cache serves next.
+    expect((await client.supported()).kinds[0].network).toBe("canton:2");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("collapses concurrent cold-start callers onto one request", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fetchMock = vi.fn(async () => {
+      await gate;
+      return json(kinds("canton:one"));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FacilitatorClient("https://f.example");
+
+    const all = Promise.all([client.supported(), client.supported(), client.supported()]);
+    release();
+    const results = await all;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    for (const res of results) expect(res.kinds[0].network).toBe("canton:one");
+  });
+
+  it("serves the stale value when a refresh fails", async () => {
+    vi.useFakeTimers();
+    let attempt = 0;
+    const fetchMock = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) return json(kinds("canton:one"));
+      return json({ error: "down" }, 503);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FacilitatorClient("https://f.example", { supportedTtlMs: 1_000 });
+
+    await client.supported();
+    vi.advanceTimersByTime(2_000);
+
+    // A facilitator blip must not stop a merchant quoting.
+    expect((await client.supported()).kinds[0].network).toBe("canton:one");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to stale for a caller that joined a failing request, not just the one that started it", async () => {
+    vi.useFakeTimers();
+    let attempt = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fetchMock = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) return json(kinds("canton:one"));
+      await gate;
+      return json({ error: "down" }, 503);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FacilitatorClient("https://f.example", { supportedTtlMs: 1_000 });
+
+    await client.supported();
+    vi.advanceTimersByTime(2_000);
+
+    const joined = Promise.all([client.supported(), client.supported()]);
+    release();
+    const results = await joined;
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const res of results) expect(res.kinds[0].network).toBe("canton:one");
+  });
+
+  it("throws when the first fetch fails and there is nothing stale to serve", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ error: "down" }, 503)));
+    const client = new FacilitatorClient("https://f.example");
+
+    const err: FacilitatorError = await client.supported().catch((e) => e);
+    expect(err).toBeInstanceOf(FacilitatorError);
+    expect(err.status).toBe(503);
+    expect(err.endpoint).toBe("/v2/supported");
+  });
+
+  it("retries after a failure rather than caching it", async () => {
+    let attempt = 0;
+    const fetchMock = vi.fn(async () => {
+      attempt += 1;
+      return attempt === 1 ? json({ error: "down" }, 503) : json(kinds("canton:one"));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FacilitatorClient("https://f.example");
+
+    await client.supported().catch(() => undefined);
+    expect((await client.supported()).kinds[0].network).toBe("canton:one");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("caches per client, so one deployment's answer never serves another", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      json(kinds(url.startsWith("https://a.") ? "canton:a" : "canton:b")),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const a = new FacilitatorClient("https://a.example");
+    const b = new FacilitatorClient("https://b.example");
+
+    expect((await a.supported()).kinds[0].network).toBe("canton:a");
+    expect((await b.supported()).kinds[0].network).toBe("canton:b");
+  });
+});

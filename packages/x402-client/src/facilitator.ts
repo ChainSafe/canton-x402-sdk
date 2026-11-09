@@ -1,10 +1,10 @@
 import type {
-  CantonPaymentPayload,
-  CantonPaymentRequirements,
+  X402PaymentPayload,
+  X402PaymentRequirements,
   SettleResponse,
   SupportedResponse,
-  VerifyRequest,
   VerifyResponse,
+  X402Request,
 } from "@chainsafe/x402-core";
 
 export interface FacilitatorClientOptions {
@@ -17,6 +17,16 @@ export interface FacilitatorClientOptions {
   apiKey?: string | (() => string | Promise<string>);
   /** Abort a request that exceeds this many ms. Omit for no timeout. */
   timeoutMs?: number;
+  /**
+   * How long a `/v2/supported` response is reused, in milliseconds. Default
+   * five minutes; `0` fetches every time.
+   *
+   * It is cached because merchants configure from it — the synchronizer, the
+   * instrument admin, the transfer method — and those are deployment facts that
+   * change when the facilitator is redeployed, not per request. Without a cache
+   * every challenge would carry a round trip to learn what it already knew.
+   */
+  supportedTtlMs?: number;
 }
 
 /**
@@ -52,8 +62,14 @@ interface RawResponse {
 }
 
 /** Thin client for a Canton x402 facilitator's verify / settle / supported API. */
+const DEFAULT_SUPPORTED_TTL_MS = 5 * 60_000;
+
 export class FacilitatorClient {
   private readonly base: string;
+  /** Last successful `/v2/supported`, with the time it was fetched. */
+  private supportedCache?: { at: number; value: SupportedResponse };
+  /** A fetch already in flight, so concurrent callers share one request. */
+  private supportedInFlight?: Promise<SupportedResponse>;
 
   /**
    * @param facilitatorUrl Base URL of the facilitator; a trailing slash is trimmed.
@@ -72,8 +88,8 @@ export class FacilitatorClient {
    * protocol/transport error.
    */
   verify(
-    payload: CantonPaymentPayload,
-    requirements: CantonPaymentRequirements,
+    payload: X402PaymentPayload<unknown>,
+    requirements: X402PaymentRequirements<unknown>,
   ): Promise<VerifyResponse> {
     return this.postDomain<VerifyResponse>("/v2/verify", envelope(payload, requirements));
   }
@@ -84,14 +100,63 @@ export class FacilitatorClient {
    * protocol/transport error.
    */
   settle(
-    payload: CantonPaymentPayload,
-    requirements: CantonPaymentRequirements,
+    payload: X402PaymentPayload<unknown>,
+    requirements: X402PaymentRequirements<unknown>,
   ): Promise<SettleResponse> {
     return this.postDomain<SettleResponse>("/v2/settle", envelope(payload, requirements));
   }
 
-  /** GET /v2/supported — the (scheme, network) kinds this facilitator accepts. Unauthenticated. */
-  async supported(): Promise<SupportedResponse> {
+  /**
+   * GET /v2/supported — what this facilitator settles: the (scheme, network)
+   * kinds and, in `kinds[].extra`, the synchronizer, instruments and transfer
+   * methods a merchant configures from. Unauthenticated.
+   *
+   * Cached for {@link FacilitatorClientOptions.supportedTtlMs}. Concurrent
+   * callers share one request rather than each making their own, so a cold
+   * start under load costs one round trip and not one per caller.
+   *
+   * A refresh that fails falls back to the last value when there is one: these
+   * are near-static deployment facts, and a facilitator blip should not stop a
+   * merchant quoting. Pass `{ refresh: true }` to bypass the cache; with no
+   * previous value, the error propagates.
+   */
+  async supported(opts: { refresh?: boolean } = {}): Promise<SupportedResponse> {
+    const ttl = this.opts.supportedTtlMs ?? DEFAULT_SUPPORTED_TTL_MS;
+    const cached = this.supportedCache;
+    if (!opts.refresh && cached && Date.now() - cached.at < ttl) return cached.value;
+
+    try {
+      return await this.fetchSupportedOnce(opts.refresh === true);
+    } catch (err) {
+      // Stale beats nothing for data that changes on redeploy, not per request.
+      // Checked here rather than at the fetch, so a caller that joined someone
+      // else's request falls back the same way as the one that started it.
+      if (cached) return cached.value;
+      throw err;
+    }
+  }
+
+  /** The fetch itself, with concurrent callers collapsed onto one request. */
+  private fetchSupportedOnce(refresh: boolean): Promise<SupportedResponse> {
+    const existing = this.supportedInFlight;
+    if (!refresh && existing) return existing;
+
+    const fetching: Promise<SupportedResponse> = this.fetchSupported().then(
+      (value) => {
+        this.supportedCache = { at: Date.now(), value };
+        if (this.supportedInFlight === fetching) this.supportedInFlight = undefined;
+        return value;
+      },
+      (err: unknown) => {
+        if (this.supportedInFlight === fetching) this.supportedInFlight = undefined;
+        throw err;
+      },
+    );
+    this.supportedInFlight = fetching;
+    return fetching;
+  }
+
+  private async fetchSupported(): Promise<SupportedResponse> {
     const res = await this.request("/v2/supported", "GET", undefined, false);
     if (res.ok && res.parsed !== undefined) return res.parsed as SupportedResponse;
     throw this.error("/v2/supported", res);
@@ -101,7 +166,7 @@ export class FacilitatorClient {
    * Shared POST path for verify/settle: send the envelope and return the domain
    * response on 2xx, or throw {@link FacilitatorError} on anything else.
    */
-  private async postDomain<T>(path: string, body: VerifyRequest): Promise<T> {
+  private async postDomain<T>(path: string, body: X402Request<unknown, unknown>): Promise<T> {
     const res = await this.request(path, "POST", JSON.stringify(body));
     // 2xx is the only success path: the facilitator returns evaluated verdicts
     // (valid AND invalid) with 200. Any non-2xx is a protocol/server error whose
@@ -183,9 +248,9 @@ function parseRetryAfter(value: string | null): number | undefined {
 
 /** Wrap a payload + requirements into the `{x402Version, paymentPayload, paymentRequirements}` wire envelope. */
 function envelope(
-  payload: CantonPaymentPayload,
-  requirements: CantonPaymentRequirements,
-): VerifyRequest {
+  payload: X402PaymentPayload<unknown>,
+  requirements: X402PaymentRequirements<unknown>,
+): X402Request<unknown, unknown> {
   return {
     x402Version: payload.x402Version,
     paymentPayload: payload,
