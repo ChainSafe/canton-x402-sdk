@@ -118,10 +118,10 @@ describe("decodePreparedTransaction on a non-canonical encoding", () => {
   });
 
   it("still decodes when the other fields appear once each", () => {
-    // PreparedTransaction.metadata and Exercise.template_id
-    const blob = encodePreparedTransaction(TRANSFER, {
-      extra: { prepared: wrap(2, empty), exercise: wrap(4, empty) },
-    });
+    // Exercise.template_id. PreparedTransaction.metadata used to be injected
+    // here too; the fixture emits it now — the canonical hasher needs it — so
+    // injecting a second one is the repeated-field case, covered separately.
+    const blob = encodePreparedTransaction(TRANSFER, { extra: { exercise: wrap(4, empty) } });
     expect(decodePreparedTransaction(blob)).toEqual(TRANSFER);
   });
 });

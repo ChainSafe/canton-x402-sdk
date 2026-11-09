@@ -5,11 +5,15 @@
 // stateless — the stateful guards (replay) and on-chain execution stay in
 // the facilitator, which composes this verifier's result.
 
-import { sign as ed25519Sign, verify as ed25519Verify, hashes as ed25519Hashes } from "@noble/ed25519";
+import {
+  sign as ed25519Sign,
+  verify as ed25519Verify,
+  hashes as ed25519Hashes,
+} from "@noble/ed25519";
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import type { NetworkId } from "../types/common";
-import { isCantonPaymentInner } from "../types/payment";
+import { HashingSchemeVersion, isCantonPaymentInner } from "../types/payment";
 import { CantonPaymentRequirements, isCantonPaymentRequirements } from "../types/requirements";
 import type {
   SchemeVerifier,
@@ -26,6 +30,8 @@ import {
 } from "./common";
 import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 import { gunzipPreparedTransaction } from "./prepared-tx-codec";
+import { computePreparedTransactionHash } from "./prepared-tx-hash";
+import { guardPreparedTransaction } from "./prepared-tx-guard";
 
 // @noble/ed25519 v3 needs sha512 wired (same as the facilitator's wallet.ts).
 ed25519Hashes.sha512 = sha512;
@@ -211,11 +217,11 @@ function fail(reason: VerifyInvalidReason, payer?: string): VerifyResponseInvali
  * stateful checks (replay, min-amount FX policy) and the on-chain execute
  * compose on top of a successful result here.
  */
-function verifyCantonExact(
+async function verifyCantonExact(
   networkId: NetworkId,
   payload: X402PaymentPayload<unknown>,
   requirements: X402PaymentRequirements<unknown>,
-): VerifyResponse {
+): Promise<VerifyResponse> {
   // 1. scheme — both sides must name the one id the spec defines.
   if (payload.scheme !== EXACT_SCHEME_ID || requirements.scheme !== EXACT_SCHEME_ID) {
     return fail("scheme_mismatch");
@@ -250,36 +256,96 @@ function verifyCantonExact(
   if (!partySuffix || derivedFingerprint.toLowerCase() !== partySuffix.toLowerCase()) {
     return fail("bad_fingerprint", inner.payer);
   }
-  // 6. signature over the prepared-transaction hash, each in the one encoding
-  //    the spec gives it. The facilitator relays `signature` to the ledger as
-  //    is. `preparedTxHash` is keyed on (the facilitator's submissionId), so one
-  //    hash has one spelling: an upper-case copy decodes to the same bytes and
-  //    would verify, and is still refused.
+  // 6. Validate the prepared-transaction hash and signature encodings.
+  //    `signature` is canonical base64, while `preparedTxHash` is canonical
+  //    lowercase hex. The hash is keyed on the facilitator's submissionId,
+  //    so alternate spellings of the same bytes are refused.
   const signatureHex = signatureFromBase64(inner.signature);
-  if (
-    !PREPARED_TX_HASH.test(inner.preparedTxHash) ||
-    signatureHex === null ||
-    !verifySignature(inner.preparedTxHash, signatureHex, inner.publicKey)
-  ) {
+  if (!PREPARED_TX_HASH.test(inner.preparedTxHash) || signatureHex === null) {
     return fail("bad_signature", inner.payer);
   }
-  // 7. the signed transfer must actually move what the requirements demand.
-  //    This is the payload's one binding to the requirements: the signature
-  //    covers the prepared transaction, so decoding it and checking sender/
-  //    receiver/instrument/amount rejects a valid signature over a divergent
-  //    transfer (e.g. to another party, or a smaller amount).
-  //    The payload carries it gzipped; a member that is malformed or over
-  //    either bound is as undecodable as a bad protobuf.
+
+  // 7. An absent hashingSchemeVersion means V2.
+  const hashingSchemeVersion =
+    inner.hashingSchemeVersion ?? HashingSchemeVersion.V2;
+
+  if (hashingSchemeVersion !== HashingSchemeVersion.V2) {
+    return fail("internal_error", inner.payer);
+  }
+  // 8. Gunzip exactly once. Hashing, guarding and decoding use these bytes.
   const prepared = gunzipPreparedTransaction(inner.preparedTransaction);
-  const transfer = prepared && decodePreparedTransaction(bytesToBase64(prepared));
+  if (prepared === null) {
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: "undecodable" },
+    };
+  }
+
+  const preparedBase64 = bytesToBase64(prepared);
+
+  // 9. Bound and validate the graph before the upstream recursive hasher.
+  const graph = guardPreparedTransaction(preparedBase64);
+  if (!graph.ok) {
+    return {
+      isValid: false,
+      invalidReason: "invalid_prepared_transaction_structure",
+      payer: inner.payer,
+      extensions: { detail: graph.reason },
+    };
+  }
+
+  // 10. Derive the trusted hash from the validated prepared transaction.
+  let computedHash: string;
+  try {
+    computedHash = await computePreparedTransactionHash(
+      preparedBase64,
+      hashingSchemeVersion,
+    );
+  } catch {
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: "undecodable" },
+    };
+  }
+
+  // 11. The supplied hash must describe this exact transaction.
+  if (computedHash.toLowerCase() !== inner.preparedTxHash.toLowerCase()) {
+    return fail("prepared_transaction_hash_mismatch", inner.payer);
+  }
+
+  // 12. Verify the payload's base64 signature against the trusted hash.
+  if (!verifySignature(computedHash, signatureHex, inner.publicKey)) {
+    return fail("bad_signature", inner.payer);
+  }
+
+  // 13. The signed transfer must actually move what the requirements demand.
+  //     This is the payload's one binding to the requirements: the signature
+  //     covers the prepared transaction, so decoding it and checking sender/
+  //     receiver/instrument/amount rejects a valid signature over a divergent
+  //     transfer (e.g. to another party, or a smaller amount).
+  const transfer = decodePreparedTransaction(preparedBase64);
   if (!transfer) {
-    return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: "undecodable" } };
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: "undecodable" },
+    };
   }
   const mismatch = findTransferMismatch(transfer, requirements, inner.payer);
   if (mismatch) {
-    return { isValid: false, invalidReason: "transfer_mismatch", payer: inner.payer, extensions: { detail: mismatch } };
+    return {
+      isValid: false,
+      invalidReason: "transfer_mismatch",
+      payer: inner.payer,
+      extensions: { detail: mismatch },
+    };
   }
-  // 8. the transfer must still be executable. An absent deadline counts as
+  // 14. the transfer must still be executable. An absent deadline counts as
   //     expired: `executeBefore` is not optional in a real transfer, and
   //     reading a missing one as "no deadline" would make the check skippable
   //     by leaving the field out.
