@@ -12,9 +12,8 @@
 // `accepted` is the `accepts[]` entry the payer chose, so the requirements the
 // payment was built against travel inside it. Verification is stateless: the
 // facilitator checks the signed transfer against one specific requirements
-// object — its receiver, instrument, amount and memo — so that object must
-// travel back with the payment. The merchant validates it against its own
-// policy before forwarding it.
+// object — its receiver, instrument, amount and memo — and that is the one the
+// merchant forwards, after validating it against its own policy.
 //
 // Isomorphic on purpose (browser + node): base64 via btoa/atob, UTF-8 via
 // TextEncoder/TextDecoder — no Node Buffer.

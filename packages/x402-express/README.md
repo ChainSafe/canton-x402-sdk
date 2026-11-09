@@ -71,14 +71,15 @@ const { paymentRequired } = require("@chainsafe/x402-express");
    transaction id is returned in the `X-PAYMENT-RESPONSE` response header.
 
 Verification uses the requirements the payment carries as **`accepted`**, not
-freshly-rebuilt ones, since those carry the `nonce` and `validBefore` the payer
-was quoted. They are not signed: the signed transfer is checked against them.
-They are validated against merchant policy before use: the scheme, network,
-`payTo`, resource, asset and `maxTimeoutSeconds` must be this request's terms,
-the amount must not be under the price, and they must not be expired. Other
-fields (`nonce`, `validBefore`, `description`, `extra` keys beyond the instrument)
-are not compared, and reach the facilitator as the payer sent them. A header in the pre-spec `{ payment, requirements }`
-shape, or a payment with no `accepted`, is `bad_payload`. Amounts are atomic
+freshly-rebuilt ones, since a memo is issued per challenge and the payer signed
+the one it was quoted. They are not signed: the signed transfer is checked
+against them. They are validated against merchant policy before use: the scheme,
+network, `payTo`, resource, asset and `maxTimeoutSeconds` must be this request's
+terms, and the amount must not be under the price. Other fields (`description`,
+and the `extra` keys beyond the instrument, `memo` and `executeBeforeSeconds`
+among them) are not compared, and reach the facilitator as the payer sent them.
+A header in the pre-spec `{ payment, requirements }` shape, or a payment with no
+`accepted`, is `bad_payload`. Amounts are atomic
 units throughout — the same unit the wire carries.
 
 ## Options
@@ -100,11 +101,10 @@ Either a **declarative spec** — `{ payTo, asset, network, amount, scheme?, res
 That proves less than it looks, though: the scheme compares the transfer against the requirements the **payer** echoed, so a payer can echo no memo and sign none, or echo any value and sign that. The middleware keeps no record of what it issued, so it cannot tell. If you reconcile *on* the memo, use `checkPayment` — your own say on a paid request, with everything the payer sent, run after merchant policy and **before verify, so before any settle**. Return a short reason to refuse (answered as a 402 carrying that code), or nothing to accept:
 
 ```ts
-checkPayment: async ({ payload, requirements }) => {
+checkPayment: async ({ requirements }) => {
   const order = await orders.findByRef(requirements.extra.memo);
   if (!order) return "policy_memo_unknown";
   if (order.status !== "awaiting-payment") return "policy_order_closed";
-  if (!(await allowed(payload.payload.payer))) return "policy_payer_blocked";
 },
 ```
 

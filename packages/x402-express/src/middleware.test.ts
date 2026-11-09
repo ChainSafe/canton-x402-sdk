@@ -639,7 +639,7 @@ describe("paymentRequired", () => {
   it("forwards exactly the payment's accepted to the facilitator as paymentRequirements", async () => {
     const fetchMock = stubFacilitator();
     const header = paymentHeader(
-      { nonce: "nonce-forwarded" },
+      { extra: { ...ECHOED_EXTRA, memo: "order-42" } },
       {},
       { resource: { url: "https://f.example/paid", description: "Access" }, extensions: { "x-ext": { info: { a: 1 }, schema: {} } } },
     );
@@ -678,8 +678,8 @@ describe("paymentRequired", () => {
   });
 
   it("refuses an accepted whose maxTimeoutSeconds is not the merchant's", async () => {
-    // Only nonce and validBefore are the payer's quote's own; a field that does
-    // not change between requests has to match this request's terms.
+    // It does not change between requests, so it has to be this request's
+    // terms: the payer does not get to stretch how long the facilitator holds it.
     const fetchMock = stubFacilitator();
     for (const maxTimeoutSeconds of [3600, 10]) {
       const res = await request(makeApp()).get("/paid").set("X-PAYMENT", paymentHeader({ maxTimeoutSeconds }));

@@ -204,10 +204,10 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       if (!header) throw new PaymentRejection("payment_required", fresh);
 
       // The payment carries the requirements it was built against as `accepted`,
-      // the accepts[] entry the payer chose. Verify against those, after
-      // checking them against merchant policy. Nothing in the payload binds
-      // them on its own — what binds is the signed transfer the verifier
-      // decodes and compares to them.
+      // the accepts[] entry the payer chose. Verify against those, after checking
+      // them against merchant policy. Nothing in the payment binds them on its
+      // own — what binds is the signed transfer the verifier decodes and compares
+      // to them.
       let payload: CantonPaymentPayload;
       try {
         payload = decodePaymentHeader(header);
@@ -350,9 +350,9 @@ async function resolve<T>(value: Resolvable<T>, req: Request): Promise<T> {
  * Ensure the requirements the payer chose (`accepted`) are acceptable per
  * merchant policy: the scheme, network, `payTo`, resource, instrument, asset
  * and `maxTimeoutSeconds` must be this request's terms, and the amount must not
- * be under the price. Other fields (`nonce`, `validBefore`, `description`,
- * `extra` keys beyond the instrument) are not compared, and are forwarded as the
- * payer sent them.
+ * be under the price. Other fields (`description`, and the `extra` keys beyond
+ * the instrument, `memo` and `executeBeforeSeconds` among them) are not
+ * compared, and are forwarded as the payer sent them.
  */
 function validateEchoedRequirements(
   echoed: CantonPaymentRequirements,
