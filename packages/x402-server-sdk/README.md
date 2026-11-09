@@ -119,7 +119,8 @@ interface X402Payer {
   `preparedTxHash` as hex);
 - assembles the payload (`assetTransferMethod: "transfer-factory"`, the prepared transaction gzipped with `gzipPreparedTransaction`,
   required `publicKey`, and the `hashingSchemeVersion` prepare used)
-  **without executing** — facilitator derives fingerprint from `publicKey` (`fingerprintForPublicKey`; no `keyFingerprint` on the wire).
+  **without executing** — facilitator derives fingerprint from `publicKey` (`fingerprintForPublicKey`; no `keyFingerprint` on the wire). It names no payer: the
+  facilitator takes the transfer's sender, and checks the key's fingerprint against it.
 
 `CantonX402Payer` is stateless: double-settle is prevented by the facilitator (it
 rejects a reused memo, when the merchant quotes one) and by Canton itself: a

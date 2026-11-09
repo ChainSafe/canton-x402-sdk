@@ -213,66 +213,67 @@ async function verifyCantonExact(
     return fail("internal_error");
   }
   const raw = payload.payload;
-  if (typeof raw.publicKey !== "string" || !raw.publicKey) {
-    return fail("missing_public_key", typeof raw.payer === "string" ? raw.payer : undefined);
-  }
+  if (typeof raw.publicKey !== "string" || !raw.publicKey) return fail("missing_public_key");
   if (!isCantonPaymentInner(raw)) return fail("internal_error");
   const inner = raw;
-  // 4. public key well-formed (32-byte Ed25519). Malformed key bytes are
-  //    indistinguishable from "no usable key" here → missing_public_key.
-  let derivedFingerprint: string;
-  try {
-    derivedFingerprint = fingerprintForPublicKey(inner.publicKey);
-  } catch {
-    return fail("missing_public_key", inner.payer);
-  }
-  // 5. the fingerprint derived from the public key must match the payer's
-  //    `::<fingerprint>` suffix (replaces the removed wire `keyFingerprint`)
-  const partySuffix = inner.payer.split("::")[1];
-  if (!partySuffix || derivedFingerprint.toLowerCase() !== partySuffix.toLowerCase()) {
-    return fail("bad_fingerprint", inner.payer);
-  }
-  // 6. Validate the prepared-transaction hash and signature encodings.
-  //    `signature` is canonical base64, while `preparedTxHash` is canonical
-  //    lowercase hex. The hash is keyed on the facilitator's submissionId,
-  //    so alternate spellings of the same bytes are refused.
-  const signatureHex = signatureFromBase64(inner.signature);
-  if (!PREPARED_TX_HASH.test(inner.preparedTxHash) || signatureHex === null) {
-    return fail("bad_signature", inner.payer);
-  }
-
-  // 7. An absent hashingSchemeVersion means V2.
-  const hashingSchemeVersion =
-    inner.hashingSchemeVersion ?? HashingSchemeVersion.V2;
-
-  if (hashingSchemeVersion !== HashingSchemeVersion.V2) {
-    return fail("internal_error", inner.payer);
-  }
-  // 8. Gunzip exactly once. Hashing, guarding and decoding use these bytes.
+  // 4. Gunzip exactly once: guarding, decoding and hashing all use these
+  //    bytes. A member that is malformed or over either bound is as
+  //    undecodable as a bad protobuf.
   const prepared = gunzipPreparedTransaction(inner.preparedTransaction);
   if (prepared === null) {
-    return {
-      isValid: false,
-      invalidReason: "transfer_mismatch",
-      payer: inner.payer,
-      extensions: { detail: "undecodable" },
-    };
+    return { isValid: false, invalidReason: "transfer_mismatch", extensions: { detail: "undecodable" } };
   }
-
   const preparedBase64 = bytesToBase64(prepared);
-
-  // 9. Bound and validate the graph before the upstream recursive hasher.
+  // 5. Bound and validate the graph before anything walks it: the decoder
+  //    below, and the upstream recursive hasher after it.
   const graph = guardPreparedTransaction(preparedBase64);
   if (!graph.ok) {
     return {
       isValid: false,
       invalidReason: "invalid_prepared_transaction_structure",
-      payer: inner.payer,
       extensions: { detail: graph.reason },
     };
   }
+  // 6. The signed transfer. Its sender is the payer (spec Rule 8): the payload
+  //    names none, so every result from here on reports this one.
+  const transfer = decodePreparedTransaction(preparedBase64);
+  if (!transfer) {
+    return { isValid: false, invalidReason: "transfer_mismatch", extensions: { detail: "undecodable" } };
+  }
+  const payer = transfer.sender;
+  // 7. public key well-formed (32-byte Ed25519). Malformed key bytes are
+  //    indistinguishable from "no usable key" here → missing_public_key.
+  let derivedFingerprint: string;
+  try {
+    derivedFingerprint = fingerprintForPublicKey(inner.publicKey);
+  } catch {
+    return fail("missing_public_key", payer);
+  }
+  // 8. the key must be the sender's: its fingerprint must match the sender
+  //    party's `::<fingerprint>` suffix. Without this, any key could sign a
+  //    transfer that names another party as the sender.
+  const partySuffix = payer.split("::")[1];
+  if (!partySuffix || derivedFingerprint.toLowerCase() !== partySuffix.toLowerCase()) {
+    return fail("bad_fingerprint", payer);
+  }
+  // 9. Validate the prepared-transaction hash and signature encodings.
+  //    `signature` is canonical base64, while `preparedTxHash` is canonical
+  //    lowercase hex. The hash is keyed on the facilitator's submissionId,
+  //    so alternate spellings of the same bytes are refused.
+  const signatureHex = signatureFromBase64(inner.signature);
+  if (!PREPARED_TX_HASH.test(inner.preparedTxHash) || signatureHex === null) {
+    return fail("bad_signature", payer);
+  }
 
-  // 10. Derive the trusted hash from the validated prepared transaction.
+  // 10. An absent hashingSchemeVersion means V2.
+  const hashingSchemeVersion =
+    inner.hashingSchemeVersion ?? HashingSchemeVersion.V2;
+
+  if (hashingSchemeVersion !== HashingSchemeVersion.V2) {
+    return fail("internal_error", payer);
+  }
+
+  // 11. Derive the trusted hash from the validated prepared transaction.
   let computedHash: string;
   try {
     computedHash = await computePreparedTransactionHash(
@@ -283,58 +284,62 @@ async function verifyCantonExact(
     return {
       isValid: false,
       invalidReason: "transfer_mismatch",
-      payer: inner.payer,
+      payer,
       extensions: { detail: "undecodable" },
     };
   }
 
-  // 11. The supplied hash must describe this exact transaction.
+  // 12. The supplied hash must describe this exact transaction.
   if (computedHash.toLowerCase() !== inner.preparedTxHash.toLowerCase()) {
-    return fail("prepared_transaction_hash_mismatch", inner.payer);
+    return fail("prepared_transaction_hash_mismatch", payer);
   }
 
-  // 12. Verify the payload's base64 signature against the trusted hash.
+  // 13. Verify the payload's base64 signature against the trusted hash.
   if (!verifySignature(computedHash, signatureHex, inner.publicKey)) {
-    return fail("bad_signature", inner.payer);
+    return fail("bad_signature", payer);
   }
 
-  // 13. The signed transfer must actually move what the requirements demand.
+  // 14. The signed transfer must actually move what the requirements demand.
   //     This is the payload's one binding to the requirements: the signature
-  //     covers the prepared transaction, so decoding it and checking sender/
-  //     receiver/instrument/amount rejects a valid signature over a divergent
-  //     transfer (e.g. to another party, or a smaller amount).
-  const transfer = decodePreparedTransaction(preparedBase64);
-  if (!transfer) {
-    return {
-      isValid: false,
-      invalidReason: "transfer_mismatch",
-      payer: inner.payer,
-      extensions: { detail: "undecodable" },
-    };
-  }
-  const mismatch = findTransferMismatch(transfer, requirements, inner.payer);
+  //     covers the prepared transaction, so checking receiver/instrument/amount
+  //     rejects a valid signature over a divergent transfer (e.g. to another
+  //     party, or a smaller amount).
+  const mismatch = findTransferMismatch(transfer, requirements);
   if (mismatch) {
     return {
       isValid: false,
       invalidReason: "transfer_mismatch",
-      payer: inner.payer,
+      payer,
       extensions: { detail: mismatch },
     };
   }
-  // 14. the transfer must still be executable. An absent deadline counts as
+  // 15. the transfer must still be executable. An absent deadline counts as
   //     expired: `executeBefore` is not optional in a real transfer, and
   //     reading a missing one as "no deadline" would make the check skippable
   //     by leaving the field out.
   if (isTransferExpired(transfer.executeBeforeMicros)) {
-    return fail("transfer_expired", inner.payer);
+    return fail("transfer_expired", payer);
   }
-  return { isValid: true, payer: inner.payer };
+  return { isValid: true, payer };
+}
+
+/**
+ * The transfer a payload's `preparedTransaction` authorizes: base64 of one gzip
+ * member, gunzipped and decoded. `null` when it is malformed or over either
+ * bound, which is as undecodable as a bad protobuf. Its `sender` is the
+ * payment's payer (spec Rule 8), since the payload names none. Takes untrusted
+ * input, so a value that is not a string is `null` too, not a throw.
+ */
+export function decodePayloadTransfer(preparedTransaction: string): DecodedTransfer | null {
+  if (typeof preparedTransaction !== "string") return null;
+  const prepared = gunzipPreparedTransaction(preparedTransaction);
+  return prepared && decodePreparedTransaction(bytesToBase64(prepared));
 }
 
 /**
  * Check a decoded transfer against the requirements. Returns `null` when the
- * transfer satisfies them, or a short field detail (`"sender" | "receiver" |
- * "instrument" | "amount" | "memo"`) naming the first divergence — surfaced in the
+ * transfer satisfies them, or a short field detail (`"receiver" | "instrument" |
+ * "amount" | "memo"`) naming the first divergence — surfaced in the
  * `transfer_mismatch` response's `extensions.detail`. The amount must be EQUAL,
  * not merely sufficient (Rule 4), and the two sides are in different units — the
  * transfer carries an on-ledger Decimal, the requirements an atomic integer at
@@ -343,9 +348,9 @@ async function verifyCantonExact(
 export function findTransferMismatch(
   transfer: DecodedTransfer,
   requirements: CantonPaymentRequirements,
-  payer: string,
-): "sender" | "receiver" | "instrument" | "amount" | "memo" | null {
-  if (transfer.sender !== payer) return "sender";
+): "receiver" | "instrument" | "amount" | "memo" | null {
+  // No sender check: the sender is the payer by definition (spec Rule 8), and
+  // the verifier has already bound the signing key to it by fingerprint.
   // Rule 12, both ways. The spec only requires the check when the merchant
   // quotes a memo, but `x402.memo` is a key the scheme reserves, not the
   // payer's own namespace — its own references go under its own key, which is

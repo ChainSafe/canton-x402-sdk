@@ -190,7 +190,6 @@ describe("shape guards + scheme/network match", () => {
   } as CantonPaymentRequirements;
   const inner = {
     assetTransferMethod: "transfer-factory",
-    payer: "alice::1220x",
     preparedTransaction: "b",
     preparedTxHash: "h",
     signature: "s",

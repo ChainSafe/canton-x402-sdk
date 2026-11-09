@@ -21,8 +21,8 @@ Canton scheme spec does not define.
 
 The hash was never signed (the signature covers `preparedTxHash`), so anyone
 holding a payload could recompute it for other requirements. What binds a
-payment to its requirements is the decoded transfer: the verifier checks its
-sender, receiver, instrument and amount against them, as before.
+payment to its requirements is the decoded transfer: the verifier checks it
+against them, as before.
 
 The verifier no longer checks it and `CantonX402Payer` no longer sends it. A
 payload that still carries one is not refused: the field is ignored.

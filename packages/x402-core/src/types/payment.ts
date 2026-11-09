@@ -28,8 +28,6 @@ export const CantonPaymentInnerSchema = v.object({
    * value fails the shape check.
    */
   assetTransferMethod: v.literal(ASSET_TRANSFER_METHOD),
-  /** Paying Canton party ID. */
-  payer: v.string(),
   /**
    * The prepared transaction from /v2/interactive-submission/prepare, as base64
    * of exactly one gzip member ({@link gzipPreparedTransaction}): at most 8 KiB
@@ -45,13 +43,15 @@ export const CantonPaymentInnerSchema = v.object({
    * The payer's Ed25519 signature over `preparedTxHash`: 64 bytes as canonical
    * standard base64. Base64, not hex — the spec's encoding, and the one the
    * ledger's `partySignatures` takes, so the facilitator relays it unchanged.
-   * Non-empty here; the verifier checks the encoding itself.
+   * Non-empty here; the verifier checks the encoding itself. Nothing here names
+   * the payer: it is the signed transfer's sender (spec Rule 8).
    */
   signature: v.pipe(v.string(), v.minLength(1)),
   /**
    * Base64 32-byte Ed25519 public key. Required — the facilitator verifies the
-   * signature against it and derives the party fingerprint from it (the party id's
-   * `::<fingerprint>` suffix is a hash of this key).
+   * signature against it, and its fingerprint must match the transfer sender's
+   * `::<fingerprint>` suffix. The spec's payload has no such field: it stays
+   * until the facilitator can read the sender party's keys from the ledger.
    */
   publicKey: v.string(),
   /**
