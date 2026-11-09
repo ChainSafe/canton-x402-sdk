@@ -9,7 +9,7 @@
 //   {
 //     "payment":      { "x402Version": 2, "scheme": "exact", "network": "canton:devnet",
 //                       "payload": { "payer": "…", "signature": "…", … } },
-//     "requirements": { "scheme": "exact", "nonce": "…", "validBefore": "…", … }
+//     "requirements": { "scheme": "exact", "amount": "…", "payTo": "…", … }
 //   }
 //
 // Two slots (not a merge) so each is validated independently on decode (at the
@@ -17,8 +17,8 @@
 // top disambiguates from the payment's own inner `.payload`.
 //
 // The requirements are mandatory: verification is stateless, and the facilitator
-// checks the signed transfer and the expiry against one specific requirements
-// object (its exact nonce + validBefore), so that object must travel back with
+// checks the signed transfer against one specific requirements object — its
+// receiver, instrument, amount and memo — so that object must travel back with
 // the payment. A payment without them is unverifiable. The merchant validates the
 // echoed requirements against its policy before trusting them.
 //

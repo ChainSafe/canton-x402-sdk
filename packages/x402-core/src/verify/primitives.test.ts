@@ -11,7 +11,6 @@ import {
   signatureFromBase64,
   isValidAmount,
   isValidLedgerAmount,
-  isExpired,
   schemeNetworkMatches,
   isCantonNetworkId,
   parseCantonNetworkId,
@@ -163,16 +162,6 @@ describe("isValidLedgerAmount — the on-ledger Decimal", () => {
   });
 });
 
-describe("isExpired", () => {
-  const now = Date.parse("2026-01-01T00:00:00.000Z");
-  it("past / at-deadline / unparseable are expired; future is not", () => {
-    expect(isExpired("2025-12-31T23:59:59.000Z", now)).toBe(true);
-    expect(isExpired("2026-01-01T00:00:00.000Z", now)).toBe(true); // <= now
-    expect(isExpired("2026-01-01T00:00:01.000Z", now)).toBe(false);
-    expect(isExpired("not-a-date", now)).toBe(true);
-  });
-});
-
 describe("canton network-id guard", () => {
   it("accepts canton:… and rejects other CAIP-2 / non-strings", () => {
     expect(isCantonNetworkId("canton:devnet")).toBe(true);
@@ -195,11 +184,9 @@ describe("shape guards + scheme/network match", () => {
     amount: "100000000",
     payTo: "merchant::1220x",
     resource: "/r",
-    nonce: "n",
-    validBefore: "2026-01-01T00:00:00.000Z",
     maxTimeoutSeconds: 60,
     asset: "CC",
-    extra: { assetTransferMethod: "transfer-factory", instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
+    extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   } as CantonPaymentRequirements;
   const inner = {
     assetTransferMethod: "transfer-factory",

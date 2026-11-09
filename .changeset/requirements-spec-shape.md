@@ -33,6 +33,5 @@ instrument placed in `extra` when the 402 is built.
 did. Any golden vector pinned against it must be regenerated on both sides of
 the wire in the same release.
 
-Not included, and still divergent from the spec: `resource` and `description`
-(which the spec puts on PaymentPayload), and `nonce` and `validBefore` (which
-it does not define at all).
+Not included, and still divergent from the spec: `resource` and `description`,
+which the spec puts on PaymentPayload.

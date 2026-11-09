@@ -20,7 +20,9 @@ holds the state involved:
 
 1. **Right scheme and network** — the payload, the requirements, and the
    network this facilitator is bound to all agree.
-2. **Still valid** — `validBefore` is still in the future.
+2. **Still executable** — the signed transfer's own `executeBefore` is far
+   enough in the future to settle (`transfer_expired`). The quote itself no
+   longer expires; the deadline that counts is inside what the payer signed.
 3. **The key belongs to the payer** — the fingerprint derived from the
    payload's `publicKey` must match the `::` suffix of the payer's party id, so
    a caller can't sign as a party it doesn't control.
@@ -30,11 +32,15 @@ holds the state involved:
 5. **The signed transfer actually pays you.** This is what binds the payment to
    your terms: the prepared transaction is decoded and its sender, receiver,
    instrument and amount are checked against the requirements, so a valid
-   signature over a divergent transfer is rejected
-   with `transfer_mismatch` and the field that diverged. The amount must be
-   exact: overpaying is refused as well as underpaying.
-6. **No replay, and you're an allowed destination** — the nonce has not been
-   used before (the facilitator tracks that), and for an authenticated merchant
+   signature over a divergent transfer is rejected with `transfer_mismatch` and
+   the field that diverged. The amount must be EQUAL, not merely sufficient —
+   `exact` is the scheme's distinguishing property, and a payer who overpays has
+   no refund path. The transfer's `x402.memo` must equal your `extra.memo`
+   exactly — in both directions, so a transfer carrying a memo you did not
+   quote is refused as well.
+6. **No replay, and you're an allowed destination** — the payment has not
+   settled before (the ledger is the real guard: a replayed transfer names
+   input holdings that are already spent), and for an authenticated merchant
    `payTo` must be a party that key is allowed to receive at (your destination
    policy). A destination denial comes back as `transfer_mismatch` with a
    `destination_not_allowed` detail on verify, and as `unauthorized` on settle.

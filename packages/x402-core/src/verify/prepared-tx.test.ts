@@ -17,6 +17,8 @@ const TRANSFER: DecodedTransfer = {
 const OTHER: DecodedTransfer = { ...TRANSFER, receiver: "someone::1220", amount: "9" };
 
 const empty = new Uint8Array();
+/** A Daml `Value` holding text — for building `meta.values` entries by hand. */
+const textValue = (t: string) => concat(new Uint8Array([(8 << 3) | 2, utf8(t).length]), utf8(t));
 const utf8 = (s: string) => new TextEncoder().encode(s);
 /** A v1 `Node` body: a TransferFactory_Transfer exercise for `t`. */
 const transferBody = (t: DecodedTransfer) =>
@@ -212,6 +214,68 @@ describe("decodePreparedTransaction reads only the node tree under the roots", (
 
   it.each(cases)("returns null for %s", (_, opts) => {
     expect(decodePreparedTransaction(encodePreparedTransaction(TRANSFER, opts))).toBeNull();
+  });
+});
+
+describe("the deadline and the memo", () => {
+  const DEADLINE = 1_762_300_000_000_000n; // µs
+  const dated = { ...TRANSFER, executeBeforeMicros: DEADLINE };
+
+  it.each([false, true])("round-trips executeBefore, positional=%s", (positional) => {
+    const got = decodePreparedTransaction(encodePreparedTransaction(dated, { positional }));
+    expect(got?.executeBeforeMicros).toBe(DEADLINE);
+  });
+
+  it("reads it as a signed 64-bit value, not a varint", () => {
+    // A Daml `Time` is an SFIXED64, so it is eight little-endian bytes behind a
+    // wire-type-1 tag. A reader that only handles length-delimited members
+    // skips it and reports no deadline at all — which Rule 10 would then have
+    // to treat as a pass or refuse every real payment.
+    for (const micros of [0n, 1n, -1n, (1n << 62n) - 1n, -(1n << 62n)]) {
+      const got = decodePreparedTransaction(encodePreparedTransaction({ ...TRANSFER, executeBeforeMicros: micros }));
+      expect(got?.executeBeforeMicros).toBe(micros);
+    }
+  });
+
+  it("reports no deadline when the transfer carries none", () => {
+    expect(decodePreparedTransaction(encodePreparedTransaction(TRANSFER))?.executeBeforeMicros).toBeUndefined();
+  });
+
+  it.each([false, true])("round-trips the memo, positional=%s", (positional) => {
+    const got = decodePreparedTransaction(
+      encodePreparedTransaction({ ...dated, memo: "invoice-2024-001" }, { positional }),
+    );
+    expect(got?.memo).toBe("invoice-2024-001");
+  });
+
+  it("reads only its own key, and only from meta.values", () => {
+    const blob = encodePreparedTransaction(dated, {
+      memoEntries: [
+        // What the wallet SDK writes for its own `memo` parameter. Reading it
+        // as ours would let a payer satisfy Rule 12 without signing our key.
+        ["splice.lfdecentralizedtrust.org/reason", textValue("the SDK's own memo")],
+        ["x402.memo", textValue("ours")],
+        ["x402.memo.other", textValue("not ours either")],
+      ],
+    });
+    expect(decodePreparedTransaction(blob)?.memo).toBe("ours");
+  });
+
+  it("reports no memo when the map has none", () => {
+    expect(decodePreparedTransaction(encodePreparedTransaction(dated, { memoEntries: [] }))?.memo).toBeUndefined();
+  });
+
+  it("refuses a repeated x402.memo rather than picking one", () => {
+    // Two entries are two answers to what the payer committed to. Any
+    // last-wins rule lets a producer show one value here and another to the
+    // engine, which is the whole point of binding the memo.
+    const blob = encodePreparedTransaction(dated, {
+      memoEntries: [
+        ["x402.memo", textValue("shown")],
+        ["x402.memo", textValue("executed")],
+      ],
+    });
+    expect(decodePreparedTransaction(blob)).toBeNull();
   });
 });
 
