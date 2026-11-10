@@ -62,7 +62,6 @@ function makeRequirements(over: Partial<CantonPaymentRequirements> = {}): Canton
     asset: "CC",
     extra: EXTRA,
     payTo: "merchant::y",
-    resource: "https://api.example/report",
     maxTimeoutSeconds: 60,
     ...over,
   };
@@ -181,4 +180,16 @@ describe("CantonX402Payer.authorize", () => {
     ).rejects.toThrow(/unsupported requirement/);
     expect(prepare).not.toHaveBeenCalled();
   });
+
+  it("echoes the 402's resource into the payload, and omits it when given none", async () => {
+    // §5.2.2's optional `resource`. `accepted` carries none — PaymentRequirements
+    // has no such field — so this is the only place a payment names one.
+    const resource = { url: "https://api.example/report", description: "A report" };
+    const withResource = await makePayer(mockSdk().sdk).authorize(makeRequirements(), { resource });
+    expect(withResource.resource).toEqual(resource);
+
+    const without = await makePayer(mockSdk().sdk).authorize(makeRequirements());
+    expect(without).not.toHaveProperty("resource");
+  });
+
 });

@@ -12,7 +12,7 @@ import {
 } from "@chainsafe/x402-core";
 import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "./middleware";
-import type { PaymentRequiredOptions, RequirementsSpec } from "./options";
+import type { PaymentRequiredOptions, RequirementsBuilder, RequirementsSpec } from "./options";
 
 // The real decoder, spied on so a test can stand in a decodable transfer without
 // building a prepared transaction: the fixture's `preparedTransaction` is not one.
@@ -486,7 +486,9 @@ describe("paymentRequired", () => {
     );
     app.get("/", (_req, res) => res.json({ ok: true }));
     const res = await request(app).get("/paid");
-    expect(res.body.accepts[0].description).toBe("Access to /");
+    // On the envelope's resource now, not on each way to pay.
+    expect(res.body.resource.description).toBe("Access to /");
+    expect(res.body.accepts[0]).not.toHaveProperty("description");
   });
 
   it("supports a full requirements builder function", async () => {
@@ -825,15 +827,48 @@ describe("paymentRequired", () => {
     expect(res.body.error).toBe("policy_network");
   });
 
-  it("rejects a payment minted for a different resource (request↔payment binding)", async () => {
-    // Same price/payTo/asset, but the payment was issued for another path — it
-    // must not be replayable against this one.
-    stubFacilitator();
-    const res = await request(makeApp())
-      .get("/paid")
-      .set("PAYMENT-SIGNATURE", paymentHeader({ resource: "https://f.example/other" }));
-    expect(res.status).toBe(402);
-    expect(res.body.error).toBe("policy_resource");
+  describe("the resource a payment names", () => {
+    // §5.2.2's optional `PaymentPayload.resource`. `accepted` carries none any
+    // more — PaymentRequirements has no such field — so this is the only
+    // resource a payer sends.
+    it("refuses one naming a different resource", async () => {
+      const fetchMock = stubFacilitator();
+      const res = await request(makeApp())
+        .get("/paid")
+        .set(
+          "PAYMENT-SIGNATURE",
+          paymentHeader({}, {}, { resource: { url: "https://f.example/other" } }),
+        );
+      expect(res.status).toBe(402);
+      expect(res.body.error).toBe("policy_resource");
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("accepts one naming this resource, and one naming none", async () => {
+      for (const envelope of [{ resource: { url: "https://f.example/paid" } }, {}]) {
+        stubFacilitator();
+        await request(makeApp())
+          .get("/paid")
+          .set("PAYMENT-SIGNATURE", paymentHeader({}, {}, envelope))
+          .expect(200);
+      }
+    });
+
+    it("is echo fidelity, not a binding: nothing the payer sends is signed", async () => {
+      // The honest limit of the check above. A payment minted for another path
+      // replays here by simply naming this one, because the signed transfer
+      // encodes the amount, payee, instrument, deadline and memo — never the
+      // resource. `extra.memo` is what ties a payment to one challenge, and
+      // only the merchant's own records can judge it (see `preSettle`).
+      stubFacilitator();
+      await request(makeApp())
+        .get("/paid")
+        .set(
+          "PAYMENT-SIGNATURE",
+          paymentHeader({}, {}, { resource: { url: "https://f.example/paid" } }),
+        )
+        .expect(200);
+    });
   });
 
   describe("onReject", () => {
@@ -1482,11 +1517,20 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         accepts: CantonPaymentRequirements[];
       };
       expect(resource.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/paid\?item=7$/);
-      expect(resource).toEqual({ url: accepts[0].resource, description: accepts[0].description });
+      expect(resource.description).toBe("Access to /");
       expect(res.body.resource).toEqual(resource);
+      // The top level is the ONLY place it appears: §5.1.2 keeps `resource`
+      // and `description` off PaymentRequirements, so no entry repeats them.
+      for (const entry of accepts) {
+        expect(entry).not.toHaveProperty("resource");
+        expect(entry).not.toHaveProperty("description");
+      }
     });
 
     it("takes a builder's resource and description, and leaves description out when it has none", async () => {
+      // A builder returning a bare array cannot name a resource — `resource` is
+      // not a requirements field any more — so it gets the request URL. The
+      // object form is how a builder names one.
       stubFacilitator();
       const built = {
         scheme: "exact",
@@ -1499,20 +1543,34 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           instrumentId: { id: "Amulet", admin: "DSO::x" },
         },
         payTo: "merchant::x",
-        resource: "https://merchant.example/report",
         maxTimeoutSeconds: 60,
       } as CantonPaymentRequirements;
-      for (const [requirements, expected] of [
+      const cases: Array<[RequirementsBuilder, Record<string, string> | "request-url"]> = [
         [
-          { ...built, description: "A report" },
+          () => ({
+            resource: "https://merchant.example/report",
+            description: "A report",
+            accepts: [built],
+          }),
           { url: "https://merchant.example/report", description: "A report" },
         ],
-        [built, { url: "https://merchant.example/report" }],
-      ] as const) {
+        [
+          () => ({ resource: "https://merchant.example/report", accepts: [built] }),
+          { url: "https://merchant.example/report" },
+        ],
+        [() => [built], "request-url"],
+      ];
+      for (const [requirements, expected] of cases) {
         const app = express();
-        app.use("/paid", paymentRequired({ ...baseOptions, requirements: () => [requirements] }));
+        app.use("/paid", paymentRequired({ ...baseOptions, requirements }));
         app.get("/paid", (_req, res) => res.json({ ok: true }));
-        expect(header(await request(app).get("/paid")).resource).toEqual(expected);
+        const resource = header(await request(app).get("/paid")).resource as Record<string, string>;
+        if (expected === "request-url") {
+          expect(resource.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/paid$/);
+          expect(resource).not.toHaveProperty("description");
+        } else {
+          expect(resource).toEqual(expected);
+        }
       }
     });
 

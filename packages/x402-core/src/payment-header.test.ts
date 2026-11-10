@@ -3,6 +3,7 @@ import {
   encodePaymentHeader,
   decodePaymentHeader,
   encodePaymentRequiredHeader,
+  decodePaymentRequiredHeader,
   MAX_PAYMENT_DEPTH,
 } from "./payment-header";
 import { isCantonPaymentRequiredResponse } from "./index";
@@ -15,7 +16,6 @@ const requirements: CantonPaymentRequirements = {
   asset: "CC",
   extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   payTo: "merchant::1220x",
-  resource: "/r",
   maxTimeoutSeconds: 60,
 };
 
@@ -163,5 +163,44 @@ describe("PAYMENT-REQUIRED codec", () => {
   it("encodes non-ASCII as UTF-8", () => {
     const p = { ...paymentRequired, resource: { url: "https://merchant.example/r", description: "Café crème ☕" } };
     expect(read(encodePaymentRequiredHeader(p))).toEqual(p);
+  });
+});
+
+describe("decodePaymentRequiredHeader", () => {
+  const offer = {
+    x402Version: 2 as const,
+    resource: { url: "https://merchant.example/r", description: "A report" },
+    accepts: [requirements],
+    error: "payment_required",
+  };
+
+  it("round-trips what encodePaymentRequiredHeader wrote", () => {
+    expect(decodePaymentRequiredHeader(encodePaymentRequiredHeader(offer))).toEqual(offer);
+  });
+
+  it("refuses base64 that is not an x402 v2 PaymentRequired", () => {
+    const b64 = (v: unknown) => btoa(JSON.stringify(v));
+    for (const bad of [
+      { x402Version: 1, resource: offer.resource, accepts: [requirements] },
+      { x402Version: 2, accepts: [requirements] },
+      { x402Version: 2, resource: { description: "no url" }, accepts: [requirements] },
+      { x402Version: 2, resource: offer.resource },
+      // The payment envelope, not the offer — a reader must not confuse them.
+      { x402Version: 2, accepted: requirements, payload: {} },
+    ]) {
+      expect(() => decodePaymentRequiredHeader(b64(bad))).toThrow(/not an x402 v2 PaymentRequired/);
+    }
+  });
+
+  it("refuses bad base64 and bad JSON, naming which", () => {
+    expect(() => decodePaymentRequiredHeader("!!!")).toThrow(/not valid base64|not valid JSON/);
+    expect(() => decodePaymentRequiredHeader(btoa("{nope"))).toThrow(/not valid JSON/);
+  });
+
+  it("refuses one nested deeper than MAX_PAYMENT_DEPTH", () => {
+    let deep: unknown = "x";
+    for (let i = 0; i < MAX_PAYMENT_DEPTH + 2; i++) deep = { deep };
+    const bad = btoa(JSON.stringify({ ...offer, extensions: deep }));
+    expect(() => decodePaymentRequiredHeader(bad)).toThrow(/nests deeper than/);
   });
 });

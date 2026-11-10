@@ -30,14 +30,6 @@ export type X402PaymentRequirements<TExtra = Record<string, unknown>> = {
   asset: string;
   /** Recipient party ID. */
   payTo: string;
-  /**
-   * Resource URL the wallet is paying for. Not a field of the spec's
-   * `PaymentRequirements`, which leaves the resource to `PaymentRequired` and
-   * `PaymentPayload`, so a payment's `accepted` need not carry it. Canton-exact
-   * requirements still require it until #76 moves it out.
-   */
-  resource?: string;
-  description?: string;
   /** Seconds the client has to complete payment. Required for every scheme. */
   maxTimeoutSeconds: number;
   /** Scheme-specific extra (the `TExtra` seam), e.g. the bridge's `cantonRecipient`. */
@@ -109,8 +101,6 @@ export const CantonPaymentRequirementsSchema = v.object({
   /** A symbol: `"CC"`, or a registry token's own. The instrument is in `extra`. */
   asset: nonEmptyString,
   payTo: nonEmptyString,
-  resource: nonEmptyString,
-  description: v.optional(v.string()),
   maxTimeoutSeconds: positiveSeconds,
   extra: CantonRequirementsExtraSchema,
 });

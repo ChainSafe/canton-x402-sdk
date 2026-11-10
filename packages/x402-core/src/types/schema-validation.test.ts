@@ -33,7 +33,6 @@ const requirements: CantonPaymentRequirements = {
   asset: "CC",
   extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
-  resource: "/api/resource",
   maxTimeoutSeconds: 60,
 };
 
@@ -77,7 +76,7 @@ describe("schema-first guards + parsers", () => {
     // Present but empty is not valid. `asset: ""` names no symbol, `payTo: ""`
     // no party. Each is checked on its own so one field's rule cannot stand in
     // for another's.
-    for (const key of ["scheme", "network", "amount", "asset", "payTo", "resource"] as const) {
+    for (const key of ["scheme", "network", "amount", "asset", "payTo"] as const) {
       expect(isCantonPaymentRequirements({ ...requirements, [key]: "" })).toBe(false);
     }
   });

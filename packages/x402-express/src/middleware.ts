@@ -20,7 +20,7 @@ import {
 import type { BaseRequirementsSpec, SchemeAdapter } from "./scheme.js";
 import { cantonExact, type CantonRequirementsSpec } from "./schemes/canton-exact.js";
 import type { PaymentRequiredOptions, X402RequestState } from "./options.js";
-import { buildQuotes, type Quote } from "./quotes.js";
+import { buildQuotes, type Offer } from "./quotes.js";
 import { rulesFor, selectQuote } from "./policy.js";
 import { PaymentRejection, respondToFailure } from "./response.js";
 
@@ -77,7 +77,7 @@ export function paymentRequired<
     // Built at most once per request, and only when something needs them: a
     // paid request needs terms to hold the payment against, a challenge needs
     // terms to advertise. The failure path reuses whatever was built here.
-    let quotes: Array<Quote<TRequirements>> | undefined;
+    let offer: Offer<TRequirements> | undefined;
     try {
       // The spec's name first. X-PAYMENT is the name this SDK used before, and
       // is still read for a payment of this shape sent under it. A 0.1.x payer
@@ -114,9 +114,25 @@ export function paymentRequired<
       const payload = decoded;
       const requirements = decoded.accepted;
 
-      quotes = await buildQuotes(req, options, scheme);
-      const refusal = selectQuote(requirements, quotes, rules);
+      offer = await buildQuotes(req, options, scheme);
+      const refusal = selectQuote(requirements, offer.quotes, rules);
       if (refusal !== undefined) throw new PaymentRejection(refusal);
+
+      // §5.2.2 lets a payment name the resource it is for, and it is now the
+      // only place one appears on the wire from the payer — `accepted` is a
+      // PaymentRequirements, which carries none. Optional, so a payment that
+      // names none is fine; one that names another resource is refused.
+      //
+      // This is echo fidelity, not a binding. Nothing the payer sends is
+      // signed — the transfer encodes the amount, payee, instrument, deadline
+      // and memo, never the resource — so a payer set on replaying a payment
+      // from elsewhere simply writes this URL here. What actually ties a
+      // payment to one challenge is `extra.memo`, which Rule 12 puts inside
+      // the signature and `preSettle` judges against merchant records.
+      const named = payload.resource?.url;
+      if (named !== undefined && named !== offer.resource.url) {
+        throw new PaymentRejection("policy_resource");
+      }
 
       const verify = await facilitator.verify(payload, requirements);
       if (!verify.isValid) {
@@ -175,7 +191,7 @@ export function paymentRequired<
       } as X402RequestState;
       next();
     } catch (err) {
-      await respondToFailure(err, req, res, options, scheme, quotes);
+      await respondToFailure(err, req, res, options, scheme, offer);
     }
   };
 }

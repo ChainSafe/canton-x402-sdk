@@ -1,4 +1,9 @@
-import { encodePaymentHeader, type CantonPaymentRequirements } from "@chainsafe/x402-core";
+import {
+  decodePaymentRequiredHeader,
+  encodePaymentHeader,
+  type CantonPaymentRequirements,
+  type ResourceInfo,
+} from "@chainsafe/x402-core";
 import type { X402Payer } from "./payer.js";
 
 /** A `fetch`-compatible function. */
@@ -50,13 +55,15 @@ export function createX402Fetch(payers: X402Payer | X402Payer[], opts: X402Fetch
     const res = await doFetch(input, init);
     if (res.status !== 402) return res;
 
-    const accepts = await readAccepts(res);
-    if (!accepts) return res; // not an x402 402 body → pass through
+    const offer = await readPaymentRequired(res);
+    if (!offer) return res; // not an x402 402 → pass through
 
-    const selection = select(accepts, list);
+    const selection = select(offer.accepts, list);
     if (!selection) return res; // no payer can satisfy any advertised requirement
 
-    const payload = await selection.payer.authorize(selection.requirements);
+    const payload = await selection.payer.authorize(selection.requirements, {
+      ...(offer.resource ? { resource: offer.resource } : {}),
+    });
     const headers = new Headers(init?.headers);
     headers.set("PAYMENT-SIGNATURE", encodePaymentHeader(payload));
     return doFetch(input, { ...init, headers });
@@ -75,12 +82,41 @@ function defaultSelect(
   return undefined;
 }
 
-/** Read `accepts[]` from a 402 body without consuming the response (clone). */
-async function readAccepts(res: Response): Promise<CantonPaymentRequirements[] | undefined> {
+/**
+ * Read the 402's `PaymentRequired`: the `PAYMENT-REQUIRED` header first, the
+ * body only as a fallback.
+ *
+ * The header is where the x402 v2 HTTP transport puts it, and it calls the
+ * response body a server implementation concern — so a conforming merchant may
+ * answer `{}`, and every registered Canton merchant does. Reading the body
+ * alone meant this wrapper silently declined to pay all of them.
+ *
+ * The body fallback stays for merchants that send it there, this SDK's own
+ * middleware among them. Either way the response is cloned, so the caller's
+ * copy is untouched.
+ */
+async function readPaymentRequired(
+  res: Response,
+): Promise<{ resource?: ResourceInfo; accepts: CantonPaymentRequirements[] } | undefined> {
+  const header = res.headers.get("PAYMENT-REQUIRED");
+  if (header) {
+    try {
+      const offer = decodePaymentRequiredHeader(header);
+      return { resource: offer.resource, accepts: offer.accepts };
+    } catch {
+      // Malformed header; a body may still carry a readable offer.
+    }
+  }
   try {
-    const body = (await res.clone().json()) as { accepts?: unknown };
-    return Array.isArray(body.accepts) ? (body.accepts as CantonPaymentRequirements[]) : undefined;
+    const body = (await res.clone().json()) as { accepts?: unknown; resource?: unknown };
+    if (!Array.isArray(body.accepts)) return undefined;
+    const accepts = body.accepts as CantonPaymentRequirements[];
+    return isResourceInfo(body.resource) ? { resource: body.resource, accepts } : { accepts };
   } catch {
     return undefined;
   }
+}
+
+function isResourceInfo(value: unknown): value is ResourceInfo {
+  return typeof value === "object" && value !== null && typeof (value as ResourceInfo).url === "string";
 }

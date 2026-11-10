@@ -11,6 +11,7 @@
 import type { Request } from "express";
 import {
   isValidAmount,
+  type ResourceInfo,
   type X402PaymentPayload,
   type X402PaymentRequirements,
 } from "@chainsafe/x402-core";
@@ -30,6 +31,18 @@ export interface Quote<TRequirements> {
 }
 
 /**
+ * What a 402 will say: one resource, and every way to pay for it.
+ *
+ * The spec's `PaymentRequired` in all but the minted references — §5.1.2 names
+ * the resource once and leaves it off `PaymentRequirements`, so it is carried
+ * here beside the quotes rather than copied into each of them.
+ */
+export interface Offer<TRequirements> {
+  resource: ResourceInfo;
+  quotes: Array<Quote<TRequirements>>;
+}
+
+/**
  * Every way to pay this request offers. Never empty.
  *
  * No reference is minted here — see {@link issueChallenge}.
@@ -42,7 +55,7 @@ export async function buildQuotes<
   req: Request,
   options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>,
   scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
-): Promise<Array<Quote<TRequirements>>> {
+): Promise<Offer<TRequirements>> {
   const source = options.requirements;
 
   // A builder is opaque: it returns finished requirements, so the middleware
@@ -50,10 +63,18 @@ export async function buildQuotes<
   // RequirementsBuilder as the reason it must stay side-effect-free.
   if (typeof source === "function") {
     const built = await source(req);
-    if (built.length === 0) {
+    // A bare array leaves the resource implicit; the object form names it.
+    const named = Array.isArray(built) ? { accepts: built } : built;
+    if (named.accepts.length === 0) {
       throw new Error("paymentRequired: the requirements builder returned no ways to pay");
     }
-    return built.map((r) => ({ requirements: assertAtomicAmount(r) }));
+    return {
+      resource: {
+        url: named.resource ?? absoluteUrl(req),
+        ...(named.description ? { description: named.description } : {}),
+      },
+      quotes: named.accepts.map((r) => ({ requirements: assertAtomicAmount(r) })),
+    };
   }
 
   if (source.accepts.length === 0) {
@@ -64,7 +85,15 @@ export async function buildQuotes<
   // it and may override any of them. Merged before the scheme sees it, so an
   // adapter is handed one complete spec and never has to know the difference.
   const { accepts, ...shared } = source;
-  return Promise.all(
+  // The resource is the sale's, named once — it is no longer a field of any
+  // `accepts[]` entry, so there is nothing per-entry to disagree with.
+  const resource = {
+    url: shared.resource ? await resolve(shared.resource, req) : absoluteUrl(req),
+    description: shared.description
+      ? await resolve(shared.description, req)
+      : `Access to ${req.path}`,
+  };
+  const quotes = await Promise.all(
     accepts.map(async (entry) => {
       const spec = { ...shared, ...entry } as unknown as TSpec;
       const part = await scheme.quote(req, spec, { facilitator: options.facilitator });
@@ -76,10 +105,6 @@ export async function buildQuotes<
           asset: part.asset,
           extra: part.extra,
           payTo: await resolve(spec.payTo, req),
-          resource: spec.resource ? await resolve(spec.resource, req) : absoluteUrl(req),
-          description: spec.description
-            ? await resolve(spec.description, req)
-            : `Access to ${req.path}`,
           maxTimeoutSeconds: spec.maxTimeoutSeconds
             ? await resolve(spec.maxTimeoutSeconds, req)
             : DEFAULT_MAX_TIMEOUT_SECONDS,
@@ -89,6 +114,7 @@ export async function buildQuotes<
       return quote;
     }),
   );
+  return { resource, quotes };
 }
 
 /**
@@ -132,12 +158,9 @@ function assertAtomicAmount<TRequirements extends X402PaymentRequirements<unknow
 }
 
 /**
- * The URL a request was made to, which is the `resource` a quote defaults to.
- *
- * Exported because response.ts needs the SAME value: a 402's top-level
- * `resource` falls back to it when the terms name none, and the two falling
- * back differently would have the envelope disagree with its own `accepts[]`.
+ * The URL a request was made to: the `resource` an offer defaults to when the
+ * terms name none. Resolved once here, since the 402 names the resource once.
  */
-export function absoluteUrl(req: Request): string {
+function absoluteUrl(req: Request): string {
   return `${req.protocol}://${req.get("host") ?? ""}${req.originalUrl}`;
 }

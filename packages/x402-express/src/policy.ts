@@ -30,9 +30,6 @@ const COMMON_RULES: Record<
   scheme: { compare: "equal", reason: "policy_scheme" },
   network: { compare: "equal", reason: "policy_network" },
   payTo: { compare: "equal", reason: "policy_payTo" },
-  // Bind the payment to THIS resource: without it, a payment minted for path A
-  // (matching price/payTo/asset) could be replayed against path B.
-  resource: { compare: "equal", reason: "policy_resource" },
   asset: { compare: "equal", reason: "policy_asset" },
   // Overpaying is the payer's business; underpaying is not. Compared as BigInt,
   // because atomic units are 1e10 larger than the token amount — anything over
@@ -45,9 +42,6 @@ const COMMON_RULES: Record<
   },
   // Replaced per scheme in rulesFor().
   extra: { compare: "skip", why: "filled in from the scheme adapter" },
-  // Does not reach the ledger, so it does not change what settles. Left
-  // uncompared so a payer library that normalises or drops it still pays.
-  description: { compare: "skip", why: "informational" },
   // The facilitator holds a payment for at most this long; the payer does not
   // get to stretch it.
   maxTimeoutSeconds: { compare: "equal", reason: "policy_timeout" },

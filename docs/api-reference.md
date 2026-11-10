@@ -127,8 +127,6 @@ guarantee.
       "executeBeforeSeconds": 120
     },
     "payTo": "merchant::1220…",
-    "resource": "https://api.example.com/paid",
-    "description": "Access to /paid",
     "maxTimeoutSeconds": 60
   }
 }
@@ -142,7 +140,6 @@ guarantee.
 | `paymentPayload.payload`                    | The six fields above, all required except `hashingSchemeVersion`, which means `HASHING_SCHEME_VERSION_V2` when absent. `assetTransferMethod` must be `"transfer-factory"`, as in the requirements' `extra`; a payload without it or with another value fails the shape check (`internal_error`). `signature` is canonical base64 of the 64-byte signature and `preparedTxHash` is 64 lower-case hex digits; an empty one fails the payload's shape check (`internal_error`), and any other encoding is `bad_signature`. `preparedTransaction` is base64 of exactly one gzip member with no optional header fields, at most 8 KiB compressed and 64 KiB decompressed; anything else is `transfer_mismatch` with detail `undecodable`. `publicKey` replaced the older `keyFingerprint` — the facilitator derives the fingerprint from the key and matches it against the `::` suffix of the transfer's sender, which is the payer: the payload names none. The signature covers the prepared transaction, whose receiver, instrument and amount the facilitator checks against `paymentRequirements`: that is what binds the payload to them. |
 | `amount`                                    | Integer string of atomic units — 1 CC = 1e10, so `"500000000"` is 0.05 CC. **Exact**, not a floor: the transfer must move this amount, and an overpayment is rejected.                                                                                                       |
 | `payTo`                                     | Must be a party your API key owns. Otherwise verify answers `transfer_mismatch` and settle answers `unauthorized`.                                                                                                                                                             |
-| `resource`                                  | Required — the URL being paid for.                                                                                                                                                                                                                                             |
 | `asset`                                     | A symbol — `"CC"` for Canton Coin, or a registry token's own. The instrument it names is `extra.instrumentId`.
 | `extra.instrumentId`                        | Required `{admin, id}`: `asset` alone cannot say which registry issued the instrument, and the facilitator binds the transfer against this.
 | `maxTimeoutSeconds`                         | Required — seconds the client has to complete payment. A whole number of at least 1; `0`, a negative, a fraction and `Infinity` are all refused.
@@ -211,7 +208,6 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
       "executeBeforeSeconds": 120
     },
     "payTo": "merchant::1220…",
-    "resource": "https://api.example.com/paid",
     "maxTimeoutSeconds": 60
   }
 }
@@ -266,8 +262,6 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
       "executeBeforeSeconds": 120
     },
     "payTo": "merchant::1220…",
-    "resource": "https://api.example.com/paid",
-    "description": "Access to /paid",
     "maxTimeoutSeconds": 60
   }
 }
