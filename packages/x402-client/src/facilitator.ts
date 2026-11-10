@@ -61,9 +61,10 @@ interface RawResponse {
   retryAfter?: number;
 }
 
-/** Thin client for a Canton x402 facilitator's verify / settle / supported API. */
+/** How long `supported()` reuses its answer when no `supportedTtlMs` is given. */
 const DEFAULT_SUPPORTED_TTL_MS = 5 * 60_000;
 
+/** Thin client for a Canton x402 facilitator's verify / settle / supported API. */
 export class FacilitatorClient {
   private readonly base: string;
   /** Last successful `/v2/supported`, with the time it was fetched. */
@@ -115,12 +116,28 @@ export class FacilitatorClient {
    * callers share one request rather than each making their own, so a cold
    * start under load costs one round trip and not one per caller.
    *
-   * A refresh that fails falls back to the last value when there is one: these
-   * are near-static deployment facts, and a facilitator blip should not stop a
-   * merchant quoting. Pass `{ refresh: true }` to bypass the cache; with no
-   * previous value, the error propagates.
+   * When the TTL has passed and the refetch fails, the last value is served
+   * instead: these are near-static deployment facts, and a facilitator blip
+   * should not stop a merchant quoting. With nothing cached to fall back to,
+   * the error propagates.
+   *
+   * `{ refresh: true }` bypasses the cache on the way in and on the way out: a
+   * caller asking for current data is told when it cannot have it, so a failed
+   * refresh throws rather than resolving with the old value.
+   *
+   * Each caller gets its own copy, so editing the result cannot change what
+   * the next caller reads.
    */
   async supported(opts: { refresh?: boolean } = {}): Promise<SupportedResponse> {
+    // A copy per caller, as every call got before there was a cache. Sharing
+    // the cached object would let one caller's edit — `s.kinds = s.kinds
+    // .filter(…)` — be what every later caller reads until the TTL runs out.
+    // Cloning is microseconds against a round trip of milliseconds, and it is
+    // done here, around the whole lookup, so no return path can miss it.
+    return structuredClone(await this.supportedUncloned(opts));
+  }
+
+  private async supportedUncloned(opts: { refresh?: boolean }): Promise<SupportedResponse> {
     const ttl = this.opts.supportedTtlMs ?? DEFAULT_SUPPORTED_TTL_MS;
     const cached = this.supportedCache;
     if (!opts.refresh && cached && Date.now() - cached.at < ttl) return cached.value;
@@ -128,10 +145,14 @@ export class FacilitatorClient {
     try {
       return await this.fetchSupportedOnce(opts.refresh === true);
     } catch (err) {
-      // Stale beats nothing for data that changes on redeploy, not per request.
+      // Stale beats nothing for data that changes on redeploy, not per request
+      // — but only for a caller that did not ask for current data. `refresh`
+      // means "I need it now", and answering that with the old value is both
+      // the opposite of what was asked and undetectable from the result.
+      //
       // Checked here rather than at the fetch, so a caller that joined someone
       // else's request falls back the same way as the one that started it.
-      if (cached) return cached.value;
+      if (cached && opts.refresh !== true) return cached.value;
       throw err;
     }
   }
@@ -143,8 +164,16 @@ export class FacilitatorClient {
 
     const fetching: Promise<SupportedResponse> = this.fetchSupported().then(
       (value) => {
-        this.supportedCache = { at: Date.now(), value };
-        if (this.supportedInFlight === fetching) this.supportedInFlight = undefined;
+        // Only the newest fetch may write. A `refresh` started while another
+        // request was running leaves two in flight, and if the older one lands
+        // last it would overwrite the fresher answer — leaving the cache stale
+        // for a full TTL, which is usually the very thing the refresh was
+        // called to fix. The caller of the older fetch still gets its own
+        // value back; it just does not become what everyone else reads.
+        if (this.supportedInFlight === fetching) {
+          this.supportedCache = { at: Date.now(), value };
+          this.supportedInFlight = undefined;
+        }
         return value;
       },
       (err: unknown) => {

@@ -253,6 +253,89 @@ describe("FacilitatorClient /v2/supported cache", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("an older fetch landing last does not overwrite a newer answer", async () => {
+    // A refresh starting while another request runs leaves two in flight. If
+    // the older lands last, the cache would serve its answer for a full TTL —
+    // undoing the refresh that was called to correct it.
+    const gates: Array<() => void> = [];
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      const mine = ++call;
+      await new Promise<void>((r) => gates.push(r));
+      return json(kinds(mine === 1 ? "canton:old" : "canton:new"));
+    }));
+    const client = new FacilitatorClient("https://f.example");
+
+    const older = client.supported();
+    await vi.waitFor(() => expect(gates).toHaveLength(1));
+    const newer = client.supported({ refresh: true });
+    await vi.waitFor(() => expect(gates).toHaveLength(2));
+
+    gates[1]();
+    expect((await newer).kinds[0].network).toBe("canton:new");
+    gates[0]();
+    // The older caller still gets what it fetched.
+    expect((await older).kinds[0].network).toBe("canton:old");
+
+    expect((await client.supported()).kinds[0].network).toBe("canton:new");
+  });
+
+  it("a failed refresh throws rather than quietly serving the stale value", async () => {
+    // `refresh` means "I need current data". Answering with the old value is
+    // the opposite of what was asked, and the caller cannot tell from the
+    // result — so this is the one path where stale does NOT beat nothing.
+    let attempt = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      attempt += 1;
+      return attempt === 1 ? json(kinds("canton:one")) : json({ error: "down" }, 503);
+    }));
+    const client = new FacilitatorClient("https://f.example");
+
+    await client.supported();
+    const err: FacilitatorError = await client.supported({ refresh: true }).catch((e) => e);
+    expect(err).toBeInstanceOf(FacilitatorError);
+    expect(err.status).toBe(503);
+
+    // And the cache is untouched: the TTL path still serves what it had.
+    expect((await client.supported()).kinds[0].network).toBe("canton:one");
+  });
+
+  it("gives each caller its own copy, so an edit cannot poison the cache", async () => {
+    // Before the cache every call parsed a fresh body. Sharing the cached
+    // object would make one caller's narrowing the next caller's truth.
+    const fetchMock = vi.fn(async () => json(kinds("canton:one")));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new FacilitatorClient("https://f.example");
+
+    const first = await client.supported();
+    first.kinds = first.kinds.filter((k) => k.network === "canton:nope");
+    expect(first.kinds).toHaveLength(0);
+
+    const second = await client.supported();
+    expect(second.kinds).toHaveLength(1);
+    expect(second.kinds[0].network).toBe("canton:one");
+    expect(second).not.toBe(first);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives a copy on the stale-fallback path too", async () => {
+    vi.useFakeTimers();
+    let attempt = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      attempt += 1;
+      return attempt === 1 ? json(kinds("canton:one")) : json({ error: "down" }, 503);
+    }));
+    const client = new FacilitatorClient("https://f.example", { supportedTtlMs: 1_000 });
+
+    await client.supported();
+    vi.advanceTimersByTime(2_000);
+    const stale = await client.supported();
+    stale.kinds.length = 0;
+
+    vi.advanceTimersByTime(2_000);
+    expect((await client.supported()).kinds).toHaveLength(1);
+  });
+
   it("caches per client, so one deployment's answer never serves another", async () => {
     const fetchMock = vi.fn(async (url: string) =>
       json(kinds(url.startsWith("https://a.") ? "canton:a" : "canton:b")),
