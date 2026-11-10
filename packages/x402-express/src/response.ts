@@ -18,7 +18,7 @@ import { FacilitatorError } from "@chainsafe/x402-client";
 
 import type { BaseRequirementsSpec, SchemeAdapter } from "./scheme.js";
 import type { PaymentRejectionInfo, PaymentRequiredOptions } from "./options.js";
-import { buildQuotes, issueChallenge, type Quote } from "./quotes.js";
+import { absoluteUrl, buildQuotes, issueChallenge, type Quote } from "./quotes.js";
 
 /**
  * Internal control-flow signal: answer this request with a 402.
@@ -135,8 +135,4 @@ function respond402<TRequirements extends X402PaymentRequirements<unknown>>(
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-function absoluteUrl(req: Request): string {
-  return `${req.protocol}://${req.get("host") ?? ""}${req.originalUrl}`;
 }

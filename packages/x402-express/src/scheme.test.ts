@@ -259,4 +259,41 @@ describe("paymentRequired with a non-canton scheme", () => {
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_requirements_invalid");
   });
+
+  it("names the request URL as the resource when a builder's terms carry none", async () => {
+    // `resource` is optional on the envelope type and a builder is handed
+    // through untouched — unlike a spec, nothing fills it in. The spec requires
+    // a 402 to name one regardless, so the envelope falls back to the same URL
+    // a spec would have defaulted to.
+    stubFacilitator();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired<VoucherSpec, VoucherRequirements, VoucherPayload>({
+        facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+        scheme: voucherScheme(),
+        requirements: () => [
+          {
+            scheme: "voucher",
+            network: "vouchers:test",
+            amount: "10",
+            asset: "VCH",
+            extra: { book: "autumn-2026" },
+            payTo: "shop::1",
+            maxTimeoutSeconds: 60,
+          } as VoucherRequirements,
+        ],
+      }),
+    );
+    app.get("/paid", (_req, res) => res.json({ ok: true }));
+    const res = await request(app).get("/paid?q=1");
+    expect(res.status).toBe(402);
+    const sent = JSON.parse(
+      Buffer.from(res.headers["payment-required"], "base64").toString("utf8"),
+    );
+    expect(sent.resource.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/paid\?q=1$/);
+    expect(sent.resource).not.toHaveProperty("description");
+    expect(res.body.resource).toEqual(sent.resource);
+  });
+
 });

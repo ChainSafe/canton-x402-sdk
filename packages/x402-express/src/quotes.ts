@@ -131,6 +131,13 @@ function assertAtomicAmount<TRequirements extends X402PaymentRequirements<unknow
   return r;
 }
 
-function absoluteUrl(req: Request): string {
+/**
+ * The URL a request was made to, which is the `resource` a quote defaults to.
+ *
+ * Exported because response.ts needs the SAME value: a 402's top-level
+ * `resource` falls back to it when the terms name none, and the two falling
+ * back differently would have the envelope disagree with its own `accepts[]`.
+ */
+export function absoluteUrl(req: Request): string {
   return `${req.protocol}://${req.get("host") ?? ""}${req.originalUrl}`;
 }
