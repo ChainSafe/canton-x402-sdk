@@ -4,6 +4,7 @@ import {
   CantonPaymentRequirementsSchema,
   X402PaymentRequirementsEnvelopeSchema,
 } from "./requirements";
+import { InstrumentIdSchema } from "./common";
 import type { NetworkId, X402Version } from "./common";
 import type { CantonPaymentInner, X402PaymentPayload } from "./payment";
 import type { X402PaymentRequirements } from "./requirements";
@@ -225,3 +226,80 @@ export const SupportedResponseSchema = v.object({
   kinds: v.array(SupportedKindSchema),
 });
 export type SupportedResponse = v.InferOutput<typeof SupportedResponseSchema>;
+
+/**
+ * Thrown when a kind's `extra` is not a canton-exact one: a key this scheme
+ * defines is missing or the wrong shape. Named for the cause, since the caller
+ * can do nothing about it but tell whoever runs the facilitator.
+ */
+export class MalformedSupportedExtraError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MalformedSupportedExtraError";
+  }
+}
+
+/**
+ * One instrument a deployment settles, as `kinds[].extra.instruments[]` carries
+ * it.
+ *
+ * `admin` repeats `instrumentId.admin`: the registered scheme names the admin
+ * party at the top level, and the Splice instrument id carries it too. Both are
+ * read, and {@link selectCantonDeployments} refuses a response where the two
+ * disagree, since it is then inconsistent about who validates the holding.
+ */
+export const SupportedInstrumentSchema = v.looseObject({
+  admin: v.optional(v.string()),
+  instrumentId: v.optional(InstrumentIdSchema),
+  /** Display symbol, e.g. `CC`. */
+  symbol: v.optional(v.string()),
+});
+export type SupportedInstrument = v.InferOutput<typeof SupportedInstrumentSchema>;
+
+/**
+ * The canton-exact reading of `kinds[].extra`.
+ *
+ * `extra` is Optional and scheme-defined in x402 v2 §7.3, so what is in there is
+ * this scheme's business. Every field is optional and unknown keys pass: a
+ * conforming facilitator may omit any of this, and `extra` is where other
+ * deployments put their own keys. Nothing here is trusted to exist — the reader
+ * says so when something it needs is missing, instead of taking `undefined` for
+ * a value.
+ */
+export const CantonSupportedExtraSchema = v.looseObject({
+  /** Asset transfer methods this deployment speaks, e.g. `transfer-factory`. */
+  transferMethods: v.array(v.pipe(v.string(), v.minLength(1))),
+  /** The synchronizer it submits to — the id a payer prepares against. */
+  synchronizerId: v.pipe(v.string(), v.minLength(1)),
+  /** How a prepared transaction travels, e.g. `inline`. */
+  carriages: v.array(v.pipe(v.string(), v.minLength(1))),
+  /**
+   * The instruments this deployment lists. Optional: what an absent, empty or
+   * unusable list means is the reader's, not the shape's — see
+   * {@link selectCantonDeployments}.
+   */
+  instruments: v.optional(v.array(SupportedInstrumentSchema)),
+});
+export type CantonSupportedExtra = v.InferOutput<typeof CantonSupportedExtraSchema>;
+
+/**
+ * Read one kind's `extra` as canton-exact, or say what is wrong with it.
+ *
+ * Throws rather than returning `{}`, which is what it did before: swallowing
+ * the failure meant one bad field discarded every good one — the synchronizer
+ * and the instruments alongside it — and the caller was then told the
+ * deployment "advertises no instrument", which was both false and unactionable.
+ *
+ * Unknown keys still pass: `extra` is where a deployment puts its own, and only
+ * the keys this scheme defines are checked.
+ */
+export function cantonSupportedExtra(kind: SupportedKind): CantonSupportedExtra {
+  const parsed = v.safeParse(CantonSupportedExtraSchema, kind.extra ?? {});
+  if (parsed.success) return parsed.output;
+  const problems = parsed.issues
+    .map((i) => `${["extra", ...(i.path ?? []).map((p) => String(p.key))].join(".")}: ${i.message}`)
+    .join("; ");
+  throw new MalformedSupportedExtraError(
+    `facilitator kind ${kind.scheme}/${kind.network} does not advertise a canton-exact extra — ${problems}`,
+  );
+}
