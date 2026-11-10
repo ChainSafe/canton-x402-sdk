@@ -78,9 +78,12 @@ network, `payTo`, resource, asset and `maxTimeoutSeconds` must be this request's
 terms, and the amount must not be under the price. Other fields (`description`,
 and the `extra` keys beyond the instrument, `memo` and `executeBeforeSeconds`
 among them) are not compared, and reach the facilitator as the payer sent them.
-A header in the pre-spec `{ payment, requirements }` shape, or a payment with no
-`accepted`, is `bad_payload`. Amounts are atomic
-units throughout — the same unit the wire carries.
+A header in the pre-spec `{ payment, requirements }` shape, a payment with no
+`accepted`, or one whose `accepted` is not a whole `PaymentRequirements` (one of
+`scheme`, `network`, `amount`, `asset` and `payTo` missing or empty, or a
+`maxTimeoutSeconds` that is not a whole number of at least 1), is
+`bad_payload`. Amounts are atomic units throughout — the same unit the wire
+carries.
 
 ## Options
 

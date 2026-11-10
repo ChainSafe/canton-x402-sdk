@@ -216,12 +216,15 @@ describe("shape guards + scheme/network match", () => {
     expect(
       isX402PaymentPayload({
         x402Version: 2,
-        accepted: { scheme: "batch-settlement-canton", network: "canton:devnet" },
+        accepted: { ...requirements, scheme: "batch-settlement-canton", extra: { quoteId: "q-1" } },
         payload: { ethereumTxHash: "0x" },
       }),
     ).toBe(true);
-    expect(isX402PaymentPayload({ x402Version: 2, accepted: { scheme: "", network: "canton:devnet" }, payload: {} })).toBe(false);
-    expect(isX402PaymentPayload({ x402Version: 1, accepted: { scheme: "exact", network: "n" }, payload: {} })).toBe(false);
+    // ...but only a whole PaymentRequirements, not a scheme and a network alone.
+    expect(isX402PaymentPayload({ x402Version: 2, accepted: { scheme: "exact", network: "canton:devnet" }, payload: {} })).toBe(false);
+    expect(isX402PaymentPayload({ x402Version: 2, accepted: requirements, payload: {} })).toBe(true);
+    expect(isX402PaymentPayload({ x402Version: 2, accepted: { ...requirements, scheme: "" }, payload: {} })).toBe(false);
+    expect(isX402PaymentPayload({ x402Version: 1, accepted: requirements, payload: {} })).toBe(false);
     // The pre-spec envelope, with the scheme and network at the top level.
     expect(isX402PaymentPayload({ x402Version: 2, scheme: "exact", network: "canton:devnet", payload: {} })).toBe(false);
     expect(isX402PaymentPayload({})).toBe(false);

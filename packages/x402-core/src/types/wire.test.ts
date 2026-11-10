@@ -9,6 +9,7 @@ import type {
   VerifyRequest,
   SettleRequest,
   SettleResponse,
+  SchemeVerifier,
   SupportedResponse,
   VerifyResponse,
   X402PaymentPayload,
@@ -64,13 +65,19 @@ describe("x402-core wire types", () => {
       error: "payment_required",
     };
 
+    // The generic payment and the canton-exact one assign to each other, so a
+    // payer can build either and hand it to what takes the other.
+    const generic: X402PaymentPayload = payload;
+    const canton: CantonPaymentPayload = generic;
+
     expect(verifyReq.x402Version).toBe(2);
     expect(settleReq.paymentPayload).toBe(payload);
+    expect(canton).toBe(payload);
     expect(supported.kinds).toHaveLength(1);
     expect(paymentRequired.accepts[0]).toBe(requirements);
   });
 
-  it("expresses a second scheme's payload and extra via the generics — no casts", () => {
+  it("expresses a second scheme's payload and extra via the generics — no casts", async () => {
     // A future EVM→Canton scheme: different inner payload and `extra` bag. It
     // instantiates the X402* generics directly; the fact that this block
     // type-checks (no `as`/`as unknown as`) is the acceptance criterion.
@@ -98,7 +105,7 @@ describe("x402-core wire types", () => {
       extra: { cantonRecipient: "merchant::1220dead" },
     };
 
-    const payload: X402PaymentPayload<EvmInner> = {
+    const payload: X402PaymentPayload<EvmInner, EvmExtra> = {
       x402Version: 2,
       accepted: requirements,
       payload: {
@@ -118,6 +125,17 @@ describe("x402-core wire types", () => {
     expect(request.paymentPayload.payload.ethereumTxHash).toBe("0xfeed");
     expect(request.paymentRequirements.asset).toBe("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
     expect(request.paymentRequirements.extra?.cantonRecipient).toBe("merchant::1220dead");
+    expect(request.paymentPayload.accepted.extra?.cantonRecipient).toBe("merchant::1220dead");
+
+    // ...and the request reaches the scheme-agnostic verifier contract as it is.
+    const verifier: SchemeVerifier = {
+      schemeId: "exact-evm-to-canton-cc",
+      networkId: "eip155:1",
+      verify: () => Promise.resolve({ isValid: true }),
+    };
+    await expect(verifier.verify(request.paymentPayload, request.paymentRequirements)).resolves.toEqual({
+      isValid: true,
+    });
   });
 
   it("carries a mixed-scheme accepts[] in one 402 (union type argument)", () => {

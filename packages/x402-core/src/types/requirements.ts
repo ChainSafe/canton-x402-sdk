@@ -8,9 +8,12 @@ import type { NetworkId, Scheme, X402Version } from "./common";
  * the spec types as a string for every scheme (a token contract address on EVM,
  * a symbol here). Anything an asset cannot say as a string belongs in `extra`.
  * `scheme` is the open {@link Scheme} union so schemes share the envelope.
- * Generic → type-only (the concrete Canton shape below is schema-first).
+ * Generic → type-only (the concrete Canton shape below is schema-first). A type
+ * alias, not an interface, so it keeps an implicit index signature: a payment
+ * typed with it as `accepted` still assigns to the schema-inferred
+ * `CantonPaymentPayload`, whose `accepted` is a loose object.
  */
-export interface X402PaymentRequirements<TExtra = Record<string, unknown>> {
+export type X402PaymentRequirements<TExtra = Record<string, unknown>> = {
   scheme: Scheme;
   network: NetworkId;
   /**
@@ -22,14 +25,19 @@ export interface X402PaymentRequirements<TExtra = Record<string, unknown>> {
   asset: string;
   /** Recipient party ID. */
   payTo: string;
-  /** Resource URL the wallet is paying for. */
-  resource: string;
+  /**
+   * Resource URL the wallet is paying for. Not a field of the spec's
+   * `PaymentRequirements`, which leaves the resource to `PaymentRequired` and
+   * `PaymentPayload`, so a payment's `accepted` need not carry it. Canton-exact
+   * requirements still require it until #76 moves it out.
+   */
+  resource?: string;
   description?: string;
   /** Seconds the client has to complete payment. Required for every scheme. */
   maxTimeoutSeconds: number;
   /** Scheme-specific extra (the `TExtra` seam), e.g. the bridge's `cantonRecipient`. */
   extra?: TExtra;
-}
+};
 
 /** A required string field: present and not empty. */
 const nonEmptyString = v.pipe(v.string(), v.minLength(1));
@@ -112,13 +120,12 @@ export function parseCantonPaymentRequirements(input: unknown): CantonPaymentReq
 }
 
 /**
- * Loose validator for the requirements envelope: the universal fields every scheme
- * shares, with a scheme-agnostic `asset` object (the concrete asset shape is the
- * per-scheme seam). `looseObject` so a scheme's extra keys pass through. Mirrors
- * {@link isX402PaymentPayload} — envelope-level validation only; the per-scheme
- * verifier checks the concrete asset (use {@link isCantonPaymentRequirements} for
- * canton-exact). This is the requirements shape carried as the X402 request's
- * `paymentRequirements`.
+ * Loose validator for the requirements envelope: the fields the spec requires of
+ * every scheme's `PaymentRequirements`. `looseObject` so a scheme's own keys,
+ * `extra` among them, pass through. Mirrors {@link isX402PaymentPayload} —
+ * envelope-level validation only; the per-scheme verifier checks the rest (use
+ * {@link isCantonPaymentRequirements} for canton-exact). This is the shape of the
+ * X402 request's `paymentRequirements`, and of a payment's `accepted`.
  */
 export const X402PaymentRequirementsEnvelopeSchema = v.looseObject({
   scheme: nonEmptyString,

@@ -61,7 +61,7 @@ export function atomicToLedger(amount: string, decimals: number): string | null 
 
 /** The scheme + network the payer chose (`accepted`) must match the requirements. */
 export function schemeNetworkMatches(
-  payload: X402PaymentPayload<unknown>,
+  payload: X402PaymentPayload<unknown, unknown>,
   requirements: X402PaymentRequirements<unknown>,
 ): boolean {
   const accepted: unknown = payload.accepted;

@@ -214,10 +214,11 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       } catch {
         throw new PaymentRejection("bad_payload", fresh);
       }
-      // The codec checks `accepted` only for a scheme and a network, and types
-      // it optimistically; nothing else in it has been checked. Narrow before
-      // reading a field, or one without `extra` throws a TypeError and answers
-      // 500 instead of 402 — attacker-controlled input choosing our status code.
+      // The codec checks `accepted` only for the fields every scheme's
+      // requirements share, and types it optimistically; `extra` and `resource`
+      // have not been checked. Narrow before reading them, or one without
+      // `extra` throws a TypeError and answers 500 instead of 402 —
+      // attacker-controlled input choosing our status code.
       const requirements: unknown = payload.accepted;
       if (!isCantonPaymentRequirements(requirements)) {
         throw new PaymentRejection("policy_requirements_invalid", fresh);

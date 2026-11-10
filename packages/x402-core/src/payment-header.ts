@@ -42,20 +42,21 @@ export function encodePaymentHeader<TPayload = CantonPaymentPayload>(payload: TP
 /**
  * Parse an `X-PAYMENT` header value into the payment it carries. Throws on bad
  * base64 / JSON, or when the value is not a well-formed x402 v2 payment envelope,
- * including the pre-spec `{ payment, requirements }` wrapper and a payment with
- * no `accepted`.
+ * including the pre-spec `{ payment, requirements }` wrapper, a payment with no
+ * `accepted`, and one whose `accepted` is not a whole `PaymentRequirements` (a
+ * field every scheme's requirements share, missing or empty).
  *
  * Validation here is **envelope-level and scheme-agnostic** (x402 v2, an
- * `accepted` with a scheme and a network, a payload object) — deliberately *not*
- * the concrete per-scheme inner or the full requirements. Concrete validation is
- * the verifier's job: the facilitator (or a local {@link createCantonExactVerifier})
- * checks the scheme-specific inner + asset and the signature before the payment is
- * trusted. This keeps the codec one scheme-agnostic seam and avoids duplicating
- * per-scheme knowledge here.
+ * `accepted` with the fields every scheme's requirements share, a payload
+ * object) — deliberately *not* the concrete per-scheme inner, or the rest of
+ * `accepted`. Concrete validation is the verifier's job: the facilitator (or a
+ * local {@link createCantonExactVerifier}) checks the scheme-specific inner +
+ * asset and the signature before the payment is trusted. This keeps the codec
+ * one scheme-agnostic seam and avoids duplicating per-scheme knowledge here.
  *
  * The result is typed as the canton-exact payload for caller convenience; that's
  * optimistic — a caller MUST verify before relying on scheme-specific fields, and
- * narrow `accepted` before reading more than its scheme and network.
+ * narrow `accepted` before reading more than the fields every scheme shares.
  */
 export function decodePaymentHeader(headerValue: string): CantonPaymentPayload {
   let raw: string;

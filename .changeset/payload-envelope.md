@@ -25,11 +25,23 @@ passed through, and either may be `null`.
 payment was built against. `encodePaymentHeader(payload)` takes one argument,
 `decodePaymentHeader` returns the payment, and `DecodedPaymentHeader` is
 removed (also from `@chainsafe/x402-express`'s re-exports). A header in the old
-shape, or a payment with no `accepted`, fails to decode.
+shape, a payment with no `accepted`, or one whose `accepted` is not a whole
+`PaymentRequirements`, fails to decode.
+
+**`accepted` is a `PaymentRequirements`**, as the spec defines it.
+`X402PaymentPayload.accepted` is typed `X402PaymentRequirements`, and
+`X402PaymentPayload` takes the `extra` type as a second parameter, which
+`X402Request` passes through. `isX402PaymentPayload`, `isCantonPaymentPayload`
+and `decodePaymentHeader` check it with `X402PaymentRequirementsEnvelopeSchema`,
+as `paymentRequirements` is checked: an `accepted` whose `scheme`, `network`,
+`amount`, `asset` or `payTo` is missing or empty, or whose `maxTimeoutSeconds`
+is not a whole number of at least 1, is refused. Its `extra` is not checked. `X402PaymentRequirements.resource` is optional, since the spec's
+`PaymentRequirements` has no `resource`; canton-exact requirements still
+require it.
 
 **The verifier applies spec Rule 1 to `accepted`.** Its `scheme` must be
 `exact` and its `network` must equal the requirements', or the answer is
-`scheme_mismatch` / `network_mismatch`. Nothing else in `accepted` is checked:
+`scheme_mismatch` / `network_mismatch`. It compares nothing else in `accepted`:
 the transfer is bound to `paymentRequirements`, as before. A payment without a
 usable `accepted`, including the pre-spec envelope, is `scheme_mismatch`, and an
 `x402Version` other than 2 is `internal_error`. `schemeNetworkMatches` reads
@@ -40,7 +52,8 @@ network instead of the payment's.
 `createX402Fetch` sends the payment alone.
 
 The express middleware takes the requirements to verify from the payment's
-`accepted`: it narrows them (`policy_requirements_invalid` if they are not
+`accepted`: it narrows them (`bad_payload` if the codec refuses the `accepted`,
+an empty `amount` among them; `policy_requirements_invalid` if they are not
 canton-exact requirements), checks them against the merchant's terms, and
 forwards them as `paymentRequirements`, as it did with the echoed slot. It now
 also refuses an `accepted` whose `maxTimeoutSeconds` is not the merchant's

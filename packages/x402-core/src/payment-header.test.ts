@@ -51,13 +51,21 @@ describe("X-PAYMENT codec", () => {
   });
 
   it("decodes any scheme's payment — concrete inner validation is the verifier's job", () => {
-    // Decode validates the envelope (x402 v2, an accepted with a scheme and a
-    // network, a payload object), NOT the canton-exact inner or the full
-    // requirements. Another scheme's payment must decode; the per-scheme
+    // Decode validates the envelope (x402 v2, an accepted with the fields every
+    // scheme's requirements share, a payload object), NOT the canton-exact inner
+    // or accepted's extra. Another scheme's payment must decode; the per-scheme
     // verifier rejects it downstream.
     const foreign = {
       x402Version: 2,
-      accepted: { scheme: "exact", network: "eip155:84532", amount: "10000", payTo: "0xC0ffee" },
+      accepted: {
+        scheme: "exact",
+        network: "eip155:84532",
+        amount: "10000",
+        asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        payTo: "0xC0ffee",
+        maxTimeoutSeconds: 60,
+        extra: { name: "USDC", version: "2" },
+      },
       payload: { signature: "0xfeed", authorization: { from: "0xA" } },
     };
     expect(decodePaymentHeader(btoa(JSON.stringify(foreign)))).toEqual(foreign);
@@ -71,16 +79,18 @@ describe("X-PAYMENT codec", () => {
     }
   });
 
-  it("refuses an accepted that is missing, null, an array, a string, or has no scheme or network", () => {
-    const { accepted: _omit, ...inner } = payload;
+  it("refuses an accepted that is missing, null, an array, a string, or not a whole PaymentRequirements", () => {
+    const { accepted, ...inner } = payload;
+    // Each field the spec requires of every scheme's PaymentRequirements.
+    const required = ["scheme", "network", "amount", "asset", "payTo", "maxTimeoutSeconds"] as const;
     const bad = [
       inner,
       { ...inner, accepted: null },
       { ...inner, accepted: [] },
       { ...inner, accepted: "exact" },
-      { ...inner, accepted: { network: "canton:devnet" } },
-      { ...inner, accepted: { scheme: "exact" } },
-      { ...inner, accepted: { scheme: "", network: "canton:devnet" } },
+      { ...inner, accepted: { scheme: "exact", network: "canton:devnet" } },
+      { ...inner, accepted: { ...accepted, scheme: "" } },
+      ...required.map((key) => ({ ...inner, accepted: { ...accepted, [key]: undefined } })),
     ];
     for (const value of bad) {
       expect(() => decodePaymentHeader(btoa(JSON.stringify(value)))).toThrow(/not an x402 v2 payment/);

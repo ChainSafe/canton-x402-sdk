@@ -559,16 +559,10 @@ describe("cantonExactVerifier", () => {
 
   it("checks accepted only for Rule 1: the rest of the verdict depends on paymentRequirements", async () => {
     // The spec binds the transfer to paymentRequirements; accepted only has to
-    // name the same scheme and network. An accepted that carries just those, as
-    // another implementation might send, or that differs elsewhere, verifies.
+    // name the same scheme and network. One that differs elsewhere verifies.
     const { payload, requirements, payer } = await buildSignedFixture();
-    const variants = [
-      { scheme: requirements.scheme, network: requirements.network },
-      { ...requirements, amount: "1", payTo: "someoneelse::1220" },
-    ];
-    for (const accepted of variants) {
-      expect(await verifier.verify({ ...payload, accepted }, requirements)).toEqual({ isValid: true, payer });
-    }
+    const accepted = { ...requirements, amount: "1", payTo: "someoneelse::1220" };
+    expect(await verifier.verify({ ...payload, accepted }, requirements)).toEqual({ isValid: true, payer });
   });
 
   it("verifies a payment carrying resource and extensions, or null for either", async () => {
@@ -633,12 +627,8 @@ describe("createVerifierRegistry", () => {
     const { payload, requirements, payer } = await buildSignedFixture();
 
     expect(await multi.verify(payload, requirements)).toEqual({ isValid: true, payer });
-    const evmPayload = {
-      x402Version: 2 as const,
-      accepted: { scheme: "exact-evm-to-canton-cc", network: "eip155:1" },
-      payload: {},
-    };
     const evmReq = { ...requirements, scheme: "exact-evm-to-canton-cc", network: "eip155:1" };
+    const evmPayload = { x402Version: 2 as const, accepted: evmReq, payload: {} };
     expect(await multi.verify(evmPayload, evmReq)).toEqual({ isValid: true, payer: "0xpayer" });
   });
 });

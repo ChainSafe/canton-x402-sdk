@@ -166,26 +166,43 @@ describe("generic (loose) vs concrete (canton-exact) verify request", () => {
     paymentRequirements: requirements,
   };
   // A different scheme: valid universal envelope, but the inner is NOT a CantonPaymentInner.
+  const bridgeRequirements = {
+    scheme: "batch-settlement-canton",
+    network: "eip155:1",
+    amount: "1000000",
+    payTo: "0xC0ffee",
+    maxTimeoutSeconds: 60,
+    asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  };
   const bridgeReq = {
     x402Version: 2,
     paymentPayload: {
       x402Version: 2,
-      accepted: { scheme: "batch-settlement-canton", network: "eip155:1" },
+      accepted: bridgeRequirements,
       payload: { evmTxHash: "0xfeed", quoteId: "q-1" },
     },
-    paymentRequirements: {
-      scheme: "batch-settlement-canton",
-      network: "eip155:1",
-      amount: "1000000",
-      payTo: "0xC0ffee",
-      maxTimeoutSeconds: 60,
-      asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-    },
+    paymentRequirements: bridgeRequirements,
   };
 
   it("isX402Request accepts any scheme's envelope (scheme-agnostic dispatch gate)", () => {
     expect(isX402Request(cantonReq)).toBe(true);
     expect(isX402Request(bridgeReq)).toBe(true);
+  });
+
+  it("takes a payment's accepted only as a whole PaymentRequirements, generic or canton-exact", () => {
+    // The spec's accepted is the PaymentRequirements the payer chose. One that
+    // names only the scheme and network is not one.
+    for (const req of [cantonReq, bridgeReq]) {
+      const { scheme, network } = req.paymentPayload.accepted;
+      const partial = { ...req, paymentPayload: { ...req.paymentPayload, accepted: { scheme, network } } };
+      expect(isX402Request(partial)).toBe(false);
+      expect(isCantonVerifyRequest(partial)).toBe(false);
+    }
+    // Its extra is not checked: that is the per-scheme verifier's, against
+    // paymentRequirements.
+    const { extra: _omit, ...noExtra } = requirements;
+    const noExtraReq = { ...cantonReq, paymentPayload: { ...cantonReq.paymentPayload, accepted: noExtra } };
+    expect(isCantonVerifyRequest(noExtraReq)).toBe(true);
   });
 
   it("isCantonVerifyRequest accepts canton-exact but rejects another scheme's inner", () => {

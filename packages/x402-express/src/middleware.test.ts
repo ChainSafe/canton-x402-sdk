@@ -582,17 +582,17 @@ describe("paymentRequired", () => {
     }
   });
 
-  it("rejects an EMPTY amount in accepted when narrowing it, before policy", async () => {
-    // BigInt("") is 0, so this one matters — but the requirements schema's
-    // non-empty amount catches it first, which is why the code is
-    // policy_requirements_invalid and not policy_amount_invalid. Asserted so the
-    // earlier guard cannot quietly go.
+  it("rejects an EMPTY amount in accepted on decode, before policy", async () => {
+    // BigInt("") is 0, so this one matters — but the codec's envelope check
+    // catches it first (every PaymentRequirements has a non-empty amount), which
+    // is why the code is bad_payload and not policy_amount_invalid. Asserted so
+    // the earlier guard cannot quietly go.
     const fetchMock = stubFacilitator();
     const res = await request(makeApp())
       .get("/paid")
       .set("X-PAYMENT", paymentHeader({ amount: "" }));
     expect(res.status).toBe(402);
-    expect(res.body.error).toBe("policy_requirements_invalid");
+    expect(res.body.error).toBe("bad_payload");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

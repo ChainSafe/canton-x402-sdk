@@ -10,12 +10,13 @@ import type { X402PaymentRequirements } from "./requirements";
 
 /**
  * Generic request body for POST /v2/verify and /v2/settle — payload + requirements,
- * parameterized by the same scheme seams. Generic → type-only; the concrete
- * canton-exact request below is schema-first.
+ * parameterized by the same scheme seams: `TExtra` is both the requirements' and
+ * the payment's `accepted`'s. Generic → type-only; the concrete canton-exact
+ * request below is schema-first.
  */
 export interface X402Request<TInner = CantonPaymentInner, TExtra = Record<string, unknown>> {
   x402Version: X402Version;
-  paymentPayload: X402PaymentPayload<TInner>;
+  paymentPayload: X402PaymentPayload<TInner, TExtra>;
   paymentRequirements: X402PaymentRequirements<TExtra>;
 }
 
@@ -48,11 +49,11 @@ const X402RequestEnvelopeSchema = v.looseObject({
   paymentPayload: X402PaymentEnvelopeSchema,
   paymentRequirements: X402PaymentRequirementsEnvelopeSchema,
 });
-export function isX402Request(x: unknown): x is X402Request<unknown> {
+export function isX402Request(x: unknown): x is X402Request<unknown, unknown> {
   return v.is(X402RequestEnvelopeSchema, x);
 }
-export function parseX402Request(input: unknown): X402Request<unknown> {
-  return v.parse(X402RequestEnvelopeSchema, input) as unknown as X402Request<unknown>;
+export function parseX402Request(input: unknown): X402Request<unknown, unknown> {
+  return v.parse(X402RequestEnvelopeSchema, input) as unknown as X402Request<unknown, unknown>;
 }
 
 /**
@@ -60,7 +61,7 @@ export function parseX402Request(input: unknown): X402Request<unknown> {
  * single source of truth; the facilitator and any client conform to it. Method
  * interface → type-only.
  *
- * The params are the widest envelope (`unknown` inner/asset), so a heterogeneous
+ * The params are the widest envelope (`unknown` inner and `extra`), so a heterogeneous
  * registry of verifiers type-checks and each verifier narrows via its own guard.
  */
 export interface SchemeVerifier {
@@ -68,7 +69,7 @@ export interface SchemeVerifier {
   /** The concrete network this verifier is bound to, e.g. `canton:devnet`. */
   readonly networkId: NetworkId;
   verify(
-    payload: X402PaymentPayload<unknown>,
+    payload: X402PaymentPayload<unknown, unknown>,
     requirements: X402PaymentRequirements<unknown>,
   ): Promise<VerifyResponse>;
 }

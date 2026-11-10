@@ -8,13 +8,14 @@
 // Multi-scheme generics: the chain-agnostic bases carry the scheme seams
 // via defaulted type params, and the canton-exact types are thin aliases —
 //
-//   interface X402PaymentPayload<TInner>        { x402Version; accepted; payload: TInner; resource?; extensions? }
-//   interface X402PaymentRequirements<TExtra>   { …; asset: string; extra?: TExtra }
+//   interface X402PaymentPayload<TInner,TExtra> { x402Version; accepted: X402PaymentRequirements<TExtra>; payload: TInner; resource?; extensions? }
+//   type X402PaymentRequirements<TExtra>        = { …; asset: string; extra?: TExtra }
 //   interface X402Request<TInner,TExtra>        { paymentPayload; paymentRequirements }
 //   type CantonPaymentPayload      = X402PaymentPayload<CantonPaymentInner>
 //
 // Seams: the payload's ENTIRE `payload` object (TInner), and requirements' `extra`
-// (TExtra). A new scheme instantiates these with its own shapes — no
+// (TExtra), which is also the payment's `accepted.extra`: X402Request passes one
+// TExtra to both. A new scheme instantiates these with its own shapes — no
 // `as unknown as` casts. `asset` is NOT a seam: the spec types it as a string for
 // every scheme, so whatever a string cannot carry belongs in `extra`.
 //

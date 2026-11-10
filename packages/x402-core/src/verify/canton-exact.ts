@@ -195,7 +195,7 @@ function fail(reason: VerifyInvalidReason, payer?: string): VerifyResponseInvali
  */
 async function verifyCantonExact(
   networkId: NetworkId,
-  payload: X402PaymentPayload<unknown>,
+  payload: X402PaymentPayload<unknown, unknown>,
   requirements: X402PaymentRequirements<unknown>,
 ): Promise<VerifyResponse> {
   // 1. scheme — the requirements the payer chose (`accepted`) and the ones it
