@@ -1,6 +1,8 @@
 import * as v from "valibot";
 import { ASSET_TRANSFER_METHOD } from "./common";
-import type { NetworkId, Scheme, X402Version } from "./common";
+import type { X402Version } from "./common";
+import { X402PaymentRequirementsEnvelopeSchema } from "./requirements";
+import type { X402PaymentRequirements } from "./requirements";
 
 /**
  * Canton interactive-submission hashing-scheme versions. These are the protobuf
@@ -66,43 +68,70 @@ export const CantonPaymentInnerSchema = v.object({
 export type CantonPaymentInner = v.InferOutput<typeof CantonPaymentInnerSchema>;
 
 /**
- * Generic x402 payment envelope. `TInner` is the scheme-specific inner payload —
- * the whole `payload` object is the one chain-specific seam. `scheme` is the open
- * {@link Scheme} union so schemes share the envelope; each scheme guards on the
- * literal it knows. Generic → type-only (valibot can't infer a generic); the
- * loose runtime envelope check lives in `isX402PaymentPayload`.
+ * x402 v2 `ResourceInfo`: what the payment is for. Only `url` is required. The
+ * optional fields also take an explicit `null`, as other implementations send
+ * it.
  */
-export interface X402PaymentPayload<TInner = CantonPaymentInner> {
+export const ResourceInfoSchema = v.looseObject({
+  url: v.pipe(v.string(), v.minLength(1)),
+  description: v.nullish(v.string()),
+  mimeType: v.nullish(v.string()),
+  serviceName: v.nullish(v.string()),
+  tags: v.nullish(v.array(v.string())),
+  iconUrl: v.nullish(v.string()),
+});
+export type ResourceInfo = v.InferOutput<typeof ResourceInfoSchema>;
+
+/** x402 v2 `extensions`: extension id → its data. Passed through, not interpreted. */
+export const PaymentExtensionsSchema = v.record(v.string(), v.unknown());
+export type PaymentExtensions = v.InferOutput<typeof PaymentExtensionsSchema>;
+
+/**
+ * Generic x402 v2 payment envelope. `TInner` is the scheme-specific inner payload —
+ * the whole `payload` object is the one chain-specific seam — and `TExtra` is
+ * `accepted`'s `extra`, as in {@link X402PaymentRequirements}. The scheme and the
+ * network are not top-level: they are `accepted`'s, the requirements the payer
+ * chose. Generic → type-only (valibot can't infer a generic); the loose runtime
+ * envelope check lives in `isX402PaymentPayload`.
+ */
+export interface X402PaymentPayload<TInner = CantonPaymentInner, TExtra = Record<string, unknown>> {
   x402Version: X402Version;
-  scheme: Scheme;
-  network: NetworkId;
+  /**
+   * The `accepts[]` entry the payer chose: a whole `PaymentRequirements`, as the
+   * spec defines it. Checked for the fields every scheme's requirements share; a
+   * caller that reads `extra` narrows it first.
+   */
+  accepted: X402PaymentRequirements<TExtra>;
   payload: TInner;
+  resource?: ResourceInfo | null;
+  extensions?: PaymentExtensions | null;
 }
 
 /** canton-exact payload: the X-PAYMENT envelope carrying a {@link CantonPaymentInner}. */
 export const CantonPaymentPayloadSchema = v.object({
   x402Version: v.literal(2),
-  scheme: v.string(),
-  network: v.string(),
+  accepted: X402PaymentRequirementsEnvelopeSchema,
   payload: CantonPaymentInnerSchema,
+  resource: v.nullish(ResourceInfoSchema),
+  extensions: v.nullish(PaymentExtensionsSchema),
 });
 export type CantonPaymentPayload = v.InferOutput<typeof CantonPaymentPayloadSchema>;
 
 /**
- * Loose validator for the outer payment envelope: x402 v2, any non-empty scheme
- * (the per-scheme verifier validates the inner `payload`), a network, and a
- * `payload` object. `looseObject` so extra envelope keys (e.g. the echoed
- * `paymentRequirements` the X-PAYMENT header carries) pass through. Scheme-agnostic
- * — use {@link isCantonPaymentInner} for the canton-exact inner.
+ * Loose validator for the outer payment envelope: x402 v2, an `accepted` that is
+ * a PaymentRequirements ({@link X402PaymentRequirementsEnvelopeSchema}), and a
+ * `payload` object (the per-scheme verifier validates the inner). `looseObject` so extra envelope keys pass through.
+ * Scheme-agnostic — use {@link isCantonPaymentInner} for the canton-exact inner.
  */
 export const X402PaymentEnvelopeSchema = v.looseObject({
   x402Version: v.literal(2),
-  scheme: v.pipe(v.string(), v.minLength(1)),
-  network: v.string(),
+  accepted: X402PaymentRequirementsEnvelopeSchema,
   payload: v.looseObject({}),
+  resource: v.nullish(ResourceInfoSchema),
+  extensions: v.nullish(PaymentExtensionsSchema),
 });
 
-export function isX402PaymentPayload(x: unknown): x is X402PaymentPayload<unknown> {
+export function isX402PaymentPayload(x: unknown): x is X402PaymentPayload<unknown, unknown> {
   return v.is(X402PaymentEnvelopeSchema, x);
 }
 

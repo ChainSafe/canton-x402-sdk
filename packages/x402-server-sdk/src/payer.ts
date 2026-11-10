@@ -8,6 +8,10 @@ import type { CantonPaymentPayload, CantonPaymentRequirements } from "@chainsafe
 export interface X402Payer {
   /** Whether this payer can satisfy a requirement (scheme + network + transfer method + asset). */
   supports(requirements: CantonPaymentRequirements): boolean;
-  /** Prepare + sign a payment, returning the payload a facilitator settles. */
+  /**
+   * Prepare + sign a payment, returning the payload a facilitator settles. Its
+   * `accepted` must be `requirements`, whole: `createX402Fetch` sends the payment
+   * alone, and the merchant takes the requirements to verify against from it.
+   */
   authorize(requirements: CantonPaymentRequirements): Promise<CantonPaymentPayload>;
 }

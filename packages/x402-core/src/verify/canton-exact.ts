@@ -195,15 +195,21 @@ function fail(reason: VerifyInvalidReason, payer?: string): VerifyResponseInvali
  */
 async function verifyCantonExact(
   networkId: NetworkId,
-  payload: X402PaymentPayload<unknown>,
+  payload: X402PaymentPayload<unknown, unknown>,
   requirements: X402PaymentRequirements<unknown>,
 ): Promise<VerifyResponse> {
-  // 1. scheme — both sides must name the one id the spec defines.
-  if (payload.scheme !== EXACT_SCHEME_ID || requirements.scheme !== EXACT_SCHEME_ID) {
+  // 1. scheme — the requirements the payer chose (`accepted`) and the ones it
+  //    is verified against must both name the one id the spec defines (Rule 1).
+  //    A payment with no `accepted`, or a pre-spec envelope that carries the
+  //    scheme at the top level instead, names none.
+  const accepted = isObj(payload.accepted) ? payload.accepted : undefined;
+  if (payload.x402Version !== 2) return fail("internal_error");
+  if (!accepted) return fail("scheme_mismatch");
+  if (accepted.scheme !== EXACT_SCHEME_ID || requirements.scheme !== EXACT_SCHEME_ID) {
     return fail("scheme_mismatch");
   }
-  // 2. network — payload, requirements, and this verifier's binding must agree
-  if (payload.network !== requirements.network || payload.network !== networkId) {
+  // 2. network — accepted, requirements, and this verifier's binding must agree
+  if (accepted.network !== requirements.network || requirements.network !== networkId) {
     return fail("network_mismatch");
   }
   // 3. shapes — narrow the unknown inner/requirements before reading fields.

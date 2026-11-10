@@ -57,7 +57,7 @@ export function createX402Fetch(payers: X402Payer | X402Payer[], opts: X402Fetch
 
     const payload = await selection.payer.authorize(selection.requirements);
     const headers = new Headers(init?.headers);
-    headers.set("X-PAYMENT", encodePaymentHeader(payload, selection.requirements));
+    headers.set("X-PAYMENT", encodePaymentHeader(payload));
     return doFetch(input, { ...init, headers });
   };
 }

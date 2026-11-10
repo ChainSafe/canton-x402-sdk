@@ -1,20 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { encodePaymentHeader, decodePaymentHeader } from "./payment-header";
+import { encodePaymentHeader, decodePaymentHeader, MAX_PAYMENT_DEPTH } from "./payment-header";
 import type { CantonPaymentPayload, CantonPaymentRequirements } from "./index";
-
-const payload: CantonPaymentPayload = {
-  x402Version: 2,
-  scheme: "exact",
-  network: "canton:devnet",
-  payload: {
-    assetTransferMethod: "transfer-factory",
-    preparedTransaction: "b",
-    preparedTxHash: "h",
-    signature: "s",
-    publicKey: "pk",
-    hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
-  },
-};
 
 const requirements: CantonPaymentRequirements = {
   scheme: "exact",
@@ -27,72 +13,114 @@ const requirements: CantonPaymentRequirements = {
   maxTimeoutSeconds: 60,
 };
 
+const payload: CantonPaymentPayload = {
+  x402Version: 2,
+  accepted: requirements,
+  payload: {
+    assetTransferMethod: "transfer-factory",
+    preparedTransaction: "b",
+    preparedTxHash: "h",
+    signature: "s",
+    publicKey: "pk",
+    hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
+  },
+};
+
 describe("X-PAYMENT codec", () => {
-  it("round-trips { payment, requirements }", () => {
-    const decoded = decodePaymentHeader(encodePaymentHeader(payload, requirements));
-    expect(decoded.payload).toEqual(payload);
-    expect(decoded.requirements).toEqual(requirements);
+  it("round-trips the payment, with the requirements it was built against as `accepted`", () => {
+    const decoded = decodePaymentHeader(encodePaymentHeader(payload));
+    expect(decoded).toEqual(payload);
+    expect(decoded.accepted).toEqual(requirements);
   });
 
-  it("decodes any scheme's envelope — concrete inner validation is the verifier's job", () => {
-    // Option A: decode validates the envelope (x402 shape + universal requirements),
-    // NOT the canton-exact inner. A well-formed envelope carrying another scheme's
-    // inner must decode; the per-scheme verifier rejects it downstream.
+  it("serialises the bare x402 v2 payment, with no wrapper around it", () => {
+    const obj = JSON.parse(atob(encodePaymentHeader(payload)));
+    expect(Object.keys(obj).sort()).toEqual(["accepted", "payload", "x402Version"]);
+    expect(obj).toEqual(payload);
+  });
+
+  it("carries resource and extensions through, including an explicit null", () => {
+    const withExtras: CantonPaymentPayload = {
+      ...payload,
+      resource: { url: "https://merchant.example/r", description: "A report", mimeType: null },
+      extensions: { "x-example": { info: { a: 1 }, schema: {} } },
+    };
+    expect(decodePaymentHeader(encodePaymentHeader(withExtras))).toEqual(withExtras);
+    const nulls = { ...payload, resource: null, extensions: null };
+    expect(decodePaymentHeader(encodePaymentHeader(nulls))).toEqual(nulls);
+  });
+
+  it("decodes any scheme's payment — concrete inner validation is the verifier's job", () => {
+    // Decode validates the envelope (x402 v2, an accepted with the fields every
+    // scheme's requirements share, a payload object), NOT the canton-exact inner
+    // or accepted's extra. Another scheme's payment must decode; the per-scheme
+    // verifier rejects it downstream.
     const foreign = {
-      payment: {
-        x402Version: 2,
-        scheme: "batch-settlement-canton",
-        network: "eip155:1",
-        payload: { evmTxHash: "0xfeed", quoteId: "q-1" },
-      },
-      requirements: {
-        scheme: "batch-settlement-canton",
-        network: "eip155:1",
-        amount: "1000000",
+      x402Version: 2,
+      accepted: {
+        scheme: "exact",
+        network: "eip155:84532",
+        amount: "10000",
+        asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
         payTo: "0xC0ffee",
         maxTimeoutSeconds: 60,
-        asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        extra: { name: "USDC", version: "2" },
       },
+      payload: { signature: "0xfeed", authorization: { from: "0xA" } },
     };
-    const decoded = decodePaymentHeader(btoa(JSON.stringify(foreign)));
-    expect(decoded.payload).toEqual(foreign.payment);
-    expect(decoded.requirements).toEqual(foreign.requirements);
+    expect(decodePaymentHeader(btoa(JSON.stringify(foreign)))).toEqual(foreign);
   });
 
-  it("serialises two separate slots — no merge, no paymentRequirements", () => {
-    const obj = JSON.parse(atob(encodePaymentHeader(payload, requirements)));
-    expect(Object.keys(obj).sort()).toEqual(["payment", "requirements"]);
-    expect(obj.payment).toEqual(payload);
-    expect("paymentRequirements" in obj).toBe(false);
-    // requirements do not leak into the payment slot
-    expect("requirements" in obj.payment).toBe(false);
+  it("refuses the pre-spec envelopes: the { payment, requirements } wrapper, and top-level scheme/network", () => {
+    const { accepted: _omit, ...inner } = payload;
+    const legacyPayment = { ...inner, scheme: "exact", network: "canton:devnet" };
+    for (const legacy of [{ payment: legacyPayment, requirements }, legacyPayment]) {
+      expect(() => decodePaymentHeader(btoa(JSON.stringify(legacy)))).toThrow(/not an x402 v2 payment/);
+    }
   });
 
-  it("throws a slot-specific error when `payment` is missing or malformed", () => {
-    expect(() => decodePaymentHeader(btoa(JSON.stringify({ requirements })))).toThrow(
-      /`payment` slot/,
+  it("refuses an accepted that is missing, null, an array, a string, or not a whole PaymentRequirements", () => {
+    const { accepted, ...inner } = payload;
+    // Each field the spec requires of every scheme's PaymentRequirements.
+    const required = ["scheme", "network", "amount", "asset", "payTo", "maxTimeoutSeconds"] as const;
+    const bad = [
+      inner,
+      { ...inner, accepted: null },
+      { ...inner, accepted: [] },
+      { ...inner, accepted: "exact" },
+      { ...inner, accepted: { scheme: "exact", network: "canton:devnet" } },
+      { ...inner, accepted: { ...accepted, scheme: "" } },
+      ...required.map((key) => ({ ...inner, accepted: { ...accepted, [key]: undefined } })),
+    ];
+    for (const value of bad) {
+      expect(() => decodePaymentHeader(btoa(JSON.stringify(value)))).toThrow(/not an x402 v2 payment/);
+    }
+  });
+
+  it("refuses another x402Version, and a resource without a url", () => {
+    expect(() => decodePaymentHeader(btoa(JSON.stringify({ ...payload, x402Version: 1 })))).toThrow(
+      /not an x402 v2 payment/,
     );
     expect(() =>
-      decodePaymentHeader(btoa(JSON.stringify({ payment: { x402Version: 2 }, requirements }))),
-    ).toThrow(/`payment` slot/);
-  });
-
-  it("throws a slot-specific error when `requirements` is missing or malformed", () => {
-    expect(() => decodePaymentHeader(btoa(JSON.stringify({ payment: payload })))).toThrow(
-      /`requirements` slot/,
-    );
-    expect(() =>
-      decodePaymentHeader(
-        btoa(JSON.stringify({ payment: payload, requirements: { scheme: "exact" } })),
-      ),
-    ).toThrow(/`requirements` slot/);
+      decodePaymentHeader(btoa(JSON.stringify({ ...payload, resource: { description: "no url" } }))),
+    ).toThrow(/not an x402 v2 payment/);
   });
 
   it("handles non-ASCII content (isomorphic UTF-8)", () => {
-    const r: CantonPaymentRequirements = { ...requirements, description: "Café crème ☕" };
-    const decoded = decodePaymentHeader(encodePaymentHeader(payload, r));
-    expect(decoded.requirements).toEqual(r);
-    expect(decoded.payload).toEqual(payload);
+    const p: CantonPaymentPayload = { ...payload, accepted: { ...requirements, description: "Café crème ☕" } };
+    expect(decodePaymentHeader(encodePaymentHeader(p))).toEqual(p);
+  });
+
+  it("refuses a payment nested deeper than MAX_PAYMENT_DEPTH, and takes one at the cap", () => {
+    // Built as text: JSON.stringify itself overflows on the deepest case, which
+    // is the failure the cap keeps away from the facilitator call. The payment
+    // is 2 levels deep where extensions.x starts.
+    const withNested = (levels: number): string =>
+      JSON.stringify(payload).slice(0, -1) + `,"extensions":{"x":${"[".repeat(levels)}0${"]".repeat(levels)}}}`;
+    expect(decodePaymentHeader(btoa(withNested(MAX_PAYMENT_DEPTH - 2))).extensions).toBeDefined();
+    for (const levels of [MAX_PAYMENT_DEPTH - 1, 5000]) {
+      expect(() => decodePaymentHeader(btoa(withNested(levels)))).toThrow(/nests deeper than/);
+    }
   });
 
   it("throws on invalid base64 and invalid JSON", () => {
@@ -100,9 +128,9 @@ describe("X-PAYMENT codec", () => {
     expect(() => decodePaymentHeader(btoa("not json at all"))).toThrow(/not valid JSON/);
   });
 
-  it("throws when the decoded value is not a { payment, requirements } object", () => {
-    expect(() => decodePaymentHeader(btoa(JSON.stringify(42)))).toThrow(
-      /did not decode to a .* envelope/,
-    );
+  it("throws when the decoded value is not an object", () => {
+    for (const value of [42, null, "x", []]) {
+      expect(() => decodePaymentHeader(btoa(JSON.stringify(value)))).toThrow(/not an x402 v2 payment/);
+    }
   });
 });

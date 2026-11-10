@@ -20,8 +20,7 @@ const requirements = {
 
 const payload = {
   x402Version: 2,
-  scheme: "exact",
-  network: "canton:x",
+  accepted: requirements,
   payload: {
     assetTransferMethod: "transfer-factory",
     preparedTransaction: "cHJlcA==",
@@ -63,7 +62,8 @@ describe("createX402Fetch", () => {
     expect(payer.authorize).toHaveBeenCalledWith(requirements);
     expect(fetchMock.mock.calls).toHaveLength(2);
     const retryInit = fetchMock.mock.calls[1][1] as RequestInit;
-    expect(new Headers(retryInit.headers).get("X-PAYMENT")).toBe(encodePaymentHeader(payload, requirements));
+    // The header carries the payment alone: the requirements travel in it as `accepted`.
+    expect(new Headers(retryInit.headers).get("X-PAYMENT")).toBe(encodePaymentHeader(payload));
   });
 
   it("passes a 402 through when the payer can't satisfy it", async () => {

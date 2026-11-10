@@ -39,19 +39,20 @@ server (step 4).
 
 4. **Retry with `X-PAYMENT`**
 
-   The payload — `assetTransferMethod`, `preparedTransaction`,
-   `preparedTxHash`, `signature`, `publicKey`, `hashingSchemeVersion` —
-   plus the requirements it was built against are JSON-encoded, base64'd into
-   an `X-PAYMENT` header, and the request is retried. That header carries the
-   prepared transaction, gzipped, with its disclosed contracts.
+   The payment — the requirements it was built against as `accepted` (the
+   `accepts[]` entry the payer chose), and the payload: `assetTransferMethod`,
+   `preparedTransaction`, `preparedTxHash`, `signature`, `publicKey`,
+   `hashingSchemeVersion` — is JSON-encoded, base64'd into an `X-PAYMENT`
+   header, and the request is retried. That header carries the prepared
+   transaction, gzipped, with its disclosed contracts.
 
 5. **Merchant verifies, then settles**
 
    Your middleware re-checks the payment against your own terms — scheme,
-   network, `payTo`, resource, asset, and that it is neither underpriced nor
-   expired — using the exact requirements the payment was built against,
-   which the facilitator then holds the signed transfer to, so a payment built
-   for other terms can't pass. It then POSTs
+   network, `payTo`, resource, asset, `maxTimeoutSeconds`, and that it is
+   neither underpriced nor expired — using the exact requirements the payment was built against, its
+   `accepted`, which the facilitator then holds the signed transfer to, so a
+   payment built for other terms can't pass. It then POSTs
    `{ x402Version, paymentPayload, paymentRequirements }` to `/v2/verify` and,
    with `settle: true` (the default is `false`: verify only), to `/v2/settle`,
    with your API key. A payment that fails your terms or the facilitator's

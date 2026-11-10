@@ -125,5 +125,7 @@ lending policy (`APPROVE_MIN_SCORE`, `MAX_LOAN`, `MAX_LTV`).
   bureau does this via `http.createServer({ maxHeaderSize })` (see `credit-bureau/src/server.ts`).
 - **x402-core version alignment.** The payer and the facilitator must speak the same
   `x402-core` payload contract. A facilitator built against an older `x402-core` rejects a
-  newer payload with `scheme_mismatch` at `/v2/verify`. Ensure the deployed facilitator runs
-  an `x402-core` compatible with the SDK version you install.
+  newer payload at `/v2/verify`: the payment's spec envelope (`accepted` in place of a
+  top-level scheme and network) fails its request check with a `400`, which the middleware
+  answers as a `502` `facilitator_error`. Ensure the deployed facilitator runs an
+  `x402-core` compatible with the SDK version you install.
