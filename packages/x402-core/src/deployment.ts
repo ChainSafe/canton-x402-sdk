@@ -219,10 +219,18 @@ function selectInstruments(
     want === undefined ? listed : listed.filter((i) => want.includes(i.instrumentId?.id ?? ""));
 
   if (matching.length === 0) {
+    // What the facilitator said, and nothing about what to do next: core does
+    // not know how the caller's quote is configured, which is the same reason
+    // there is no singular form of this function.
+    const offered = listed.map((i) => i.instrumentId?.id).filter(Boolean);
     throw new DeploymentSelectionError(
       `facilitator kind ${label(kind)} advertises no instrument${
-        want === undefined ? "" : ` with id ${want.map((w) => `"${w}"`).join(" or ")}`
-      } in extra.instruments; name the asset explicitly`,
+        want === undefined
+          ? ""
+          : want.length === 0
+            ? " with an empty id list"
+            : ` with id ${want.map((w) => `"${w}"`).join(" or ")}`
+      } in extra.instruments${offered.length > 0 ? `; it lists ${offered.join(", ")}` : ""}`,
     );
   }
 
@@ -260,5 +268,9 @@ function describe(prefer: DeploymentPreference): string {
 
 function list(what: string, values: string[] | undefined): string | undefined {
   if (values === undefined) return undefined;
+  // An empty list matches nothing, and is almost always a caller's list that
+  // came out empty. Saying so beats reading it as "any", which would silently
+  // match everything and turn that mistake into a wrong-but-working quote.
+  if (values.length === 0) return `an empty ${what} list`;
   return `${what}${values.length === 1 ? "" : "s"} ${values.map((v) => `"${v}"`).join(" or ")}`;
 }

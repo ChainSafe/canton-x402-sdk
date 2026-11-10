@@ -6,6 +6,7 @@ import {
   selectDeployments,
   DeploymentSelectionError,
   MalformedSupportedExtraError,
+  type CantonDeploymentPreference,
   type SupportedResponse,
 } from "./index";
 
@@ -342,12 +343,33 @@ describe("selectCantonDeployments: every way to pay", () => {
     expect(all.map((t) => t.extra.instrumentId.id)).toEqual(["Amulet", "EURx"]);
   });
 
+  it("names an empty preference list rather than reading it as `any`", () => {
+    // A list that came out empty is a caller's bug. Matching everything would
+    // hide it behind a quote that looks fine.
+    const cases: Array<[CantonDeploymentPreference, string]> = [
+      [{ networks: [] }, "an empty network list"],
+      [{ schemes: [] }, "an empty scheme list"],
+      [{ instruments: [] }, "with an empty id list"],
+    ];
+    for (const [prefer, expected] of cases) {
+      const err = catchError(() => selectCantonDeployments(response(twoInstruments), prefer));
+      expect(err).toBeInstanceOf(DeploymentSelectionError);
+      expect(err.message).toContain(expected);
+    }
+  });
+
   it("still refuses when nothing matches what was asked for", () => {
     const err = catchError(() =>
       selectCantonDeployments(response(twoInstruments), { instruments: ["GBPx"] }),
     );
     expect(err).toBeInstanceOf(DeploymentSelectionError);
     expect(err.message).toContain('"GBPx"');
+    // Says what IS on offer, so the caller can pick from it...
+    expect(err.message).toContain("Amulet");
+    expect(err.message).toContain("USDCx");
+    // ...and nothing about how to fix it: core does not know how the caller's
+    // quote is configured, which is why there is no singular form either.
+    expect(err.message).not.toContain("name the asset");
   });
 
   it("narrowing to exactly one is the caller's business, not an error here", () => {

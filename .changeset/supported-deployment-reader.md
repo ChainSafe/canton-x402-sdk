@@ -86,9 +86,9 @@ Because the advertised `synchronizerId` is required, the derived
 ### What it refuses
 
 Not ambiguity — that is the merchant layer's call. But a preference nothing
-matches is an error: no matching kind names what the facilitator does settle,
-while no matching instrument names only what was asked for, not yet what is on
-offer.
+matches is an error naming what the facilitator does settle — the kinds it has,
+or the instruments it lists. Only that: how to change the request is the
+caller's business, for the same reason there is no singular form.
 
 So is a response that contradicts itself: an instrument whose top-level `admin`
 and whose `instrumentId.admin` disagree is inconsistent about who validates the
