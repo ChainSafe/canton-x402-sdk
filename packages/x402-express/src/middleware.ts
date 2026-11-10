@@ -321,6 +321,12 @@ export function paymentRequired<
           verify.extensions,
         );
       }
+      // The payload names no payer — it is the signed transfer's sender (spec
+      // Rule 8), which the facilitator reports. `payer` is optional in a verify
+      // response, so ask the scheme to read its own when it is left out. Before
+      // settling, so a payment is never captured for a request we then fail.
+      const payer = verify.payer ?? scheme.payerOf(payload);
+      if (!payer) throw new PaymentRejection("transfer_mismatch", "undecodable");
 
       let settleResponse: SettleResponse | undefined;
       if (settle) {
@@ -331,24 +337,12 @@ export function paymentRequired<
         res.setHeader("X-PAYMENT-RESPONSE", settleResponse.transaction);
       }
 
-      req.x402 = {
-        payer: verify.payer ?? payerOf(payload),
-        requirements,
-        payload,
-        verify,
-        settle: settleResponse,
-      } as X402RequestState;
+      req.x402 = { payer, requirements, payload, verify, settle: settleResponse } as X402RequestState;
       next();
     } catch (err) {
       await respondToFailure(err, req, res, options, scheme, quotes);
     }
   };
-}
-
-/** The payer the payload names, when the facilitator did not name one. */
-function payerOf(payload: X402PaymentPayload<unknown>): string {
-  const inner = payload.payload as { payer?: unknown };
-  return typeof inner.payer === "string" ? inner.payer : "";
 }
 
 /**

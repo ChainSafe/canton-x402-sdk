@@ -178,7 +178,7 @@ On a paid request the middleware attaches:
 
 ```ts
 req.x402 = {
-  payer: string;
+  payer: string; // the signed transfer's sender: the facilitator's verify.payer, or read from the payload
   requirements: CantonPaymentRequirements;
   payload: CantonPaymentPayload;
   verify: VerifyResponse;

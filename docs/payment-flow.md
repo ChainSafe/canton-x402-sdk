@@ -39,7 +39,7 @@ server (step 4).
 
 4. **Retry with `X-PAYMENT`**
 
-   The payload — `assetTransferMethod`, `payer`, `preparedTransaction`,
+   The payload — `assetTransferMethod`, `preparedTransaction`,
    `preparedTxHash`, `signature`, `publicKey`, `hashingSchemeVersion` —
    plus the requirements it was built against are JSON-encoded, base64'd into
    an `X-PAYMENT` header, and the request is retried. That header carries the

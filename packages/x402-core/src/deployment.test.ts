@@ -5,24 +5,45 @@ import {
   selectCantonDeployments,
   selectDeployments,
   DeploymentSelectionError,
+  MalformedSupportedExtraError,
+  type CantonDeploymentPreference,
   type SupportedResponse,
 } from "./index";
 
 const DSO = "DSO::1220be58";
 const amulet = { id: "Amulet", admin: DSO };
 
-const kind = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
-  x402Version: 2,
-  scheme: "exact",
-  network: "canton:devnet",
-  extra: {
-    transferMethods: ["transfer-factory"],
-    synchronizerId: "global-domain::1220be58",
-    carriages: ["inline"],
-    instruments: [{ admin: DSO, instrumentId: amulet, symbol: "CC" }],
-  },
-  ...over,
-});
+/** The keys a canton-exact `extra` must carry. */
+const REQUIRED_EXTRA = {
+  transferMethods: ["transfer-factory"],
+  synchronizerId: "global-domain::1220be58",
+  carriages: ["inline"],
+};
+
+/**
+ * `over.extra` MERGES with the required keys, because a real response always
+ * carries them — a test varying `instruments` is not also saying the
+ * deployment stopped advertising a synchronizer. Pass `rawExtra` to replace
+ * the whole object.
+ */
+const kind = (over: Record<string, unknown> = {}): Record<string, unknown> => {
+  const { extra, rawExtra, ...rest } = over as Record<string, unknown> & {
+    extra?: Record<string, unknown>;
+    rawExtra?: unknown;
+  };
+  const base = {
+    x402Version: 2,
+    scheme: "exact",
+    network: "canton:devnet",
+    extra: {
+      ...REQUIRED_EXTRA,
+      instruments: [{ admin: DSO, instrumentId: amulet, symbol: "CC" }],
+      ...(extra ?? {}),
+    },
+    ...rest,
+  };
+  return rawExtra === undefined ? base : { ...base, extra: rawExtra };
+};
 
 const response = (...kinds: Array<Record<string, unknown>>): SupportedResponse =>
   ({ kinds }) as unknown as SupportedResponse;
@@ -63,11 +84,24 @@ describe("selectCantonDeployments", () => {
     expect(terms.asset).toBe("CC");
   });
 
-  it("omits synchronizerId when the deployment advertises none", () => {
-    const [terms] = selectCantonDeployments(
-      response(kind({ extra: { instruments: [{ instrumentId: amulet }] } })),
+  it("refuses a deployment that advertises no synchronizer, naming the field", () => {
+    // It is what a payer prepares against, so terms without one are not terms.
+    const { synchronizerId: _drop, ...rest } = REQUIRED_EXTRA;
+    const err = catchError(() =>
+      selectCantonDeployments(response(kind({ rawExtra: { ...rest, instruments: [{ instrumentId: amulet }] } }))),
     );
-    expect("synchronizerId" in terms.extra).toBe(false);
+    expect(err).toBeInstanceOf(MalformedSupportedExtraError);
+    expect(err.message).toContain("extra.synchronizerId");
+  });
+
+  it("refuses a deployment that advertises no transferMethods or carriages", () => {
+    for (const missing of ["transferMethods", "carriages"] as const) {
+      const extra: Record<string, unknown> = { ...REQUIRED_EXTRA, instruments: [{ instrumentId: amulet }] };
+      delete extra[missing];
+      const err = catchError(() => selectCantonDeployments(response(kind({ rawExtra: extra }))));
+      expect(err).toBeInstanceOf(MalformedSupportedExtraError);
+      expect(err.message).toContain(`extra.${missing}`);
+    }
   });
 
   it("returns a way to pay for each kind, rather than choosing between them", () => {
@@ -100,7 +134,7 @@ describe("selectCantonDeployments", () => {
   });
 
   it("says so when a kind advertises no instruments at all", () => {
-    const err = catchError(() => selectCantonDeployments(response(kind({ extra: {} }))));
+    const err = catchError(() => selectCantonDeployments(response(kind({ extra: { instruments: [] } }))));
     expect(err).toBeInstanceOf(DeploymentSelectionError);
     expect(err.message).toContain("extra.instruments");
   });
@@ -108,7 +142,8 @@ describe("selectCantonDeployments", () => {
   it("says so when `extra` is missing entirely", () => {
     const { extra: _drop, ...noExtra } = kind();
     const err = catchError(() => selectCantonDeployments(response(noExtra)));
-    expect(err).toBeInstanceOf(DeploymentSelectionError);
+    expect(err).toBeInstanceOf(MalformedSupportedExtraError);
+    expect(err.message).toContain("does not advertise a canton-exact extra");
   });
 
   it("refuses an instrument whose two admin spellings disagree", () => {
@@ -145,8 +180,18 @@ describe("cantonSupportedExtra (types/facilitator)", () => {
     expect(extra).toMatchObject({ somethingElse: 7 });
   });
 
-  it("reads a malformed extra as empty rather than throwing", () => {
-    expect(cantonSupportedExtra(kind({ extra: { instruments: "not-an-array" } }) as never)).toEqual({});
+  it("names the field when a known key is the wrong shape, instead of reading the extra as empty", () => {
+    // Swallowing it threw away the synchronizer and the good instruments too,
+    // and the caller was then told the deployment advertised no instrument.
+    const err = catchError(() =>
+      cantonSupportedExtra(kind({ extra: { instruments: "not-an-array" } }) as never),
+    );
+    expect(err).toBeInstanceOf(MalformedSupportedExtraError);
+    expect(err.message).toContain("extra.instruments");
+  });
+
+  it("still passes an extra that carries every required key", () => {
+    expect(cantonSupportedExtra(kind() as never).synchronizerId).toBe("global-domain::1220be58");
   });
 });
 
@@ -231,7 +276,8 @@ describe("selectDeployments with a selector that is not canton's", () => {
     // A voucher kind carries no instruments; canton's selector would refuse it,
     // which is the point of the selector being the scheme's and not the base's.
     const err = catchError(() => selectCantonDeployments(response(voucherKind)));
-    expect(err.message).toContain("extra.instruments");
+    expect(err).toBeInstanceOf(MalformedSupportedExtraError);
+    expect(err.message).toContain("does not advertise a canton-exact extra");
     expect(selectDeployments(response(voucherKind), voucherSelector)[0].asset).toBe("VCH");
   });
 });
@@ -297,12 +343,33 @@ describe("selectCantonDeployments: every way to pay", () => {
     expect(all.map((t) => t.extra.instrumentId.id)).toEqual(["Amulet", "EURx"]);
   });
 
+  it("names an empty preference list rather than reading it as `any`", () => {
+    // A list that came out empty is a caller's bug. Matching everything would
+    // hide it behind a quote that looks fine.
+    const cases: Array<[CantonDeploymentPreference, string]> = [
+      [{ networks: [] }, "an empty network list"],
+      [{ schemes: [] }, "an empty scheme list"],
+      [{ instruments: [] }, "with an empty id list"],
+    ];
+    for (const [prefer, expected] of cases) {
+      const err = catchError(() => selectCantonDeployments(response(twoInstruments), prefer));
+      expect(err).toBeInstanceOf(DeploymentSelectionError);
+      expect(err.message).toContain(expected);
+    }
+  });
+
   it("still refuses when nothing matches what was asked for", () => {
     const err = catchError(() =>
       selectCantonDeployments(response(twoInstruments), { instruments: ["GBPx"] }),
     );
     expect(err).toBeInstanceOf(DeploymentSelectionError);
     expect(err.message).toContain('"GBPx"');
+    // Says what IS on offer, so the caller can pick from it...
+    expect(err.message).toContain("Amulet");
+    expect(err.message).toContain("USDCx");
+    // ...and nothing about how to fix it: core does not know how the caller's
+    // quote is configured, which is why there is no singular form either.
+    expect(err.message).not.toContain("name the asset");
   });
 
   it("narrowing to exactly one is the caller's business, not an error here", () => {

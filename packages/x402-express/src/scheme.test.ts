@@ -50,6 +50,11 @@ function voucherScheme(): SchemeAdapter<VoucherSpec, VoucherRequirements, Vouche
     acceptsPayload(p): p is VoucherPayload {
       return typeof (p.payload as { code?: unknown }).code === "string";
     },
+    payerOf(p) {
+      // This scheme names its payer outright; canton-exact has to decode a
+      // signed transfer for the same answer. The middleware does not care.
+      return p.payload.code.startsWith("VCH-") ? `holder-of-${p.payload.code}` : undefined;
+    },
     extraRules: {
       book: { compare: "equal", reason: "policy_wrong_book" },
       ticket: { compare: "skip", why: "per-challenge" },
@@ -68,7 +73,11 @@ function voucherScheme(): SchemeAdapter<VoucherSpec, VoucherRequirements, Vouche
   };
 }
 
-function voucherHeader(over: Record<string, unknown> = {}, extra?: Record<string, unknown>): string {
+function voucherHeader(
+  over: Record<string, unknown> = {},
+  extra?: Record<string, unknown>,
+  envelope: Record<string, unknown> = {},
+): string {
   const requirements = {
     scheme: "voucher",
     network: "vouchers:test",
@@ -86,6 +95,7 @@ function voucherHeader(over: Record<string, unknown> = {}, extra?: Record<string
     scheme: "voucher",
     network: "vouchers:test",
     payload: { code: "VCH-123" },
+    ...envelope,
   } as VoucherPayload;
   return encodePaymentHeader(payload as never, requirements as never);
 }
@@ -186,6 +196,27 @@ describe("paymentRequired with a non-canton scheme", () => {
     expect(paid.status).toBe(200);
     // Same discipline as canton's memo, with no canton code involved.
     expect(issued).toEqual(["ticket-0"]);
+  });
+
+  it("asks the scheme who paid when the facilitator does not say", async () => {
+    // `payer` is optional in a verify response. The middleware must not know
+    // how any scheme recovers it — canton decodes a transfer, this one reads a
+    // field, and the flow is the same either way.
+    stubFacilitator({ verify: { isValid: true } });
+    const res = await request(voucherApp()).get("/paid").set("X-PAYMENT", voucherHeader());
+    expect(res.status).toBe(200);
+    expect(res.body.payer).toBe("holder-of-VCH-123");
+  });
+
+  it("refuses the payment when neither the facilitator nor the scheme can name a payer", async () => {
+    const fetchMock = stubFacilitator({ verify: { isValid: true } });
+    const res = await request(voucherApp())
+      .get("/paid")
+      .set("X-PAYMENT", voucherHeader({}, undefined, { payload: { code: "NOT-A-VOUCHER" } }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("transfer_mismatch");
+    // Refused before settle, so nothing was captured for a request we then failed.
+    for (const [url] of fetchMock.mock.calls) expect(String(url)).not.toContain("/v2/settle");
   });
 
   it("refuses a payload the scheme does not accept, without asking the facilitator", async () => {

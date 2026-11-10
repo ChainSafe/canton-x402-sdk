@@ -74,8 +74,8 @@ export interface CantonDeploymentPreference extends DeploymentPreference {
 /** The canton-exact part of what a deployment advertises. */
 export interface CantonDeploymentExtra {
   instrumentId: InstrumentId;
-  /** Present when the deployment advertises one. */
-  synchronizerId?: string;
+  /** The synchronizer to prepare against. Required of a canton-exact extra. */
+  synchronizerId: string;
 }
 
 /** What a merchant needs in order to quote a canton-exact payment. */
@@ -164,8 +164,10 @@ function cantonExtraSelector(
   return (kind) => {
     const advertised = cantonSupportedExtra(kind);
     return selectInstruments(kind, advertised, instruments).map((instrumentId) => {
-      const extra: CantonDeploymentExtra = { instrumentId };
-      if (advertised.synchronizerId !== undefined) extra.synchronizerId = advertised.synchronizerId;
+      const extra: CantonDeploymentExtra = {
+        instrumentId,
+        synchronizerId: advertised.synchronizerId,
+      };
       return {
         // The advertised symbol when there is one, since the deployment knows
         // its own token's name; assetSymbol only knows the ones compiled here.
@@ -204,15 +206,31 @@ function selectInstruments(
 ): InstrumentId[] {
   // `admin` alone cannot name an instrument, so an entry without an
   // instrumentId is not a way to pay.
+  //
+  // Only what is listed. A deployment that leaves Canton Coin implied by the
+  // scheme — the registered one does, listing CIP-56 tokens only — is read as
+  // not settling it, and discovery will not produce it. That is deliberate:
+  // synthesising an entry nobody advertised would mean quoting against a
+  // deployment on the strength of a convention rather than its own answer.
+  // A merchant paying Canton Coin there pins `network` and `asset`, which
+  // skips discovery altogether.
   const listed = (extra.instruments ?? []).filter((i) => i.instrumentId !== undefined);
   const matching =
     want === undefined ? listed : listed.filter((i) => want.includes(i.instrumentId?.id ?? ""));
 
   if (matching.length === 0) {
+    // What the facilitator said, and nothing about what to do next: core does
+    // not know how the caller's quote is configured, which is the same reason
+    // there is no singular form of this function.
+    const offered = listed.map((i) => i.instrumentId?.id).filter(Boolean);
     throw new DeploymentSelectionError(
       `facilitator kind ${label(kind)} advertises no instrument${
-        want === undefined ? "" : ` with id ${want.map((w) => `"${w}"`).join(" or ")}`
-      } in extra.instruments; name the asset explicitly`,
+        want === undefined
+          ? ""
+          : want.length === 0
+            ? " with an empty id list"
+            : ` with id ${want.map((w) => `"${w}"`).join(" or ")}`
+      } in extra.instruments${offered.length > 0 ? `; it lists ${offered.join(", ")}` : ""}`,
     );
   }
 
@@ -250,5 +268,9 @@ function describe(prefer: DeploymentPreference): string {
 
 function list(what: string, values: string[] | undefined): string | undefined {
   if (values === undefined) return undefined;
+  // An empty list matches nothing, and is almost always a caller's list that
+  // came out empty. Saying so beats reading it as "any", which would silently
+  // match everything and turn that mistake into a wrong-but-working quote.
+  if (values.length === 0) return `an empty ${what} list`;
   return `${what}${values.length === 1 ? "" : "s"} ${values.map((v) => `"${v}"`).join(" or ")}`;
 }

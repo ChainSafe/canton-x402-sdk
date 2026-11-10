@@ -12,6 +12,7 @@ import {
   ASSET_TRANSFER_METHOD,
   assetSymbol,
   CantonRequirementsExtraSchema,
+  decodePayloadTransfer,
   isCantonPaymentPayload,
   isCantonPaymentRequirements,
   selectCantonDeployments,
@@ -118,6 +119,12 @@ export const cantonExact: SchemeAdapter<
 
   acceptsPayload(payload: X402PaymentPayload<unknown>): payload is CantonPaymentPayload {
     return isCantonPaymentPayload(payload);
+  },
+
+  payerOf(payload: CantonPaymentPayload): string | undefined {
+    // Spec Rule 8: the payer is the signed transfer's sender. It sits inside
+    // what was signed, where the dropped `payer` field was a claim beside it.
+    return decodePayloadTransfer(payload.payload.preparedTransaction)?.sender;
   },
 
   extraRules: EXTRA_RULES,

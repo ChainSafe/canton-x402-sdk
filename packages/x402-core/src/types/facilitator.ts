@@ -183,6 +183,18 @@ export const SupportedResponseSchema = v.object({
 export type SupportedResponse = v.InferOutput<typeof SupportedResponseSchema>;
 
 /**
+ * Thrown when a kind's `extra` is not a canton-exact one: a key this scheme
+ * defines is missing or the wrong shape. Named for the cause, since the caller
+ * can do nothing about it but tell whoever runs the facilitator.
+ */
+export class MalformedSupportedExtraError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MalformedSupportedExtraError";
+  }
+}
+
+/**
  * One instrument a deployment settles, as `kinds[].extra.instruments[]` carries
  * it.
  *
@@ -211,17 +223,38 @@ export type SupportedInstrument = v.InferOutput<typeof SupportedInstrumentSchema
  */
 export const CantonSupportedExtraSchema = v.looseObject({
   /** Asset transfer methods this deployment speaks, e.g. `transfer-factory`. */
-  transferMethods: v.optional(v.array(v.string())),
+  transferMethods: v.array(v.pipe(v.string(), v.minLength(1))),
   /** The synchronizer it submits to — the id a payer prepares against. */
-  synchronizerId: v.optional(v.string()),
+  synchronizerId: v.pipe(v.string(), v.minLength(1)),
   /** How a prepared transaction travels, e.g. `inline`. */
-  carriages: v.optional(v.array(v.string())),
+  carriages: v.array(v.pipe(v.string(), v.minLength(1))),
+  /**
+   * The instruments this deployment lists. Optional: what an absent, empty or
+   * unusable list means is the reader's, not the shape's — see
+   * {@link selectCantonDeployments}.
+   */
   instruments: v.optional(v.array(SupportedInstrumentSchema)),
 });
 export type CantonSupportedExtra = v.InferOutput<typeof CantonSupportedExtraSchema>;
 
-/** Read one kind's `extra` as canton-exact. `{}` when it is absent or malformed. */
+/**
+ * Read one kind's `extra` as canton-exact, or say what is wrong with it.
+ *
+ * Throws rather than returning `{}`, which is what it did before: swallowing
+ * the failure meant one bad field discarded every good one — the synchronizer
+ * and the instruments alongside it — and the caller was then told the
+ * deployment "advertises no instrument", which was both false and unactionable.
+ *
+ * Unknown keys still pass: `extra` is where a deployment puts its own, and only
+ * the keys this scheme defines are checked.
+ */
 export function cantonSupportedExtra(kind: SupportedKind): CantonSupportedExtra {
   const parsed = v.safeParse(CantonSupportedExtraSchema, kind.extra ?? {});
-  return parsed.success ? parsed.output : {};
+  if (parsed.success) return parsed.output;
+  const problems = parsed.issues
+    .map((i) => `${["extra", ...(i.path ?? []).map((p) => String(p.key))].join(".")}: ${i.message}`)
+    .join("; ");
+  throw new MalformedSupportedExtraError(
+    `facilitator kind ${kind.scheme}/${kind.network} does not advertise a canton-exact extra — ${problems}`,
+  );
 }

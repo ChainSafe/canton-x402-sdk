@@ -195,6 +195,14 @@ export interface SchemeAdapter<
   /** Does this payload conform to the scheme? */
   acceptsPayload(payload: X402PaymentPayload<unknown>): payload is TPayload;
   /**
+   * Who paid, read from the payload itself — for when the facilitator does not
+   * say. `payer` is optional in a verify response, and the x402 v2 payload
+   * names no payer, so whoever it is has to be recovered from what the payer
+   * signed. Only the scheme knows how: canton-exact decodes the prepared
+   * transaction and takes its sender. `undefined` when it cannot be read.
+   */
+  payerOf(payload: TPayload): string | undefined;
+  /**
    * How each field of the scheme's `extra` is held against the merchant's.
    * Key it off the scheme's own schema so the table cannot drift from the shape
    * it describes.
