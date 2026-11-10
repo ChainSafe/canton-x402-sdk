@@ -67,23 +67,48 @@ Zero matches is settled before any scheme code runs; the selector then runs once
 per matching kind, because until it has there is no way to know how many ways to
 pay there are.
 
+### What a canton-exact `extra` must carry
+
+`transferMethods`, `synchronizerId` and `carriages` are required, and a kind
+whose `extra` lacks one is not a canton-exact deployment. `instruments` stays
+optional; what an absent or empty list means is below.
+
+`cantonSupportedExtra` throws `MalformedSupportedExtraError` naming the field
+rather than returning `{}`. Swallowing the failure would mean one bad key
+discards every good one — the synchronizer and the instruments with it — and
+the caller is then told the deployment "advertises no instrument", which is
+false and unactionable. Unknown keys still pass: only the keys this scheme
+defines are checked.
+
+Because the advertised `synchronizerId` is required, the derived
+`CantonDeploymentExtra.synchronizerId` is no longer optional.
+
 ### What it refuses
 
 Not ambiguity — that is the merchant layer's call. But a preference nothing
-matches is an error, with a message naming what the facilitator does settle, and
-so is a response that contradicts itself: an instrument whose top-level `admin`
+matches is an error: no matching kind names what the facilitator does settle,
+while no matching instrument names only what was asked for, not yet what is on
+offer.
+
+So is a response that contradicts itself: an instrument whose top-level `admin`
 and whose `instrumentId.admin` disagree is inconsistent about who validates the
 holding, and quoting either half would be a guess at which is right.
 
 ### Also
 
-`cantonSupportedExtra(kind)` reads one kind's `extra` as canton-exact,
-permissively, since every field is optional and unknown keys are another
-deployment's business.
+The exported surface is `selectDeployments`, `selectCantonDeployments`,
+`cantonSupportedExtra`, the two error types and the types themselves. Kind
+filtering and canton's own extra selector stay internal — nothing outside needs
+them, and `supported.kinds` is right there for anyone wanting the raw list.
 
-The exported surface is `selectDeployments`, `selectCantonDeployments` and the
-types. Kind filtering and canton's own selector stay internal — nothing outside
-needs them, and `supported.kinds` is right there for anyone wanting the raw list.
+Canton Coin is read only when a deployment lists it. The registered
+implementation leaves it implied by the scheme and lists CIP-56 tokens only, so
+discovery against one of those returns its other instruments and not CC. Ours
+lists it explicitly, so this costs nothing here; a merchant on a deployment
+that does not pins `network` and `asset`, which skips discovery. Implying it is
+possible — the DSO is `DSO::` plus the advertised synchronizer's namespace —
+and deliberately not done, so that a quote always rests on what a facilitator
+answered rather than on a convention.
 
 Nothing consumes this yet; the Express middleware does in a follow-up.
 
