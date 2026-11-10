@@ -381,13 +381,20 @@ describe("cantonExactVerifier", () => {
   });
 
   it("reads the signature only as canonical base64 of 64 bytes", async () => {
-    const { payload, requirements, signatureHex, payer } = await buildSignedFixture();
+    // The signed transfer's deadline is now plus the horizon, so the signature
+    // changes with the clock, and about one in fifteen has no "+" or "/" for the
+    // URL-safe variant to replace. Step the horizon until it has one.
+    let fixture = await buildSignedFixture();
+    for (let s = 121; s < 200 && !/[+/]/.test(fixture.payload.payload.signature); s++) {
+      fixture = await buildSignedFixture({ executeBeforeSeconds: s });
+    }
+    const { payload, requirements, signatureHex, payer } = fixture;
     const signature = payload.payload.signature;
     const nonCanonical = withPaddingBitSet(signature);
     // Decodes to the very same signature, so only the canonical check refuses it.
     expect(atob(nonCanonical)).toBe(atob(signature));
     const urlSafe = signature.replace(/\+/g, "-").replace(/\//g, "_");
-    // The fixture's signature is fixed, and it has a "+" or a "/" to replace.
+    // The loop above made sure it has a "+" or a "/" to replace.
     expect(urlSafe).not.toBe(signature);
     // Hex is what a payer built against the old field sends. Its 128 digits are
     // valid base64 too, so the 64-byte check is what refuses it.
