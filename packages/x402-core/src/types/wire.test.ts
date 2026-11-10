@@ -61,6 +61,7 @@ describe("x402-core wire types", () => {
 
     const paymentRequired: CantonPaymentRequiredResponse = {
       x402Version: 2,
+      resource: { url: "https://merchant.example/api/resource", description: "A report" },
       accepts: [requirements],
       error: "payment_required",
     };
@@ -168,6 +169,7 @@ describe("x402-core wire types", () => {
 
     const offer: X402PaymentRequiredResponse<CantonPaymentRequirements | BridgeRequirements> = {
       x402Version: 2,
+      resource: { url: "https://merchant.example/api/resource" },
       accepts: [canton, bridge], // heterogeneous — both schemes in one accepts[]
       error: "payment_required",
     };

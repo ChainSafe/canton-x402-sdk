@@ -1,6 +1,8 @@
 // X-PAYMENT header codec — the single source of truth for serialising and
 // deserialising the x402 payment envelope. Shared by the payer (builds the
-// header), the merchant middleware (reads it), and the facilitator.
+// header), the merchant middleware (reads it), and the facilitator. The 402's
+// `PAYMENT-REQUIRED` header is base64(JSON) the same way, so its encoder lives
+// here too.
 //
 // ── The envelope ────────────────────────────────────────────────────────────
 // `X-PAYMENT` is base64(JSON) of the x402 v2 PaymentPayload, nothing around it:
@@ -20,6 +22,7 @@
 
 import { isX402PaymentPayload } from "./types";
 import type { CantonPaymentPayload } from "./types/payment";
+import type { X402PaymentRequiredResponse } from "./types/requirements";
 
 /**
  * The deepest a decoded payment may nest. A real one is a handful of levels
@@ -37,6 +40,18 @@ export const MAX_PAYMENT_DEPTH = 64;
  */
 export function encodePaymentHeader<TPayload = CantonPaymentPayload>(payload: TPayload): string {
   return bytesToBase64(new TextEncoder().encode(JSON.stringify(payload)));
+}
+
+/**
+ * Serialise a 402's `PaymentRequired` into a `PAYMENT-REQUIRED` response header
+ * value: base64 of its UTF-8 JSON, as the x402 v2 HTTP transport carries it and
+ * as `X-PAYMENT` carries a payment. Generic so any scheme's `accepts[]` can be
+ * encoded.
+ */
+export function encodePaymentRequiredHeader<TRequirements>(
+  paymentRequired: X402PaymentRequiredResponse<TRequirements>,
+): string {
+  return bytesToBase64(new TextEncoder().encode(JSON.stringify(paymentRequired)));
 }
 
 /**

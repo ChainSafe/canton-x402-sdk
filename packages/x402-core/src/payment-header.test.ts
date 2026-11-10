@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { encodePaymentHeader, decodePaymentHeader, MAX_PAYMENT_DEPTH } from "./payment-header";
-import type { CantonPaymentPayload, CantonPaymentRequirements } from "./index";
+import {
+  encodePaymentHeader,
+  decodePaymentHeader,
+  encodePaymentRequiredHeader,
+  MAX_PAYMENT_DEPTH,
+} from "./payment-header";
+import { isCantonPaymentRequiredResponse } from "./index";
+import type { CantonPaymentPayload, CantonPaymentRequirements, CantonPaymentRequiredResponse } from "./index";
 
 const requirements: CantonPaymentRequirements = {
   scheme: "exact",
@@ -132,5 +138,30 @@ describe("X-PAYMENT codec", () => {
     for (const value of [42, null, "x", []]) {
       expect(() => decodePaymentHeader(btoa(JSON.stringify(value)))).toThrow(/not an x402 v2 payment/);
     }
+  });
+});
+
+describe("PAYMENT-REQUIRED codec", () => {
+  /** What a client does with the header: base64 → UTF-8 → JSON. */
+  const read = (header: string): unknown =>
+    JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(header), (c) => c.charCodeAt(0))));
+
+  const paymentRequired: CantonPaymentRequiredResponse = {
+    x402Version: 2,
+    resource: { url: "https://merchant.example/r", description: "A report" },
+    accepts: [requirements],
+    error: "payment_required",
+  };
+
+  it("serialises the PaymentRequired as base64 JSON, nothing around it", () => {
+    const header = encodePaymentRequiredHeader(paymentRequired);
+    expect(header).toMatch(/^[A-Za-z0-9+/]+=*$/);
+    expect(read(header)).toEqual(paymentRequired);
+    expect(isCantonPaymentRequiredResponse(read(header))).toBe(true);
+  });
+
+  it("encodes non-ASCII as UTF-8", () => {
+    const p = { ...paymentRequired, resource: { url: "https://merchant.example/r", description: "Café crème ☕" } };
+    expect(read(encodePaymentRequiredHeader(p))).toEqual(p);
   });
 });
