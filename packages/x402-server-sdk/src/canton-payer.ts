@@ -45,7 +45,7 @@ export interface CantonX402PayerOptions {
 /**
  * Canton canton-exact payer over `@canton-network/wallet-sdk`: builds a Token
  * Standard transfer, prepares it (interactive submission), Ed25519-signs the hash,
- * and assembles the X-PAYMENT payload — without executing (the facilitator settles).
+ * and assembles the payment payload — without executing (the facilitator settles).
  */
 export class CantonX402Payer implements X402Payer {
   constructor(private readonly opts: CantonX402PayerOptions) {}

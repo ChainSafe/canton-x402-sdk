@@ -8,7 +8,7 @@
 **Breaking.** The payload's `preparedTransaction` is base64 of one gzip
 member, as the Canton scheme spec defines, instead of base64 of the bare
 protobuf. A typical transfer goes from 22-27 KB to about 5 KB, which keeps
-the `X-PAYMENT` header near 10 KB.
+the payment header near 10 KB.
 
 The verifier reads it only as exactly one gzip member with no optional header
 fields, at most 8 KiB compressed and 64 KiB decompressed, the spec's

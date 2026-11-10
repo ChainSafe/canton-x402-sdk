@@ -35,10 +35,10 @@ function makePayer(supports = true) {
   return { supports: () => supports, authorize: vi.fn(async () => payload) } satisfies X402Payer;
 }
 
-/** Mock fetch: 402 (with accepts) until an X-PAYMENT header is present, then 200. */
+/** Mock fetch: 402 (with accepts) until a PAYMENT-SIGNATURE header is present, then 200. */
 function makeFetch(opts?: { body402?: unknown; always200?: boolean }): FetchLike & { mock: { calls: unknown[][] } } {
   return vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-    const paid = new Headers(init?.headers).has("X-PAYMENT");
+    const paid = new Headers(init?.headers).has("PAYMENT-SIGNATURE");
     if (paid || opts?.always200) return new Response(JSON.stringify({ ok: true }), { status: 200 });
     return new Response(JSON.stringify(opts?.body402 ?? { x402Version: 2, accepts: [requirements] }), { status: 402 });
   }) as never;
@@ -54,7 +54,7 @@ describe("createX402Fetch", () => {
     expect(fetchMock.mock.calls).toHaveLength(1);
   });
 
-  it("on 402, authorizes and retries with the X-PAYMENT header", async () => {
+  it("on 402, authorizes and retries with the PAYMENT-SIGNATURE header, and not X-PAYMENT", async () => {
     const payer = makePayer();
     const fetchMock = makeFetch();
     const res = await createX402Fetch(payer, { fetch: fetchMock })("https://api.example/x");
@@ -63,7 +63,10 @@ describe("createX402Fetch", () => {
     expect(fetchMock.mock.calls).toHaveLength(2);
     const retryInit = fetchMock.mock.calls[1][1] as RequestInit;
     // The header carries the payment alone: the requirements travel in it as `accepted`.
-    expect(new Headers(retryInit.headers).get("X-PAYMENT")).toBe(encodePaymentHeader(payload));
+    const sent = new Headers(retryInit.headers);
+    expect(sent.get("PAYMENT-SIGNATURE")).toBe(encodePaymentHeader(payload));
+    // One copy only: the payment is about 10 KB, and a second would double it.
+    expect(sent.has("X-PAYMENT")).toBe(false);
   });
 
   it("passes a 402 through when the payer can't satisfy it", async () => {

@@ -20,7 +20,7 @@ passed through, and either may be `null`.
   }
 ```
 
-**The `X-PAYMENT` header carries the payment alone**, as base64 of its JSON. The
+**The payment header carries the payment alone**, as base64 of its JSON. The
 `{ payment, requirements }` wrapper is gone: `accepted` is the requirements the
 payment was built against. `encodePaymentHeader(payload)` takes one argument,
 `decodePaymentHeader` returns the payment, and `DecodedPaymentHeader` is

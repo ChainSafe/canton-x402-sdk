@@ -1,11 +1,14 @@
-// X-PAYMENT header codec — the single source of truth for serialising and
+// Payment header codec — the single source of truth for serialising and
 // deserialising the x402 payment envelope. Shared by the payer (builds the
 // header), the merchant middleware (reads it), and the facilitator. The 402's
 // `PAYMENT-REQUIRED` header is base64(JSON) the same way, so its encoder lives
 // here too.
 //
 // ── The envelope ────────────────────────────────────────────────────────────
-// `X-PAYMENT` is base64(JSON) of the x402 v2 PaymentPayload, nothing around it:
+// The payment travels in the `PAYMENT-SIGNATURE` request header (x402 v2 HTTP
+// transport), which this SDK called `X-PAYMENT` before; the merchant
+// middleware still reads that name. Either way the value is base64(JSON) of
+// the x402 v2 PaymentPayload, nothing around it:
 //
 //   { "x402Version": 2,
 //     "accepted": { "scheme": "exact", "network": "canton:devnet", "amount": "…", "payTo": "…", … },
@@ -34,7 +37,7 @@ import type { X402PaymentRequiredResponse } from "./types/requirements";
 export const MAX_PAYMENT_DEPTH = 64;
 
 /**
- * Serialise a payment into an `X-PAYMENT` header value ({@link decodePaymentHeader}
+ * Serialise a payment into a `PAYMENT-SIGNATURE` header value ({@link decodePaymentHeader}
  * is the inverse). Scheme-agnostic at runtime (it just serialises); generic so any
  * scheme's payload can be encoded.
  */
@@ -45,7 +48,7 @@ export function encodePaymentHeader<TPayload = CantonPaymentPayload>(payload: TP
 /**
  * Serialise a 402's `PaymentRequired` into a `PAYMENT-REQUIRED` response header
  * value: base64 of its UTF-8 JSON, as the x402 v2 HTTP transport carries it and
- * as `X-PAYMENT` carries a payment. Generic so any scheme's `accepts[]` can be
+ * as `PAYMENT-SIGNATURE` carries a payment. Generic so any scheme's `accepts[]` can be
  * encoded.
  */
 export function encodePaymentRequiredHeader<TRequirements>(
@@ -55,7 +58,7 @@ export function encodePaymentRequiredHeader<TRequirements>(
 }
 
 /**
- * Parse an `X-PAYMENT` header value into the payment it carries. Throws on bad
+ * Parse a `PAYMENT-SIGNATURE` (or `X-PAYMENT`) header value into the payment it carries. Throws on bad
  * base64 / JSON, or when the value is not a well-formed x402 v2 payment envelope,
  * including the pre-spec `{ payment, requirements }` wrapper, a payment with no
  * `accepted`, and one whose `accepted` is not a whole `PaymentRequirements` (a
@@ -78,19 +81,19 @@ export function decodePaymentHeader(headerValue: string): CantonPaymentPayload {
   try {
     raw = new TextDecoder().decode(base64ToBytes(headerValue));
   } catch (err) {
-    throw new Error(`X-PAYMENT is not valid base64: ${errMsg(err)}`);
+    throw new Error(`payment header is not valid base64: ${errMsg(err)}`);
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new Error(`X-PAYMENT is not valid JSON: ${errMsg(err)}`);
+    throw new Error(`payment header is not valid JSON: ${errMsg(err)}`);
   }
   if (nestsDeeperThan(parsed, MAX_PAYMENT_DEPTH)) {
-    throw new Error(`X-PAYMENT nests deeper than ${MAX_PAYMENT_DEPTH} levels`);
+    throw new Error(`payment header nests deeper than ${MAX_PAYMENT_DEPTH} levels`);
   }
   if (!isX402PaymentPayload(parsed)) {
-    throw new Error("X-PAYMENT is not an x402 v2 payment (x402Version 2, accepted, payload)");
+    throw new Error("payment header is not an x402 v2 payment (x402Version 2, accepted, payload)");
   }
   // Optimistically typed as canton-exact; the inner/asset are verified by the
   // verifier, not here.

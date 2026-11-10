@@ -148,7 +148,7 @@ export function isX402PaymentRequirements(x: unknown): x is X402PaymentRequireme
 /**
  * The x402 v2 `PaymentRequired` object a `402 Payment Required` answers with:
  * one resource, and the ways to pay for it. The client picks one of
- * `accepts[]`, pays it, and retries the request with the `X-PAYMENT` header.
+ * `accepts[]`, pays it, and retries the request with the `PAYMENT-SIGNATURE` header.
  *
  * The HTTP transport carries it base64-encoded in the `PAYMENT-REQUIRED`
  * response header ({@link encodePaymentRequiredHeader}). The merchant

@@ -114,7 +114,7 @@ export interface PaymentRequiredOptions {
   /**
    * Called after the middleware rejects a payment it was handed (402), or fails
    * on the facilitator (502) or its own config (500) — e.g. to log it. Not called
-   * for the plain 402 challenge to a request without `X-PAYMENT`. The middleware
+   * for the plain 402 challenge to a request without a payment. The middleware
    * logs nothing itself. A throw (or a rejected promise from an async hook) is
    * swallowed so it can't break the response or crash the process.
    */
@@ -175,10 +175,11 @@ class PaymentRejection extends Error {
 /**
  * Express middleware that gates a route behind an x402 payment.
  *
- * - No/invalid `X-PAYMENT` → `402` with the spec's `PaymentRequired`,
+ * - No/invalid payment in `PAYMENT-SIGNATURE` (or the older `X-PAYMENT`) → `402`
+ *   with the spec's `PaymentRequired`,
  *   `{ x402Version, resource, accepts: [requirements] }`, in the
  *   `PAYMENT-REQUIRED` header and as the body.
- * - Valid `X-PAYMENT` → verify (and optionally settle) via the facilitator, then
+ * - Valid payment → verify (and optionally settle) via the facilitator, then
  *   attach `req.x402` and call `next()`.
  *
  * @example
@@ -209,7 +210,11 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
         ? (await options.additionalAccepts(req)).map(assertAtomicAmount)
         : [];
 
-      const header = req.header("X-PAYMENT");
+      // The spec's name first. X-PAYMENT is the name this SDK used before, and
+      // is still read for a payment of this shape sent under it. A 0.1.x payer
+      // sends the older { payment, requirements } shape, which is refused
+      // either way.
+      const header = req.header("PAYMENT-SIGNATURE") || req.header("X-PAYMENT");
       if (!header) throw new PaymentRejection("payment_required", fresh);
 
       // The payment carries the requirements it was built against as `accepted`,
@@ -283,7 +288,7 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       let rejection: PaymentRejectionInfo | undefined;
       if (err instanceof PaymentRejection) {
         respond402(res, err.requirements, err.reason, err.details, extraAccepts);
-        // A bare challenge (no X-PAYMENT yet) is the normal flow, not a rejection.
+        // A bare challenge (no payment yet) is the normal flow, not a rejection.
         if (err.reason !== "payment_required") {
           rejection = { status: 402, reason: err.reason, details: err.details, extensions: err.extensions };
         }

@@ -24,8 +24,9 @@ export interface X402FetchOptions {
 /**
  * Wrap `fetch` so x402 payments are transparent: call the resource, and on a `402`
  * read the accepted requirements, pay via a matching payer, and retry with the
- * `X-PAYMENT` header. Non-402 responses — and 402s no payer can satisfy — pass
- * through unchanged.
+ * payment in the `PAYMENT-SIGNATURE` header, where the x402 v2 HTTP transport
+ * carries it. Non-402 responses — and 402s no payer can satisfy — pass through
+ * unchanged.
  *
  * Accepts one payer or several; with several, each advertised requirement routes to
  * the first payer that `supports()` it (e.g. a Canton payer + an EVM payer). Depends
@@ -57,7 +58,7 @@ export function createX402Fetch(payers: X402Payer | X402Payer[], opts: X402Fetch
 
     const payload = await selection.payer.authorize(selection.requirements);
     const headers = new Headers(init?.headers);
-    headers.set("X-PAYMENT", encodePaymentHeader(payload));
+    headers.set("PAYMENT-SIGNATURE", encodePaymentHeader(payload));
     return doFetch(input, { ...init, headers });
   };
 }
