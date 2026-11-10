@@ -1,7 +1,7 @@
 {
   "name": "@chainsafe/x402-server-sdk",
   "version": "0.1.2",
-  "description": "Canton x402 payer SDK — with a party key + wallet-sdk ledger access, prepare + sign a Canton Coin transfer and produce the X-PAYMENT payload for a facilitator to settle.",
+  "description": "Canton x402 payer SDK — with a party key + wallet-sdk ledger access, prepare + sign a Canton Coin transfer and produce the payment for a facilitator to settle.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

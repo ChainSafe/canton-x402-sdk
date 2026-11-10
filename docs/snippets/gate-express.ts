@@ -43,7 +43,7 @@ app.get("/paid", (req, res) => {
   res.json({ ok: true, payer: req.x402!.payer });
 });
 
-// Raise maxHeaderSize (step 6): X-PAYMENT is about 10 KB, much of Node's 16 KB
+// Raise maxHeaderSize (step 6): PAYMENT-SIGNATURE is about 10 KB, much of Node's 16 KB
 // default for all headers, so a paid retry can 431 before the handler runs.
 http
   .createServer({ maxHeaderSize: 4 * 1024 * 1024 }, app)

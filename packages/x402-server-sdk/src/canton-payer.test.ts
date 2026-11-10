@@ -84,7 +84,12 @@ describe("CantonX402Payer.authorize", () => {
     const result = await makePayer(sdk).authorize(req);
     const inner = result.payload;
 
-    expect(result).toMatchObject({ x402Version: 2, scheme: "exact", network: NETWORK });
+    // The spec envelope: the requirements this payment answers, as `accepted`,
+    // and no top-level scheme or network.
+    expect(result.x402Version).toBe(2);
+    expect(result.accepted).toBe(req);
+    expect(result).not.toHaveProperty("scheme");
+    expect(result).not.toHaveProperty("network");
     expect(inner.assetTransferMethod).toBe("transfer-factory");
     expect(inner.publicKey).toBe(publicKeyB64);
     // The spec's payload names no payer (it is the transfer's sender, Rule 8),

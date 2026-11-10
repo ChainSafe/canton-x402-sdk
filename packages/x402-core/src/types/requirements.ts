@@ -1,6 +1,11 @@
 import * as v from "valibot";
-import { ASSET_TRANSFER_METHOD, InstrumentIdSchema } from "./common";
-import type { NetworkId, Scheme, X402Version } from "./common";
+import {
+  ASSET_TRANSFER_METHOD,
+  InstrumentIdSchema,
+  PaymentExtensionsSchema,
+  ResourceInfoSchema,
+} from "./common";
+import type { NetworkId, PaymentExtensions, ResourceInfo, Scheme, X402Version } from "./common";
 
 /**
  * Generic PaymentRequirements — the merchant's 402 offer. `TExtra` is the one
@@ -8,9 +13,12 @@ import type { NetworkId, Scheme, X402Version } from "./common";
  * the spec types as a string for every scheme (a token contract address on EVM,
  * a symbol here). Anything an asset cannot say as a string belongs in `extra`.
  * `scheme` is the open {@link Scheme} union so schemes share the envelope.
- * Generic → type-only (the concrete Canton shape below is schema-first).
+ * Generic → type-only (the concrete Canton shape below is schema-first). A type
+ * alias, not an interface, so it keeps an implicit index signature: a payment
+ * typed with it as `accepted` still assigns to the schema-inferred
+ * `CantonPaymentPayload`, whose `accepted` is a loose object.
  */
-export interface X402PaymentRequirements<TExtra = Record<string, unknown>> {
+export type X402PaymentRequirements<TExtra = Record<string, unknown>> = {
   scheme: Scheme;
   network: NetworkId;
   /**
@@ -22,14 +30,19 @@ export interface X402PaymentRequirements<TExtra = Record<string, unknown>> {
   asset: string;
   /** Recipient party ID. */
   payTo: string;
-  /** Resource URL the wallet is paying for. */
-  resource: string;
+  /**
+   * Resource URL the wallet is paying for. Not a field of the spec's
+   * `PaymentRequirements`, which leaves the resource to `PaymentRequired` and
+   * `PaymentPayload`, so a payment's `accepted` need not carry it. Canton-exact
+   * requirements still require it until #76 moves it out.
+   */
+  resource?: string;
   description?: string;
   /** Seconds the client has to complete payment. Required for every scheme. */
   maxTimeoutSeconds: number;
   /** Scheme-specific extra (the `TExtra` seam), e.g. the bridge's `cantonRecipient`. */
   extra?: TExtra;
-}
+};
 
 /** A required string field: present and not empty. */
 const nonEmptyString = v.pipe(v.string(), v.minLength(1));
@@ -112,13 +125,12 @@ export function parseCantonPaymentRequirements(input: unknown): CantonPaymentReq
 }
 
 /**
- * Loose validator for the requirements envelope: the universal fields every scheme
- * shares, with a scheme-agnostic `asset` object (the concrete asset shape is the
- * per-scheme seam). `looseObject` so a scheme's extra keys pass through. Mirrors
- * {@link isX402PaymentPayload} — envelope-level validation only; the per-scheme
- * verifier checks the concrete asset (use {@link isCantonPaymentRequirements} for
- * canton-exact). This is the requirements shape carried in the X402 request +
- * X-PAYMENT envelopes.
+ * Loose validator for the requirements envelope: the fields the spec requires of
+ * every scheme's `PaymentRequirements`. `looseObject` so a scheme's own keys,
+ * `extra` among them, pass through. Mirrors {@link isX402PaymentPayload} —
+ * envelope-level validation only; the per-scheme verifier checks the rest (use
+ * {@link isCantonPaymentRequirements} for canton-exact). This is the shape of the
+ * X402 request's `paymentRequirements`, and of a payment's `accepted`.
  */
 export const X402PaymentRequirementsEnvelopeSchema = v.looseObject({
   scheme: nonEmptyString,
@@ -134,10 +146,13 @@ export function isX402PaymentRequirements(x: unknown): x is X402PaymentRequireme
 }
 
 /**
- * The `402 Payment Required` response body — returned by the merchant/resource
- * server, listing the payment options the client may satisfy. The client picks
- * one of `accepts[]`, pays it, and retries the request with the `X-PAYMENT`
- * header. Produced by the merchant middleware; parsed by the auto-pay client.
+ * The x402 v2 `PaymentRequired` object a `402 Payment Required` answers with:
+ * one resource, and the ways to pay for it. The client picks one of
+ * `accepts[]`, pays it, and retries the request with the `PAYMENT-SIGNATURE` header.
+ *
+ * The HTTP transport carries it base64-encoded in the `PAYMENT-REQUIRED`
+ * response header ({@link encodePaymentRequiredHeader}). The merchant
+ * middleware sends it as the body too, with a `details` string beside it.
  *
  * Generic over the `accepts[]` element (`TRequirements`) so a mixed-scheme offer
  * (e.g. canton-exact + a bridge scheme) is expressible as a union; every other
@@ -145,19 +160,28 @@ export function isX402PaymentRequirements(x: unknown): x is X402PaymentRequireme
  */
 export interface X402PaymentRequiredResponse<TRequirements = CantonPaymentRequirements> {
   x402Version: X402Version;
+  /** What is being paid for. Required by the spec. */
+  resource: ResourceInfo;
   /** Payment options; the client satisfies exactly one of them. */
   accepts: TRequirements[];
   /** Optional machine-readable reason, e.g. "payment_required". */
   error?: string;
+  extensions?: PaymentExtensions | null;
 }
 
 /** canton-exact 402 response: `accepts[]` of {@link CantonPaymentRequirements}. */
 export const CantonPaymentRequiredResponseSchema = v.object({
   x402Version: v.literal(2),
+  resource: ResourceInfoSchema,
   accepts: v.array(CantonPaymentRequirementsSchema),
   error: v.optional(v.string()),
+  extensions: v.nullish(PaymentExtensionsSchema),
 });
 
 export type CantonPaymentRequiredResponse = v.InferOutput<
   typeof CantonPaymentRequiredResponseSchema
 >;
+
+export function isCantonPaymentRequiredResponse(x: unknown): x is CantonPaymentRequiredResponse {
+  return v.is(CantonPaymentRequiredResponseSchema, x);
+}

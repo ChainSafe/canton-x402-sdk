@@ -2,7 +2,7 @@
  * @chainsafe/x402-server-sdk
  *
  * Payer SDK: with a Canton party key + a wallet-sdk ledger connection, prepare +
- * sign a Canton Coin transfer and produce the X-PAYMENT payload a facilitator settles.
+ * sign a Canton Coin transfer and produce the payment a facilitator settles.
  */
 export const VERSION = "0.0.1";
 
