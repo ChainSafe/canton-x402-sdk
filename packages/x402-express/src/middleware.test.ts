@@ -520,7 +520,7 @@ describe("paymentRequired", () => {
     expect(res.body.accepts[0]).toMatchObject({ resource: "/r", description: "d" });
   });
 
-  it("responds 402 with well-formed requirements when there is no X-PAYMENT", async () => {
+  it("responds 402 with well-formed requirements when there is no payment", async () => {
     stubFacilitator();
     const res = await request(makeApp()).get("/paid");
     expect(res.status).toBe(402);
@@ -683,7 +683,7 @@ describe("paymentRequired", () => {
     ).toBe(true);
   });
 
-  it("responds 402 bad_payload on an undecodable X-PAYMENT", async () => {
+  it("responds 402 bad_payload on an undecodable payment header", async () => {
     stubFacilitator();
     const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", "!!!not-base64-json!!!");
     expect(res.status).toBe(402);
@@ -834,6 +834,72 @@ describe("paymentRequired", () => {
       .set("PAYMENT-SIGNATURE", paymentHeader({ resource: "https://f.example/other" }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_resource");
+  });
+
+
+  it("forwards exactly the payment's accepted to the facilitator as paymentRequirements", async () => {
+    const fetchMock = stubFacilitator();
+    const header = paymentHeader(
+      { extra: { ...ECHOED_EXTRA, memo: "order-42" } },
+      {},
+      {
+        resource: { url: "https://f.example/paid", description: "Access" },
+        extensions: { "x-ext": { info: { a: 1 }, schema: {} } },
+      },
+    );
+    const res = await request(makeApp({ settle: true })).get("/paid").set("PAYMENT-SIGNATURE", header);
+    expect(res.status).toBe(200);
+    const sent = JSON.parse(atob(header));
+    for (const path of ["/v2/verify", "/v2/settle"]) {
+      const call = fetchMock.mock.calls.find((c) => String(c[0]).includes(path));
+      const init = (call as unknown as [string, RequestInit] | undefined)?.[1];
+      const body = JSON.parse(String(init?.body));
+      expect(body.paymentRequirements).toEqual(sent.accepted);
+      expect(body.paymentPayload).toEqual(sent);
+    }
+  });
+
+  it("answers 402 bad_payload, not 500, for the pre-spec { payment, requirements } header", async () => {
+    const fetchMock = stubFacilitator();
+    const { accepted, ...rest } = JSON.parse(atob(paymentHeader()));
+    const legacy = { payment: { ...rest, scheme: "exact", network: "canton:x" }, requirements: accepted };
+    const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", btoa(JSON.stringify(legacy)));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("bad_payload");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("answers 402 bad_payload, not 500, for a payment nested too deep to forward", async () => {
+    // JSON.parse takes it, but JSON.stringify overflows the stack serialising
+    // the facilitator request; the codec refuses it first.
+    const fetchMock = stubFacilitator();
+    const json = atob(paymentHeader());
+    const deep = json.slice(0, -1) + `,"extensions":{"x":${"[".repeat(5000)}0${"]".repeat(5000)}}}`;
+    const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", btoa(deep));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("bad_payload");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an EMPTY amount in accepted on decode, before policy", async () => {
+    // BigInt("") is 0, so this one matters — but the codec's envelope check
+    // catches it first (every PaymentRequirements has a non-empty amount), which
+    // is why the code is bad_payload and not policy_amount_invalid. Asserted so
+    // the earlier guard cannot quietly go.
+    const fetchMock = stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set("PAYMENT-SIGNATURE", paymentHeader({ amount: "" }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("bad_payload");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("passes an older facilitator's reason through as it came", async () => {
+    stubFacilitator({ verify: { isValid: false, invalidReason: "bad_signature" } });
+    const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("bad_signature");
   });
 
   describe("onReject", () => {
