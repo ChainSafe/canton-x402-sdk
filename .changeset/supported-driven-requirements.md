@@ -28,6 +28,33 @@ than a guess, because a declarative spec carries one price and a price means
 nothing without the instrument it is denominated in. Name one with `network` or
 `instrument`.
 
+### One resource, a list of ways to pay
+
+`requirements` is the merchant's terms, not one quote beside some extras:
+
+```diff
+  requirements: {
+    payTo: "merchant::1220…",
+-   amount: "500000000",
++   resource: "https://merchant.example/report",
++   accepts: [
++     { amount: "500000000" },                     // 0.05 CC
++     { amount: "250000", instrument: "USDCx" },   // priced separately
++   ],
+  }
+```
+
+That is the shape x402 v2 §5.1.2 defines: `PaymentRequired` names ONE resource
+and lists the ways to pay, and `PaymentRequirements` carries no resource of its
+own. `additionalAccepts` is gone with the asymmetry it existed to paper over —
+it took finished requirements, so those entries got no discovery, no defaults
+and no per-challenge reference, and the merchant hand-wrote the registry admin
+that discovery exists to supply.
+
+Now every entry is a spec. Each gets discovery and its own minted `memo`, the
+shared fields are named once and overridable per entry, and no entry is
+privileged. A builder returns the whole list: `(req) => CantonPaymentRequirements[]`.
+
 ### Three fixes
 
 **A successful payment no longer mints a second merchant reference.** The `memo`

@@ -45,7 +45,11 @@ function voucherScheme(): SchemeAdapter<VoucherSpec, VoucherRequirements, Vouche
     id: "voucher",
     acceptsRequirements(r): r is VoucherRequirements {
       const extra = (r as { extra?: unknown }).extra;
-      return typeof extra === "object" && extra !== null && typeof (extra as VoucherExtra).book === "string";
+      return (
+        typeof extra === "object" &&
+        extra !== null &&
+        typeof (extra as VoucherExtra).book === "string"
+      );
     },
     acceptsPayload(p): p is VoucherPayload {
       return typeof (p.payload as { code?: unknown }).code === "string";
@@ -109,10 +113,14 @@ function voucherApp(over: Record<string, unknown> = {}): Express {
       scheme: voucherScheme(),
       requirements: {
         payTo: "shop::1",
-        amount: "10",
         resource: "https://shop.example/paid",
-        book: "autumn-2026",
-        ...over,
+        accepts: [
+          {
+            amount: "10",
+            book: "autumn-2026",
+            ...over,
+          },
+        ],
       },
     }),
   );
@@ -122,7 +130,8 @@ function voucherApp(over: Record<string, unknown> = {}): Express {
 
 function stubFacilitator(over?: { verify?: unknown }) {
   const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
-    if (url.includes("/v2/verify")) return json(over?.verify ?? { isValid: true, payer: "buyer::1" });
+    if (url.includes("/v2/verify"))
+      return json(over?.verify ?? { isValid: true, payer: "buyer::1" });
     return new Response("no route", { status: 404 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -170,7 +179,9 @@ describe("paymentRequired with a non-canton scheme", () => {
   it("still applies the protocol's common rules", async () => {
     // payTo/resource/amount are the middleware's, not the scheme's.
     stubFacilitator();
-    const res = await request(voucherApp()).get("/paid").set("X-PAYMENT", voucherHeader({ amount: "1" }));
+    const res = await request(voucherApp())
+      .get("/paid")
+      .set("X-PAYMENT", voucherHeader({ amount: "1" }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_underpriced");
   });
@@ -247,7 +258,9 @@ describe("paymentRequired with a non-canton scheme", () => {
 
   it("refuses requirements the scheme does not accept", async () => {
     stubFacilitator();
-    const res = await request(voucherApp()).get("/paid").set("X-PAYMENT", voucherHeader({}, { noBook: 1 }));
+    const res = await request(voucherApp())
+      .get("/paid")
+      .set("X-PAYMENT", voucherHeader({}, { noBook: 1 }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_requirements_invalid");
   });

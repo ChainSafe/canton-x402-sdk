@@ -25,19 +25,15 @@ export async function resolve<T>(value: Resolvable<T>, req: Request): Promise<T>
 }
 
 /**
- * The requirement fields x402 v2 gives every scheme. A scheme's own spec
- * extends this with whatever its `extra` needs.
+ * The fields that describe the sale rather than one way of paying for it.
+ *
+ * Named once for all the ways to pay, and overridable per entry. x402 v2
+ * §5.1.2 puts `resource` on the 402 itself and not on each `accepts[]` entry,
+ * which is the same division.
  */
-export interface BaseRequirementsSpec {
+export interface SharedTerms {
   /** Merchant party receiving payment. */
   payTo: Resolvable<string>;
-  /**
-   * Price in **atomic units**, as an integer string: 1 CC = 1e10, so
-   * `"500000000"` is 0.05 CC. The same unit the wire carries — the middleware
-   * does not convert, so a quote means the same thing here as in a builder or
-   * in an echoed requirement.
-   */
-  amount: Resolvable<string>;
   /**
    * Network id — on Canton a `canton:<name>` from x402-core's networks.
    *
@@ -55,6 +51,20 @@ export interface BaseRequirementsSpec {
    * refuses a payment for exceeding it.
    */
   maxTimeoutSeconds?: Resolvable<number>;
+}
+
+/**
+ * What a scheme adapter is handed: the shared terms with one way to pay merged
+ * in. A scheme's own spec extends this with whatever its `extra` needs.
+ */
+export interface BaseRequirementsSpec extends SharedTerms {
+  /**
+   * Price in **atomic units**, as an integer string: 1 CC = 1e10, so
+   * `"500000000"` is 0.05 CC. The same unit the wire carries — the middleware
+   * does not convert, so a price means the same thing here as in a builder or
+   * in an echoed requirement.
+   */
+  amount: Resolvable<string>;
 }
 
 /* ------------------------------------------------------------------ *
@@ -145,7 +155,6 @@ export function compareQuote(
   return { ok: true, depth: passed };
 }
 
-
 /* ------------------------------------------------------------------ *
  * The adapter
  * ------------------------------------------------------------------ */
@@ -191,7 +200,9 @@ export interface SchemeAdapter<
   /** Scheme id, e.g. `exact`. Used as the default for `spec.scheme`. */
   readonly id: string;
   /** Does this echoed requirement conform to the scheme? */
-  acceptsRequirements(requirements: X402PaymentRequirements<unknown>): requirements is TRequirements;
+  acceptsRequirements(
+    requirements: X402PaymentRequirements<unknown>,
+  ): requirements is TRequirements;
   /** Does this payload conform to the scheme? */
   acceptsPayload(payload: X402PaymentPayload<unknown>): payload is TPayload;
   /**

@@ -113,7 +113,9 @@ export const cantonExact: SchemeAdapter<
 > = {
   id: "exact",
 
-  acceptsRequirements(requirements: X402PaymentRequirements<unknown>): requirements is CantonPaymentRequirements {
+  acceptsRequirements(
+    requirements: X402PaymentRequirements<unknown>,
+  ): requirements is CantonPaymentRequirements {
     return isCantonPaymentRequirements(requirements);
   },
 
@@ -129,7 +131,11 @@ export const cantonExact: SchemeAdapter<
 
   extraRules: EXTRA_RULES,
 
-  async quote(req: Request, spec: CantonRequirementsSpec, ctx: SchemeContext): Promise<SchemeQuote> {
+  async quote(
+    req: Request,
+    spec: CantonRequirementsSpec,
+    ctx: SchemeContext,
+  ): Promise<SchemeQuote> {
     const terms = await resolveDeploymentTerms(req, spec, ctx);
     const quote: SchemeQuote = {
       scheme: terms.scheme,
@@ -166,7 +172,12 @@ async function resolveDeploymentTerms(
   req: Request,
   spec: CantonRequirementsSpec,
   ctx: SchemeContext,
-): Promise<{ scheme: string; network: string; asset: string; instrumentId: AssetSpec["instrumentId"] }> {
+): Promise<{
+  scheme: string;
+  network: string;
+  asset: string;
+  instrumentId: AssetSpec["instrumentId"];
+}> {
   const scheme = await resolve(spec.scheme ?? cantonExact.id, req);
   const network = spec.network === undefined ? undefined : await resolve(spec.network, req);
   const pinned = spec.asset === undefined ? undefined : await resolve(spec.asset, req);
@@ -183,10 +194,13 @@ async function resolveDeploymentTerms(
 
   const prefer: CantonDeploymentPreference = { schemes: [scheme] };
   if (network !== undefined) prefer.networks = [network];
-  const instrument = spec.instrument === undefined ? undefined : await resolve(spec.instrument, req);
+  const instrument =
+    spec.instrument === undefined ? undefined : await resolve(spec.instrument, req);
   if (instrument !== undefined) prefer.instruments = [instrument];
 
-  const advertised = exactlyOne(await selectCantonDeployments(await ctx.facilitator.supported(), prefer));
+  const advertised = exactlyOne(
+    await selectCantonDeployments(await ctx.facilitator.supported(), prefer),
+  );
   return {
     scheme,
     network: network ?? advertised.network,

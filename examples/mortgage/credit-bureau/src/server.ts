@@ -114,9 +114,8 @@ app.use(
     requirements: {
       network: NETWORK_ID,
       payTo: BUREAU_PARTY,
-      asset: ASSET,
-      amount: PRICE_ATOMIC.toString(),
       description: "Credit-score pull",
+      accepts: [{ asset: ASSET, amount: PRICE_ATOMIC.toString() }],
     },
   }),
 );

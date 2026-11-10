@@ -29,10 +29,11 @@ app.use(
     facilitator,
     settle: true,
     requirements: {
-      // Only what is the merchant's own business: who is paid, and how much.
+      // Only what is the merchant's own business: who is paid, for what...
       payTo: PAY_TO,
-      amount: "500000000", // atomic units: 1 CC = 1e10, so this is 0.05 CC
       description: "Access to /paid",
+      // ...and the ways to pay for it. One here; add an entry per instrument.
+      accepts: [{ amount: "500000000" }], // atomic units: 1 CC = 1e10, so 0.05 CC
     },
   }),
 );

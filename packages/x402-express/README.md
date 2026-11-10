@@ -39,7 +39,9 @@ app.use(
     // Any field below can also be a (req) => value resolver.
     requirements: {
       payTo: "merchant::1220…",
-      amount: "500000000", // atomic units: 1 CC = 1e10, so this is 0.05 CC
+      accepts: [
+        { amount: "500000000" }, // atomic units: 1 CC = 1e10, so this is 0.05 CC
+      ],
       // `network` and `asset` are read from the facilitator's /v2/supported.
       // Set them to pin them yourself.
     },
@@ -62,8 +64,8 @@ const { paymentRequired } = require("@chainsafe/x402-express");
 
 1. **Unpaid request** (no/invalid `X-PAYMENT`) → `402` with
    `{ x402Version: 2, accepts: [...] }`: your quote, plus any
-   `additionalAccepts` entries, with the defaults filled in. A `memo` generator
-   is called here, and only here.
+   one entry per way to pay, with the defaults filled in. A `memo` generator is
+   called here, and only here — once per entry, per challenge.
 2. **Paid request** → the `X-PAYMENT` header is decoded to a payment payload
    plus the requirements it was signed against. The middleware works out which
    of the quotes it would advertise that payment is for, holds it against that
@@ -144,14 +146,34 @@ TPayload>` is exported for a route gated on another.
 | `scheme` | The payment scheme to gate on. Default `cantonExact` — Canton's registered `exact`. See [Another scheme](#another-scheme). |
 | `settle` | Capture via `/v2/settle` after verify. Default `false`. |
 | `requirements` | How to produce the `PaymentRequirements`: a **spec** or a **builder** (see below). |
-| `additionalAccepts` | `(req) => CantonPaymentRequirements[]` extra `accepts[]` entries (e.g. an alternate scheme). A payer may pay any of them — the middleware works out which advertised quote a payment is for and holds it against that one. Runs on every request, so keep it side-effect-free. |
 | `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error? }`, where `extensions` is the facilitator's full verify detail. May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
 
 ### `requirements`
 
-Either a **declarative spec** — `{ payTo, amount, network?, asset?, instrument?, scheme?, resource?, description?, maxTimeoutSeconds?, executeBeforeSeconds?, memo? }`, where the middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120), and every field may be a fixed value **or** a `(req) => value` resolver — or a **builder** `(req) => CantonPaymentRequirements` for full control (you own `maxTimeoutSeconds` and the whole of `extra`).
+A 402 advertises **one resource and a list of ways to pay for it**, which is how x402 v2 §5.1.2 defines it — `PaymentRequirements` carries no resource of its own. The config has the same shape:
 
-Only `payTo` and `amount` are required. Leave out `network` and `asset` and the middleware reads them from the facilitator's `GET /v2/supported`: the network it settles, and the instrument with the registry party it validates holdings against. That party is then read from the service doing the validating, instead of living as a second copy in your config. The response is cached by `FacilitatorClient` (`supportedTtlMs`, default 5 minutes), so this is one round trip per TTL and none at all if you pin both fields.
+```ts
+requirements: {
+  // the sale, named once
+  payTo: "merchant::1220…",
+  resource: "https://merchant.example/report",   // default: the request URL
+  description: "Quarterly report",
+
+  // the ways to pay, each advertised as one accepts[] entry
+  accepts: [
+    { amount: "500000000" },                      // 0.05 CC
+    { amount: "250000", instrument: "USDCx" },    // priced separately
+  ],
+}
+```
+
+Every entry is a spec, so each gets discovery, the defaults and **its own** per-challenge `memo` — there is no privileged first entry. Any shared field may be overridden per entry (a second instrument settling to a different party, say), and each entry carries its own price, because 0.05 of one token is not 0.05 of another and nothing here checks two entries are worth the same.
+
+Per-entry fields are `{ amount, asset?, instrument?, executeBeforeSeconds?, memo? }` plus an override of any shared one. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120). Every field may be a fixed value **or** a `(req) => value` resolver.
+
+For full control, a **builder** `(req) => CantonPaymentRequirements[]` returns the whole list and you own `maxTimeoutSeconds` and the whole of `extra`.
+
+Only `payTo` and one entry's `amount` are required. Leave out `network` and `asset` and the middleware reads them from the facilitator's `GET /v2/supported`: the network it settles, and the instrument with the registry party it validates holdings against. That party is then read from the service doing the validating, instead of living as a second copy in your config. The response is cached by `FacilitatorClient` (`supportedTtlMs`, default 5 minutes), so this is one round trip per TTL and none at all if you pin both fields.
 
 If your facilitator settles more than one network or instrument, name the one you want (`network`, or `instrument` for an instrument's `id`) — otherwise it is an error rather than a guess, because choosing for you would be choosing what you charge.
 
