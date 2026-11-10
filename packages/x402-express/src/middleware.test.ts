@@ -348,10 +348,10 @@ describe("paymentRequired", () => {
         .expect(200);
     });
 
-    it("and refused when checkPayment says so", async () => {
+    it("and refused when preSettle says so", async () => {
       stubFacilitator();
       const app = quoting({
-        checkPayment: ({ requirements }) =>
+        preSettle: ({ requirements }) =>
           requirements.extra.memo === "order-1" ? undefined : "policy_memo_unknown",
       });
       for (const extra of [{}, { memo: "someone-elses-order" }]) {
@@ -364,30 +364,57 @@ describe("paymentRequired", () => {
     });
   });
 
-  describe("checkPayment", () => {
-    it("sees the payload and the echoed requirements, and refuses before settle", async () => {
+  describe("preSettle", () => {
+    it("sees the payment and its verified payer, and refuses before settle", async () => {
       // Before settle is the point: a refusal after it would have moved funds.
       const fetchMock = stubFacilitator();
-      // Reads the payload's key rather than a payer: the payload no longer names
-      // one. What the test is for is that BOTH halves arrive, before settle.
-      let seen: { publicKey?: string; payTo?: string } = {};
+      // Reads the payload's key rather than a payer of its own: the payload
+      // names none. `payer` comes from verify, which is why the hook runs after
+      // it — nothing could supply this field earlier.
+      let seen: Record<string, unknown> = {};
       const app = makeApp({
         settle: true,
-        checkPayment: ({ payload, requirements }) => {
-          seen = { publicKey: payload.payload.publicKey, payTo: requirements.payTo };
+        preSettle: ({ payload, requirements, payer, verify }) => {
+          seen = {
+            publicKey: payload.payload.publicKey,
+            payTo: requirements.payTo,
+            payer,
+            isValid: verify.isValid,
+          };
           return "policy_order_closed";
         },
       });
       const res = await request(app).get("/paid").set("X-PAYMENT", paymentHeader());
       expect(res.status).toBe(402);
       expect(res.body.error).toBe("policy_order_closed");
-      expect(seen).toEqual({ publicKey: "pk", payTo: "merchant::x" });
-      for (const [url] of fetchMock.mock.calls) expect(String(url)).not.toContain("/v2/settle");
+      expect(seen).toEqual({
+        publicKey: "pk",
+        payTo: "merchant::x",
+        payer: "alice::x",
+        isValid: true,
+      });
+      const called = fetchMock.mock.calls.map(([url]) => String(url));
+      expect(called.some((url) => url.includes("/v2/verify"))).toBe(true);
+      expect(called.some((url) => url.includes("/v2/settle"))).toBe(false);
+    });
+
+    it("is not reached when verify refuses the payment", async () => {
+      // The merchant is asked about payments the facilitator has vouched for.
+      // A payment that never verified is the protocol's refusal, not theirs,
+      // and handing it to merchant state would invite acting on a bad signature.
+      stubFacilitator({ verify: { isValid: false, invalidReason: "bad_signature" } });
+      const preSettle = vi.fn(() => undefined);
+      const res = await request(makeApp({ settle: true, preSettle }))
+        .get("/paid")
+        .set("X-PAYMENT", paymentHeader());
+      expect(res.status).toBe(402);
+      expect(res.body.error).toBe("bad_signature");
+      expect(preSettle).not.toHaveBeenCalled();
     });
 
     it("lets the payment through when it returns nothing", async () => {
       stubFacilitator();
-      await request(makeApp({ checkPayment: () => undefined }))
+      await request(makeApp({ preSettle: () => undefined }))
         .get("/paid")
         .set("X-PAYMENT", paymentHeader())
         .expect(200);

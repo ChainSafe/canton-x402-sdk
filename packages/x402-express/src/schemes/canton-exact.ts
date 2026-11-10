@@ -96,8 +96,8 @@ const EXTRA_RULES: Record<keyof typeof CantonRequirementsExtraSchema.entries, Ru
   executeBeforeSeconds: { compare: "equal", reason: "policy_execute_before" },
   // Minted per challenge, and the terms compared against were built without
   // one. Whether the payer echoed a memo the merchant actually issued is a
-  // question only the merchant's records answer — hence `checkPayment`.
-  memo: { compare: "skip", why: "per-challenge; judged by checkPayment against merchant records" },
+  // question only the merchant's records answer — hence `preSettle`.
+  memo: { compare: "skip", why: "per-challenge; judged by preSettle against merchant records" },
 };
 
 /**

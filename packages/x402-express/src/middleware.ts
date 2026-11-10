@@ -114,11 +114,6 @@ export function paymentRequired<
       const refusal = selectQuote(requirements, quotes, rules);
       if (refusal !== undefined) throw new PaymentRejection(refusal);
 
-      // The merchant's own checks, on everything the payer sent. Placed here so
-      // a refusal costs no verify and, above all, no settle.
-      const merchantRefusal = await options.checkPayment?.({ payload, requirements }, req);
-      if (merchantRefusal) throw new PaymentRejection(merchantRefusal);
-
       const verify = await facilitator.verify(payload, requirements);
       if (!verify.isValid) {
         const detail = verify.extensions?.detail;
@@ -135,6 +130,16 @@ export function paymentRequired<
       // settling, so a payment is never captured for a request we then fail.
       const payer = verify.payer ?? scheme.payerOf(payload);
       if (!payer) throw new PaymentRejection("transfer_mismatch", "undecodable");
+
+      // The merchant's own say, on a payment the facilitator has vouched for.
+      // After verify so the echoed requirements are bound to the signed
+      // transfer and `payer` is known; before settle so a refusal never moves
+      // funds. See `preSettle` for why that order and not the cheaper one.
+      const merchantRefusal = await options.preSettle?.(
+        { payload, requirements, payer, verify },
+        req,
+      );
+      if (merchantRefusal) throw new PaymentRejection(merchantRefusal);
 
       let settleResponse: SettleResponse | undefined;
       if (settle) {

@@ -93,7 +93,7 @@ common fields in the middleware, `extra` in the scheme adapter — so a field
 added to either fails the build until someone decides what comparing it means
 rather than going unchecked. `description` and `maxTimeoutSeconds` are
 deliberately not compared: neither reaches the ledger. Nor is `memo`: the
-middleware keeps no record of what it issued, so only your `checkPayment` can
+middleware keeps no record of what it issued, so only your `preSettle` can
 judge it.
 
 Amounts are atomic units throughout — the same unit the wire carries.
@@ -181,18 +181,20 @@ A **builder** runs on every request, paid ones included, because a payment has t
 
 `memo` is special: it's a **function only** (`(req) => string | Promise<string>`), called once per challenge **issued** — on the 402 that offers terms, and not on a request that pays terms already offered — so a merchant can generate *and record* it (e.g. an order id persisted for reconciliation) without a successful payment booking a second one. Omit it to quote none. Quoting one **binds** it — the payer must sign the identical value into the transfer.
 
-That proves less than it looks, though: the scheme compares the transfer against the requirements the **payer** echoed, so a payer can echo no memo and sign none, or echo any value and sign that. The middleware keeps no record of what it issued, so it cannot tell. If you reconcile *on* the memo, use `checkPayment` — your own say on a paid request, with everything the payer sent, run after merchant policy and **before verify, so before any settle**. Return a short reason to refuse (answered as a 402 carrying that code), or nothing to accept:
+That proves less than it looks, though: the scheme compares the transfer against the requirements the **payer** echoed, so a payer can echo no memo and sign none, or echo any value and sign that. The middleware keeps no record of what it issued, so it cannot tell. If you reconcile *on* the memo, use `preSettle` — your own say on a payment the facilitator has verified, run **after verify and before any settle**. Return a short reason to refuse (answered as a 402 carrying that code), or nothing to accept:
 
 ```ts
-checkPayment: async ({ payload, requirements }) => {
+preSettle: async ({ requirements, payer }) => {
   const order = await orders.findByRef(requirements.extra.memo);
   if (!order) return "policy_memo_unknown";
   if (order.status !== "awaiting-payment") return "policy_order_closed";
-  if (!(await allowed(payload.payload.payer))) return "policy_payer_blocked";
+  if (!(await allowed(payer))) return "policy_payer_blocked";
 },
 ```
 
-It is not memo-specific — it is where any check needing your own records belongs.
+**After verify, not before.** `requirements` is what the payer echoed; until the facilitator has held the signed transfer against it, a memo there is claimed rather than committed to — and this is where merchants reserve stock or mark an order claimed, which must not run on an unverified claim. It is also the only point at which `payer` exists: the payload names none, so the payer is the verified transfer's sender. The price is that a refusal here spends a verify round-trip; wrong scheme, payee, resource or amount are refused earlier by policy, and verify moves no funds.
+
+It is not memo-specific — it is where any check needing your own records belongs. With `settle: false` it is simply the last gate before the request is let through.
 
 ## `req.x402`
 

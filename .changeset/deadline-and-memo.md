@@ -52,14 +52,24 @@ value to a reader and another to the engine.
 is a new option with no default, because quoting one binds it and an invented
 memo would refuse honest payments.
 
-There is also a new optional `checkPayment` hook, because Rule 12 on its own
+There is also a new optional `preSettle` hook, because Rule 12 on its own
 proves less than it looks: it compares the transfer against the requirements
 the PAYER echoed, so a payer can echo no memo and sign none, or echo another
 order's memo and sign that — either way the two agree, and the middleware keeps
-no record of what it issued. `checkPayment` is where that record goes. It takes
-the payload and the echoed requirements, runs after merchant policy and before
-verify (so before any settle), and returns a reason to refuse or nothing to
-accept. Not memo-specific: any check needing merchant state belongs there.
+no record of what it issued. `preSettle` is where that record goes. It takes
+the payload, the echoed requirements, the `payer` and the verify response, runs
+after verify and before any settle, and returns a reason to refuse (answered as
+a 402 carrying that code) or nothing to accept. Not memo-specific: any check
+needing merchant state belongs there.
+
+After verify rather than before it, though a refusal is then one round-trip
+dearer. Before verify, the requirements handed to the hook are a payer's claim
+that nothing has yet held against the signed transfer, so a merchant
+reconciling a memo — or reserving stock, or marking an order claimed, which is
+what this hook is for — would be acting on an unverified value. It is also the
+only point at which `payer` exists, the payload having stopped carrying one.
+Wrong scheme, payee, resource or amount are still refused by policy before any
+verify, and verify moves no funds; settle does, and a refusal precedes it.
 
 Found in review by @dimartiro.
 

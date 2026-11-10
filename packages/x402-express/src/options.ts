@@ -89,10 +89,9 @@ export interface PaymentRequiredOptions<
   /** The terms to advertise: a declarative spec, or a builder for the whole list. */
   requirements: RequirementsSpec<TSpec> | RequirementsBuilder<TRequirements>;
   /**
-   * Your own say on a paid request, run after the echoed requirements pass
-   * merchant policy and before verify — so before any settle. Return a short
-   * reason to refuse it (answered as a `402` carrying that code), or nothing
-   * to let it through.
+   * Your own say on a verified payment, run after the facilitator has verified
+   * it and before anything settles. Return a short reason to refuse it
+   * (answered as a `402` carrying that code), or nothing to let it through.
    *
    * This is where merchant state goes, because the middleware has none. It
    * rebuilds the terms on every request, so it can tell you the payer echoed
@@ -101,15 +100,37 @@ export interface PaymentRequiredOptions<
    * only your records answer:
    *
    * ```ts
-   * checkPayment: async ({ requirements }) => {
+   * preSettle: async ({ requirements, payer }) => {
    *   const order = await orders.findByRef(requirements.extra.memo);
    *   if (!order) return "policy_memo_unknown";
    *   if (order.status !== "awaiting-payment") return "policy_order_closed";
+   *   if (order.buyer !== payer) return "policy_wrong_payer";
    * },
    * ```
+   *
+   * After verify, not before, because `requirements` is what the PAYER echoed.
+   * Until the facilitator has held the signed transfer against it, a memo here
+   * is one the payer claims rather than one it committed to — and this hook is
+   * where merchants reserve stock or mark an order claimed, which must not
+   * happen on an unverified claim. It is also the first point at which `payer`
+   * is known at all: the payload names none (spec Rule 8), so the payer is the
+   * verified transfer's sender.
+   *
+   * The cost is that a refusal here spends a verify round-trip. Wrong scheme,
+   * payTo, resource or price are all refused earlier by policy, and verify
+   * moves no funds — settle is what does, and a refusal still precedes it.
+   *
+   * With `settle: false` nothing settles, and this is the last gate before the
+   * request is let through.
    */
-  checkPayment?: (
-    payment: { payload: TPayload; requirements: TRequirements },
+  preSettle?: (
+    payment: {
+      payload: TPayload;
+      requirements: TRequirements;
+      /** The verified transfer's sender. */
+      payer: string;
+      verify: VerifyResponse;
+    },
     req: Request,
   ) => string | undefined | Promise<string | undefined>;
   /**
