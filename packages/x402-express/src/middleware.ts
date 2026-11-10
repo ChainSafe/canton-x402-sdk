@@ -6,12 +6,13 @@ import {
   isCantonPaymentRequirements,
   isValidAmount,
   decodePaymentHeader,
+  encodePaymentRequiredHeader,
   type AssetSpec,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
-  type X402PaymentRequirements,
   type SettleResponse,
   type VerifyResponse,
+  type X402PaymentRequiredResponse,
 } from "@chainsafe/x402-core";
 import { FacilitatorError, type FacilitatorClient } from "@chainsafe/x402-client";
 
@@ -113,7 +114,7 @@ export interface PaymentRequiredOptions {
   /**
    * Called after the middleware rejects a payment it was handed (402), or fails
    * on the facilitator (502) or its own config (500) — e.g. to log it. Not called
-   * for the plain 402 challenge to a request without `X-PAYMENT`. The middleware
+   * for the plain 402 challenge to a request without a payment. The middleware
    * logs nothing itself. A throw (or a rejected promise from an async hook) is
    * swallowed so it can't break the response or crash the process.
    */
@@ -124,11 +125,16 @@ export interface PaymentRequiredOptions {
 export interface PaymentRejectionInfo {
   /** HTTP status sent: 402 (payment rejected), 502 (facilitator error), 500 (middleware error). */
   status: 402 | 502 | 500;
-  /** The `error` code in the response body (e.g. `bad_signature`, `facilitator_error`). */
+  /** The `error` code in the response body (e.g. `invalid_exact_canton_signature_invalid`, `facilitator_error`). */
   reason: string;
   /** The `details` string in the response body, when there is one. */
   details?: string;
-  /** The facilitator's full `extensions` for a verify rejection (may hold more than `details`). */
+  /**
+   * For a verify rejection, the facilitator's full `extensions` (may hold more
+   * than `details`, and `reason` holds the code it answered with before the
+   * spec's). The middleware's own refusal of a transfer it cannot decode sets
+   * one in the same shape.
+   */
   extensions?: Record<string, unknown>;
   /** The underlying error, for a 502 or 500. */
   error?: unknown;
@@ -169,8 +175,11 @@ class PaymentRejection extends Error {
 /**
  * Express middleware that gates a route behind an x402 payment.
  *
- * - No/invalid `X-PAYMENT` → `402` with `{ x402Version, accepts: [requirements] }`.
- * - Valid `X-PAYMENT` → verify (and optionally settle) via the facilitator, then
+ * - No/invalid payment in `PAYMENT-SIGNATURE` (or the older `X-PAYMENT`) → `402`
+ *   with the spec's `PaymentRequired`,
+ *   `{ x402Version, resource, accepts: [requirements] }`, in the
+ *   `PAYMENT-REQUIRED` header and as the body.
+ * - Valid payment → verify (and optionally settle) via the facilitator, then
  *   attach `req.x402` and call `next()`.
  *
  * @example
@@ -201,19 +210,32 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
         ? (await options.additionalAccepts(req)).map(assertAtomicAmount)
         : [];
 
-      const header = req.header("X-PAYMENT");
+      // The spec's name first. X-PAYMENT is the name this SDK used before, and
+      // is still read for a payment of this shape sent under it. A 0.1.x payer
+      // sends the older { payment, requirements } shape, which is refused
+      // either way.
+      const header = req.header("PAYMENT-SIGNATURE") || req.header("X-PAYMENT");
       if (!header) throw new PaymentRejection("payment_required", fresh);
 
-      // The X-PAYMENT envelope carries the requirements the payload was built
-      // against; verify against those, after checking them against merchant
-      // policy. Nothing in the payload binds them on its own — what binds is
-      // the signed transfer the verifier decodes and compares to them.
+      // The payment carries the requirements it was built against as `accepted`,
+      // the accepts[] entry the payer chose. Verify against those, after checking
+      // them against merchant policy. Nothing in the payment binds them on its
+      // own — what binds is the signed transfer the verifier decodes and compares
+      // to them.
       let payload: CantonPaymentPayload;
-      let requirements: CantonPaymentRequirements;
       try {
-        ({ payload, requirements } = decodePaymentHeader(header));
+        payload = decodePaymentHeader(header);
       } catch {
         throw new PaymentRejection("bad_payload", fresh);
+      }
+      // The codec checks `accepted` only for the fields every scheme's
+      // requirements share, and types it optimistically; `extra` and `resource`
+      // have not been checked. Narrow before reading them, or one without
+      // `extra` throws a TypeError and answers 500 instead of 402 —
+      // attacker-controlled input choosing our status code.
+      const requirements: unknown = payload.accepted;
+      if (!isCantonPaymentRequirements(requirements)) {
+        throw new PaymentRejection("policy_requirements_invalid", fresh);
       }
 
       const policyError = validateEchoedRequirements(requirements, fresh);
@@ -243,7 +265,13 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       // response, so read the same sender here when it is left out — before
       // settling, so a payment is never captured for a request we then fail.
       const payer = verify.payer ?? decodePayloadTransfer(payload.payload.preparedTransaction)?.sender;
-      if (!payer) throw new PaymentRejection("transfer_mismatch", fresh, "undecodable");
+      if (!payer) {
+        // Worded as the verifier words an undecodable transfer.
+        throw new PaymentRejection("invalid_exact_canton_malformed_payload", fresh, "undecodable", {
+          reason: "transfer_mismatch",
+          detail: "undecodable",
+        });
+      }
 
       let settleResponse: SettleResponse | undefined;
       if (settle) {
@@ -260,7 +288,7 @@ export function paymentRequired(options: PaymentRequiredOptions): RequestHandler
       let rejection: PaymentRejectionInfo | undefined;
       if (err instanceof PaymentRejection) {
         respond402(res, err.requirements, err.reason, err.details, extraAccepts);
-        // A bare challenge (no X-PAYMENT yet) is the normal flow, not a rejection.
+        // A bare challenge (no payment yet) is the normal flow, not a rejection.
         if (err.reason !== "payment_required") {
           rejection = { status: 402, reason: err.reason, details: err.details, extensions: err.extensions };
         }
@@ -339,19 +367,18 @@ async function resolve<T>(value: Resolvable<T>, req: Request): Promise<T> {
   return typeof value === "function" ? (value as (req: Request) => T | Promise<T>)(req) : value;
 }
 
-/** Ensure client-echoed requirements are acceptable per merchant policy. */
+/**
+ * Ensure the requirements the payer chose (`accepted`) are acceptable per
+ * merchant policy: the scheme, network, `payTo`, resource, instrument, asset
+ * and `maxTimeoutSeconds` must be this request's terms, and the amount must not
+ * be under the price. Other fields (`description`, and the `extra` keys beyond
+ * the instrument, `memo` and `executeBeforeSeconds` among them) are not
+ * compared, and are forwarded as the payer sent them.
+ */
 function validateEchoedRequirements(
-  echoed: X402PaymentRequirements<unknown>,
+  echoed: CantonPaymentRequirements,
   policy: CantonPaymentRequirements,
 ): string | null {
-  // The header is only ENVELOPE-validated on decode, and the envelope is a
-  // looseObject that does not require `extra`. decodePaymentHeader types the
-  // result optimistically as canton-exact; nothing has checked it. Narrow
-  // before reading a field, or a header without `extra` throws a TypeError and
-  // answers 500 instead of 402 — attacker-controlled input choosing our status
-  // code. This is also why the parameter is the envelope type, not the
-  // concrete one: the old signature asserted a shape no one had verified.
-  if (!isCantonPaymentRequirements(echoed)) return "policy_requirements_invalid";
   if (echoed.scheme !== policy.scheme) return "policy_scheme";
   if (echoed.network !== policy.network) return "policy_network";
   if (echoed.payTo !== policy.payTo) return "policy_payTo";
@@ -371,9 +398,18 @@ function validateEchoedRequirements(
   // anything over ~900k CC exceeds Number.MAX_SAFE_INTEGER and two different
   // prices start comparing equal.
   if (BigInt(echoed.amount) < BigInt(policy.amount)) return "policy_underpriced";
+  // The facilitator holds a payment for at most this long; the payer does not
+  // get to stretch it.
+  if (echoed.maxTimeoutSeconds !== policy.maxTimeoutSeconds) return "policy_timeout";
   return null;
 }
 
+/**
+ * Answer 402 with the spec's `PaymentRequired`: base64-encoded in the
+ * `PAYMENT-REQUIRED` header, where the HTTP transport puts it, and as the body,
+ * where clients of this middleware already read it. `details` is the body's
+ * alone; the spec object has no such field.
+ */
 function respond402(
   res: Response,
   requirements: CantonPaymentRequirements,
@@ -381,12 +417,19 @@ function respond402(
   details: string | undefined,
   additional: CantonPaymentRequirements[],
 ): void {
-  res.status(402).json({
+  const paymentRequired: X402PaymentRequiredResponse = {
     x402Version: 2,
+    // The resource this request's terms were quoted for, so the top level says
+    // what each entry's `resource` and `description` say.
+    resource: {
+      url: requirements.resource,
+      ...(requirements.description ? { description: requirements.description } : {}),
+    },
     accepts: additional.length > 0 ? [requirements, ...additional] : [requirements],
     error,
-    ...(details ? { details } : {}),
-  });
+  };
+  res.setHeader("PAYMENT-REQUIRED", encodePaymentRequiredHeader(paymentRequired));
+  res.status(402).json({ ...paymentRequired, ...(details ? { details } : {}) });
 }
 
 function absoluteUrl(req: Request): string {

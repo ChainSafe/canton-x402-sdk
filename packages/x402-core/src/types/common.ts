@@ -70,3 +70,26 @@ export const DisclosedContractSchema = v.object({
   synchronizerId: v.string(),
 });
 export type DisclosedContract = v.InferOutput<typeof DisclosedContractSchema>;
+
+/**
+ * x402 v2 `ResourceInfo`: what is being paid for. A 402's `PaymentRequired`
+ * names it, and a payment may carry it back. Only `url` is required. The
+ * optional fields also take an explicit `null`, as other implementations send
+ * it.
+ */
+export const ResourceInfoSchema = v.looseObject({
+  url: v.pipe(v.string(), v.minLength(1)),
+  description: v.nullish(v.string()),
+  mimeType: v.nullish(v.string()),
+  serviceName: v.nullish(v.string()),
+  tags: v.nullish(v.array(v.string())),
+  iconUrl: v.nullish(v.string()),
+});
+export type ResourceInfo = v.InferOutput<typeof ResourceInfoSchema>;
+
+/**
+ * x402 v2 `extensions`, on a `PaymentRequired` or a payment: extension id → its
+ * data. Passed through, not interpreted.
+ */
+export const PaymentExtensionsSchema = v.record(v.string(), v.unknown());
+export type PaymentExtensions = v.InferOutput<typeof PaymentExtensionsSchema>;

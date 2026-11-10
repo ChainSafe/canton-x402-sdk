@@ -45,7 +45,7 @@ export interface CantonX402PayerOptions {
 /**
  * Canton canton-exact payer over `@canton-network/wallet-sdk`: builds a Token
  * Standard transfer, prepares it (interactive submission), Ed25519-signs the hash,
- * and assembles the X-PAYMENT payload — without executing (the facilitator settles).
+ * and assembles the payment payload — without executing (the facilitator settles).
  */
 export class CantonX402Payer implements X402Payer {
   constructor(private readonly opts: CantonX402PayerOptions) {}
@@ -119,8 +119,10 @@ export class CantonX402Payer implements X402Payer {
     // 4. Assemble the payload the facilitator settles.
     return {
       x402Version: 2,
-      scheme: requirements.scheme,
-      network: requirements.network,
+      // The accepts[] entry this payment answers, as the spec's `accepted`: the
+      // scheme and network travel in it, and the merchant forwards it to the
+      // facilitator as the requirements to verify against.
+      accepted: requirements,
       payload: {
         // transfer.create built a TransferFactory_Transfer, the one method Canton's
         // exact defines.

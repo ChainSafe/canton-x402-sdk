@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
+import * as v from "valibot";
 import { ValiError } from "valibot";
 import {
+  isCantonPaymentPayload,
   isCantonPaymentInner,
   parseCantonPaymentInner,
   isCantonPaymentRequirements,
@@ -8,6 +10,9 @@ import {
   parseCantonPaymentRequirements,
   isCantonVerifyRequest,
   isX402Request,
+  isCantonPaymentRequiredResponse,
+  SettleResponseSchema,
+  VerifyResponseSchema,
 } from "../index";
 import type { CantonPaymentInner } from "./payment";
 import type { CantonPaymentRequirements } from "./requirements";
@@ -161,26 +166,26 @@ describe("schema-first guards + parsers", () => {
 describe("generic (loose) vs concrete (canton-exact) verify request", () => {
   const cantonReq = {
     x402Version: 2,
-    paymentPayload: { x402Version: 2, scheme: "exact", network: requirements.network, payload: inner },
+    paymentPayload: { x402Version: 2, accepted: requirements, payload: inner },
     paymentRequirements: requirements,
   };
   // A different scheme: valid universal envelope, but the inner is NOT a CantonPaymentInner.
+  const bridgeRequirements = {
+    scheme: "batch-settlement-canton",
+    network: "eip155:1",
+    amount: "1000000",
+    payTo: "0xC0ffee",
+    maxTimeoutSeconds: 60,
+    asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  };
   const bridgeReq = {
     x402Version: 2,
     paymentPayload: {
       x402Version: 2,
-      scheme: "batch-settlement-canton",
-      network: "eip155:1",
+      accepted: bridgeRequirements,
       payload: { evmTxHash: "0xfeed", quoteId: "q-1" },
     },
-    paymentRequirements: {
-      scheme: "batch-settlement-canton",
-      network: "eip155:1",
-      amount: "1000000",
-      payTo: "0xC0ffee",
-      maxTimeoutSeconds: 60,
-      asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-    },
+    paymentRequirements: bridgeRequirements,
   };
 
   it("isX402Request accepts any scheme's envelope (scheme-agnostic dispatch gate)", () => {
@@ -188,13 +193,161 @@ describe("generic (loose) vs concrete (canton-exact) verify request", () => {
     expect(isX402Request(bridgeReq)).toBe(true);
   });
 
+  it("takes a payment's accepted only as a whole PaymentRequirements, generic or canton-exact", () => {
+    // The spec's accepted is the PaymentRequirements the payer chose. One that
+    // names only the scheme and network is not one.
+    for (const req of [cantonReq, bridgeReq]) {
+      const { scheme, network } = req.paymentPayload.accepted;
+      const partial = { ...req, paymentPayload: { ...req.paymentPayload, accepted: { scheme, network } } };
+      expect(isX402Request(partial)).toBe(false);
+      expect(isCantonVerifyRequest(partial)).toBe(false);
+    }
+    // Its extra is not checked: that is the per-scheme verifier's, against
+    // paymentRequirements.
+    const { extra: _omit, ...noExtra } = requirements;
+    const noExtraReq = { ...cantonReq, paymentPayload: { ...cantonReq.paymentPayload, accepted: noExtra } };
+    expect(isCantonVerifyRequest(noExtraReq)).toBe(true);
+  });
+
   it("isCantonVerifyRequest accepts canton-exact but rejects another scheme's inner", () => {
     expect(isCantonVerifyRequest(cantonReq)).toBe(true);
     expect(isCantonVerifyRequest(bridgeReq)).toBe(false);
   });
 
+  it("takes resource and extensions on the canton-exact payment, null included, and checks their shape", () => {
+    const pay = cantonReq.paymentPayload;
+    const ok = [
+      { ...pay, resource: null, extensions: null },
+      { ...pay, resource: { url: "https://m.example/r", description: null, tags: ["a"] }, extensions: { "x-ext": { info: {}, schema: {} } } },
+    ];
+    for (const paymentPayload of ok) {
+      expect(isCantonPaymentPayload(paymentPayload)).toBe(true);
+      expect(isCantonVerifyRequest({ ...cantonReq, paymentPayload })).toBe(true);
+    }
+    const bad = [
+      { ...pay, resource: { description: "no url" } },
+      { ...pay, resource: "https://m.example/r" },
+      { ...pay, resource: { url: "https://m.example/r", tags: "a" } },
+      { ...pay, extensions: "x" },
+    ];
+    for (const paymentPayload of bad) {
+      expect(isCantonPaymentPayload(paymentPayload)).toBe(false);
+      expect(isCantonVerifyRequest({ ...cantonReq, paymentPayload })).toBe(false);
+    }
+  });
+
   it("isX402Request rejects a malformed envelope", () => {
     expect(isX402Request({ x402Version: 2, paymentPayload: {}, paymentRequirements: {} })).toBe(false);
+    // The pre-spec payment envelope: the scheme and network at the top level, no accepted.
+    const legacy = { x402Version: 2, scheme: "exact", network: requirements.network, payload: inner };
+    expect(isX402Request({ ...cantonReq, paymentPayload: legacy })).toBe(false);
+    expect(isCantonVerifyRequest({ ...cantonReq, paymentPayload: legacy })).toBe(false);
     expect(isX402Request({ x402Version: 2 })).toBe(false);
+  });
+});
+
+describe("PaymentRequired (the 402)", () => {
+  const paymentRequired = {
+    x402Version: 2,
+    resource: { url: "https://merchant.example/r", description: "A report" },
+    accepts: [requirements],
+    error: "payment_required",
+  };
+  const valid = isCantonPaymentRequiredResponse;
+
+  it("takes the spec's object, with extensions present, absent or null", () => {
+    expect(valid(paymentRequired)).toBe(true);
+    expect(valid({ ...paymentRequired, extensions: { "x-ext": { info: {} } } })).toBe(true);
+    expect(valid({ ...paymentRequired, extensions: null })).toBe(true);
+    // ResourceInfo fields this SDK does not know pass, as other servers may send them.
+    expect(valid({ ...paymentRequired, resource: { url: "https://merchant.example/r", x: 1 } })).toBe(true);
+    const { error: _omit, ...noError } = paymentRequired;
+    expect(valid(noError)).toBe(true);
+  });
+
+  it("requires a top-level resource with a url, as the spec does", () => {
+    const { resource: _omit, ...noResource } = paymentRequired;
+    expect(valid(noResource)).toBe(false);
+    for (const resource of [null, "https://merchant.example/r", {}, { url: "" }, { description: "no url" }]) {
+      expect(valid({ ...paymentRequired, resource })).toBe(false);
+    }
+  });
+
+  it("refuses another x402Version, and an extensions that is not an object", () => {
+    expect(valid({ ...paymentRequired, x402Version: 1 })).toBe(false);
+    expect(valid({ ...paymentRequired, extensions: "x" })).toBe(false);
+  });
+});
+
+describe("reason codes", () => {
+  // The Canton exact scheme spec's Error Reason Codes table, as written there.
+  const schemeTable = [
+    "invalid_exact_canton_missing_proof",
+    "invalid_exact_canton_malformed_payload",
+    "invalid_exact_canton_signature_invalid",
+    "invalid_exact_canton_amount_mismatch",
+    "invalid_exact_canton_merchant_mismatch",
+    "invalid_exact_canton_instrument_id_mismatch",
+    "invalid_exact_canton_preapproval_missing",
+    "invalid_exact_canton_fee_payer_mismatch",
+    "invalid_exact_canton_expired",
+    "invalid_exact_canton_execute_before_too_far",
+    "invalid_exact_canton_insufficient_inputs",
+    "invalid_exact_canton_memo_mismatch",
+    "invalid_exact_canton_merchant_not_registered",
+    "invalid_exact_canton_self_payment",
+    "invalid_exact_canton_execute_failed",
+    "unexpected_canton_ledger_error",
+    "settlement_pending",
+    "invalid_network",
+    "unsupported_scheme",
+  ];
+  const verifies = (invalidReason: string) => v.is(VerifyResponseSchema, { isValid: false, invalidReason });
+  const settles = (errorReason: string) => v.is(SettleResponseSchema, { success: false, errorReason });
+
+  it("takes every code in the scheme spec's table, on verify and on settle", () => {
+    for (const code of schemeTable) {
+      expect(verifies(code), code).toBe(true);
+      expect(settles(code), code).toBe(true);
+    }
+  });
+
+  it("still takes the older codes, so an older facilitator's answer parses", () => {
+    for (const code of [
+      "scheme_mismatch",
+      "network_mismatch",
+      "requirements_hash_mismatch",
+      "bad_fingerprint",
+      "bad_signature",
+      "prepared_transaction_hash_mismatch",
+      "invalid_prepared_transaction_structure",
+      "nonce_replayed",
+      "missing_public_key",
+      "transfer_mismatch",
+      "transfer_expired",
+      "internal_error",
+    ]) {
+      expect(verifies(code), code).toBe(true);
+    }
+    for (const code of [
+      "bad_request",
+      "unauthorized",
+      "scheme_mismatch",
+      "network_mismatch",
+      "requirements_hash_mismatch",
+      "bad_fingerprint",
+      "bad_signature",
+      "nonce_replayed",
+      "execution_failed",
+      "timeout",
+      "facilitator_error",
+    ]) {
+      expect(settles(code), code).toBe(true);
+    }
+  });
+
+  it("refuses a code neither spec nor this SDK defines", () => {
+    expect(verifies("invalid_exact_evm_payload_signature")).toBe(false);
+    expect(settles("made_up")).toBe(false);
   });
 });

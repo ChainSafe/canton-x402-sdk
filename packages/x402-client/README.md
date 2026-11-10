@@ -20,12 +20,9 @@ const facilitator = new FacilitatorClient("https://x402.example.com", {
   apiKey: process.env.FACILITATOR_API_KEY!,
 });
 
-// Is a payment valid against its requirements?
-const result = await facilitator.verify({
-  x402Version: 2,
-  paymentPayload,
-  paymentRequirements,
-});
+// Is a payment valid against its requirements? These are normally the payment's
+// own `accepted`, once checked against your terms (the express middleware does).
+const result = await facilitator.verify(paymentPayload, paymentRequirements);
 
 // What does this facilitator settle? The (scheme, network) kinds, and in
 // `kinds[].extra` the synchronizer, instruments and transfer methods a merchant
@@ -35,11 +32,7 @@ const result = await facilitator.verify({
 const kinds = await facilitator.supported();
 
 // Settle a verified payment on-ledger.
-const settled = await facilitator.settle({
-  x402Version: 2,
-  paymentPayload,
-  paymentRequirements,
-});
+const settled = await facilitator.settle(paymentPayload, paymentRequirements);
 ```
 
 `paymentPayload` / `paymentRequirements` are the wire types from
