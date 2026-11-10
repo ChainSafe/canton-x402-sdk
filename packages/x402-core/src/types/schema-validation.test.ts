@@ -14,7 +14,6 @@ import type { CantonPaymentRequirements } from "./requirements";
 
 const inner: CantonPaymentInner = {
   assetTransferMethod: "transfer-factory",
-  payer: "alice::1220beef",
   preparedTransaction: "cHJlcGFyZWQ=",
   preparedTxHash: "deadbeef",
   signature: "cafe",
@@ -65,7 +64,7 @@ describe("schema-first guards + parsers", () => {
   });
 
   it("rejects wrong field types", () => {
-    expect(isCantonPaymentInner({ ...inner, payer: 42 })).toBe(false);
+    expect(isCantonPaymentInner({ ...inner, signature: 42 })).toBe(false);
     expect(isCantonPaymentRequirements({ ...requirements, extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet" } } })).toBe(false);
   });
 

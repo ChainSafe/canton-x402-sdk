@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import express, { type Express } from "express";
 import request from "supertest";
 import {
+  decodePayloadTransfer,
   encodePaymentHeader,
   isCantonPaymentRequirements,
   type CantonPaymentPayload,
@@ -10,6 +11,13 @@ import {
 } from "@chainsafe/x402-core";
 import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired, type PaymentRequiredOptions } from "./middleware";
+
+// The real decoder, spied on so a test can stand in a decodable transfer without
+// building a prepared transaction: the fixture's `preparedTransaction` is not one.
+vi.mock("@chainsafe/x402-core", async (importOriginal) => {
+  const core = await importOriginal<typeof import("@chainsafe/x402-core")>();
+  return { ...core, decodePayloadTransfer: vi.fn(core.decodePayloadTransfer) };
+});
 
 const baseOptions: PaymentRequiredOptions = {
   facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
@@ -54,7 +62,7 @@ const ECHOED_EXTRA = {
 };
 
 /** Build an `X-PAYMENT` header echoing acceptable requirements. */
-function paymentHeader(overrides: Record<string, unknown> = {}): string {
+function paymentHeader(overrides: Record<string, unknown> = {}, inner: Record<string, unknown> = {}): string {
   const requirements = {
     scheme: "exact",
     network: "canton:x",
@@ -73,14 +81,14 @@ function paymentHeader(overrides: Record<string, unknown> = {}): string {
     network: "canton:x",
     payload: {
       assetTransferMethod: "transfer-factory",
-      payer: "alice::x",
       preparedTransaction: "b",
       preparedTxHash: "h",
       signature: "s",
       publicKey: "pk",
       hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
+      ...inner,
     },
-  } as CantonPaymentPayload;
+  } as unknown as CantonPaymentPayload;
   return encodePaymentHeader(payload, requirements);
 }
 
@@ -314,18 +322,20 @@ describe("paymentRequired", () => {
     it("sees the payload and the echoed requirements, and refuses before settle", async () => {
       // Before settle is the point: a refusal after it would have moved funds.
       const fetchMock = stubFacilitator();
-      let seen: { payer?: string } = {};
+      // Reads the payload's key rather than a payer: the payload no longer names
+      // one. What the test is for is that BOTH halves arrive, before settle.
+      let seen: { publicKey?: string; payTo?: string } = {};
       const app = makeApp({
         settle: true,
-        checkPayment: ({ payload }) => {
-          seen = { payer: payload.payload.payer };
+        checkPayment: ({ payload, requirements }) => {
+          seen = { publicKey: payload.payload.publicKey, payTo: requirements.payTo };
           return "policy_order_closed";
         },
       });
       const res = await request(app).get("/paid").set("X-PAYMENT", paymentHeader());
       expect(res.status).toBe(402);
       expect(res.body.error).toBe("policy_order_closed");
-      expect(seen.payer).toBe("alice::x");
+      expect(seen).toEqual({ publicKey: "pk", payTo: "merchant::x" });
       for (const [url] of fetchMock.mock.calls) expect(String(url)).not.toContain("/v2/settle");
     });
 
@@ -419,6 +429,66 @@ describe("paymentRequired", () => {
     const calls = fetchMock.mock.calls.map((c) => String(c[0]));
     expect(calls.some((u) => u.includes("/v2/verify"))).toBe(true);
     expect(calls.some((u) => u.includes("/v2/settle"))).toBe(false);
+  });
+
+  it("takes the facilitator's verify.payer when there is one, without decoding the payload", async () => {
+    stubFacilitator(); // verify answers payer "alice::x"
+    const decode = vi.mocked(decodePayloadTransfer);
+    const { decodePayloadTransfer: real } = await vi.importActual<typeof import("@chainsafe/x402-core")>("@chainsafe/x402-core");
+    decode.mockClear();
+    decode.mockImplementation(() => ({
+      sender: "bob::1220",
+      receiver: "merchant::x",
+      amount: "0.05",
+      instrumentId: { id: "Amulet", admin: "DSO::x" },
+    }));
+    try {
+      const res = await request(makeApp()).get("/paid").set("X-PAYMENT", paymentHeader());
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ ok: true, payer: "alice::x" });
+      expect(decode).not.toHaveBeenCalled();
+    } finally {
+      decode.mockImplementation(real);
+    }
+  });
+
+  it("reads the payer from the signed transfer when verify leaves it out", async () => {
+    // `payer` is optional in a verify response, and the payload names none.
+    stubFacilitator({ verify: { isValid: true } });
+    const decode = vi.mocked(decodePayloadTransfer);
+    decode.mockClear();
+    decode.mockReturnValueOnce({
+      sender: "bob::1220",
+      receiver: "merchant::x",
+      amount: "0.05",
+      instrumentId: { id: "Amulet", admin: "DSO::x" },
+    });
+    const res = await request(makeApp()).get("/paid").set("X-PAYMENT", paymentHeader());
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, payer: "bob::1220" });
+    // What gets decoded is the payload's own preparedTransaction.
+    expect(decode).toHaveBeenCalledWith("b");
+  });
+
+  it("refuses before settling when verify names no payer and the transfer does not decode", async () => {
+    const fetchMock = stubFacilitator({ verify: { isValid: true } });
+    const decode = vi.mocked(decodePayloadTransfer);
+    decode.mockClear();
+    const res = await request(makeApp({ settle: true })).get("/paid").set("X-PAYMENT", paymentHeader());
+    expect(res.status).toBe(402);
+    expect(res.body).toMatchObject({ error: "transfer_mismatch", details: "undecodable" });
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/v2/settle"))).toBe(false);
+    // The real decoder ran on the payload's transaction and found no transfer in it.
+    expect(decode).toHaveBeenCalledWith("b");
+    expect(decode.mock.results[0]).toEqual({ type: "return", value: null });
+  });
+
+  it("refuses, rather than failing with a 500, a preparedTransaction that is not a string", async () => {
+    // The header codec checks only that the inner payload is an object.
+    stubFacilitator({ verify: { isValid: true } });
+    const res = await request(makeApp()).get("/paid").set("X-PAYMENT", paymentHeader({}, { preparedTransaction: 123 }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("transfer_mismatch");
   });
 
   it("responds 402 with the reason when verify is invalid", async () => {

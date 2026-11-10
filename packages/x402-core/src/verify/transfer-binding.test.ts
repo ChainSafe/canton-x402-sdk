@@ -85,26 +85,25 @@ describe("findTransferMismatch", () => {
   };
 
   it("accepts a transfer that pays exactly the quoted amount", () => {
-    expect(findTransferMismatch(ok, requirements, PAYER)).toBeNull();
-    expect(findTransferMismatch({ ...ok, amount: "0.0100" }, requirements, PAYER)).toBeNull();
+    expect(findTransferMismatch(ok, requirements)).toBeNull();
+    expect(findTransferMismatch({ ...ok, amount: "0.0100" }, requirements)).toBeNull();
   });
 
   it("rejects an overpayment", () => {
     // Previously allowed. Rule 4: the transfer amount MUST EQUAL the quote.
-    expect(findTransferMismatch({ ...ok, amount: "0.02" }, requirements, PAYER)).toBe("amount");
+    expect(findTransferMismatch({ ...ok, amount: "0.02" }, requirements)).toBe("amount");
   });
 
-  it("rejects wrong sender / receiver / instrument / amount", () => {
-    expect(findTransferMismatch({ ...ok, sender: "mallory::1220bad" }, requirements, PAYER)).toBe("sender");
-    expect(findTransferMismatch({ ...ok, receiver: "mallory::1220bad" }, requirements, PAYER)).toBe("receiver");
-    expect(findTransferMismatch({ ...ok, instrumentId: { id: "USDC", admin: "DSO::1220be58c29e" } }, requirements, PAYER)).toBe("instrument");
-    expect(findTransferMismatch({ ...ok, instrumentId: { id: "Amulet", admin: "evil::1220" } }, requirements, PAYER)).toBe("instrument");
-    expect(findTransferMismatch({ ...ok, amount: "0.009" }, requirements, PAYER)).toBe("amount");
+  it("rejects wrong receiver / instrument / amount", () => {
+    expect(findTransferMismatch({ ...ok, receiver: "mallory::1220bad" }, requirements)).toBe("receiver");
+    expect(findTransferMismatch({ ...ok, instrumentId: { id: "USDC", admin: "DSO::1220be58c29e" } }, requirements)).toBe("instrument");
+    expect(findTransferMismatch({ ...ok, instrumentId: { id: "Amulet", admin: "evil::1220" } }, requirements)).toBe("instrument");
+    expect(findTransferMismatch({ ...ok, amount: "0.009" }, requirements)).toBe("amount");
   });
 
   it("rejects a malformed transfer amount rather than reading it as zero", () => {
     for (const bad of ["abc", "-1", "1e3", "0.30000000000", ""]) {
-      expect(findTransferMismatch({ ...ok, amount: bad }, requirements, PAYER)).toBe("amount");
+      expect(findTransferMismatch({ ...ok, amount: bad }, requirements)).toBe("amount");
     }
   });
 
@@ -112,11 +111,12 @@ describe("findTransferMismatch", () => {
     // "0.01" is a valid ledger Decimal but not a valid quote. Reading it as a
     // quote would compare 1e8 atomic against 0.01 and never match.
     const decimalQuote = { ...requirements, amount: "0.01" };
-    expect(findTransferMismatch(ok, decimalQuote, PAYER)).toBe("amount");
+    expect(findTransferMismatch(ok, decimalQuote)).toBe("amount");
   });
 
-  it("checks sender against the payload payer, not the transfer's own claim", () => {
-    // Even a well-formed transfer must originate from the authenticated payer.
-    expect(findTransferMismatch(ok, requirements, "someoneelse::1220")).toBe("sender");
+  it("has no sender to check: the sender is the payer (spec Rule 8)", () => {
+    // The payload names no payer, so any sender is accepted here; the ledger
+    // checks at execute that the sender signed.
+    expect(findTransferMismatch({ ...ok, sender: "someoneelse::1220" }, requirements)).toBeNull();
   });
 });

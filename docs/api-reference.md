@@ -94,7 +94,6 @@ guarantee.
     "network": "canton:devnet",
     "payload": {
       "assetTransferMethod": "transfer-factory",
-      "payer": "buyer::1220…",
       "preparedTransaction": "<base64 of the gzipped transaction from interactive-submission/prepare>",
       "preparedTxHash": "<lower-case hex of the 32-byte hash that was signed>",
       "signature": "<base64 Ed25519 signature over preparedTxHash>",
@@ -125,7 +124,7 @@ guarantee.
 | Field                                       | Rule                                                                                                                                                                                                                                                                           |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `x402Version`                               | Must be exactly `2`, at the top level and inside `paymentPayload`.                                                                                                                                                                                                             |
-| `paymentPayload.payload`                    | The seven fields above, all required except `hashingSchemeVersion`, which means `HASHING_SCHEME_VERSION_V2` when absent. `assetTransferMethod` must be `"transfer-factory"`, as in the requirements' `extra`; a payload without it or with another value fails the shape check (`internal_error`). `signature` is canonical base64 of the 64-byte signature and `preparedTxHash` is 64 lower-case hex digits; an empty one fails the payload's shape check (`internal_error`), and any other encoding is `bad_signature`. `preparedTransaction` is base64 of exactly one gzip member with no optional header fields, at most 8 KiB compressed and 64 KiB decompressed; anything else is `transfer_mismatch` with detail `undecodable`. `publicKey` replaced the older `keyFingerprint` — the facilitator derives the fingerprint from the key and matches it against the payer party's `::` suffix. The signature covers the prepared transaction, whose sender, receiver, instrument and amount the facilitator checks against `paymentRequirements`: that is what binds the payload to them. |
+| `paymentPayload.payload`                    | The six fields above, all required except `hashingSchemeVersion`, which means `HASHING_SCHEME_VERSION_V2` when absent. `assetTransferMethod` must be `"transfer-factory"`, as in the requirements' `extra`; a payload without it or with another value fails the shape check (`internal_error`). `signature` is canonical base64 of the 64-byte signature and `preparedTxHash` is 64 lower-case hex digits; an empty one fails the payload's shape check (`internal_error`), and any other encoding is `bad_signature`. `preparedTransaction` is base64 of exactly one gzip member with no optional header fields, at most 8 KiB compressed and 64 KiB decompressed; anything else is `transfer_mismatch` with detail `undecodable`. `publicKey` replaced the older `keyFingerprint` — the facilitator derives the fingerprint from the key and matches it against the `::` suffix of the transfer's sender, which is the payer: the payload names none. The signature covers the prepared transaction, whose receiver, instrument and amount the facilitator checks against `paymentRequirements`: that is what binds the payload to them. |
 | `amount`                                    | Integer string of atomic units — 1 CC = 1e10, so `"500000000"` is 0.05 CC. **Exact**, not a floor: the transfer must move this amount, and an overpayment is rejected.                                                                                                       |
 | `payTo`                                     | Must be a party your API key owns. Otherwise verify answers `transfer_mismatch` and settle answers `unauthorized`.                                                                                                                                                             |
 | `resource`                                  | Required — the URL being paid for.                                                                                                                                                                                                                                             |
@@ -179,7 +178,6 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
     "network": "canton:devnet",
     "payload": {
       "assetTransferMethod": "transfer-factory",
-      "payer": "buyer::1220…",
       "preparedTransaction": "…",
       "preparedTxHash": "…",
       "signature": "…",
@@ -235,7 +233,6 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
     "network": "canton:devnet",
     "payload": {
       "assetTransferMethod": "transfer-factory",
-      "payer": "buyer::1220…",
       "preparedTransaction": "<base64 of the gzipped transaction from interactive-submission/prepare>",
       "preparedTxHash": "<lower-case hex of the 32-byte hash that was signed>",
       "signature": "<base64 Ed25519 signature over preparedTxHash>",

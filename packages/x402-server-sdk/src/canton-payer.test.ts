@@ -86,10 +86,10 @@ describe("CantonX402Payer.authorize", () => {
 
     expect(result).toMatchObject({ x402Version: 2, scheme: "exact", network: NETWORK });
     expect(inner.assetTransferMethod).toBe("transfer-factory");
-    expect(inner.payer).toBe(key.partyId);
     expect(inner.publicKey).toBe(publicKeyB64);
-    // The spec's payload has no requirementsHash, and the payer no longer sends one.
-    expect(inner).not.toHaveProperty("requirementsHash");
+    // The spec's payload names no payer (it is the transfer's sender, Rule 8),
+    // and has no requirementsHash.
+    for (const field of ["payer", "requirementsHash"]) expect(inner).not.toHaveProperty(field);
     // prepare's protobuf goes out gzipped, and gunzips back to the same bytes.
     expect(Buffer.from(inner.preparedTransaction, "base64").subarray(0, 2)).toEqual(Buffer.from([0x1f, 0x8b]));
     expect(gunzipPreparedTransaction(inner.preparedTransaction)).toEqual(
