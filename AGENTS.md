@@ -37,7 +37,7 @@ The x402 SDK — a **pnpm monorepo** of published TypeScript packages.
   - CI runs build → typecheck → lint → test (`.github/workflows/ci.yml`).
 - **Release:** Changesets. **Every PR touching `packages/**` must carry a changeset** (`pnpm changeset`, or `pnpm changeset --empty` for no-release changes) — CI enforces it. Packages publish via `pnpm changeset publish` on merge of the Version PR.
 - **Packages:** `@chainsafe/x402-{core,client,express,server-sdk}`.
-  - `x402-core` — shared types, verify, X-PAYMENT codec.
+  - `x402-core` — shared types, verify, payment header codec.
   - `x402-client` — `FacilitatorClient` (verify/settle/supported).
   - `x402-express` — merchant middleware (`paymentRequired`).
   - `x402-server-sdk` — payer SDK (`CantonX402Payer`, `createX402Fetch`).

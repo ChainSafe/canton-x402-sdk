@@ -32,8 +32,10 @@ import { PaymentRejection, respondToFailure } from "./response.js";
  * second is the generic one, for a route gated on another scheme via
  * `PaymentRequiredOptions.scheme`.
  *
- * - No/invalid payment → `402` with `{ x402Version, accepts: [...] }`, one
- *   entry per way to pay, each with its own freshly minted reference.
+ * - No/invalid payment in `PAYMENT-SIGNATURE` (or the older `X-PAYMENT`) →
+ *   `402` with the spec's `PaymentRequired`, `{ x402Version, resource, accepts }`,
+ *   in the `PAYMENT-REQUIRED` header and as the body. One `accepts[]` entry per
+ *   way to pay, each with its own freshly minted reference.
  * - Valid payment → verify (and optionally settle) via the facilitator, then
  *   attach `req.x402` and call `next()`.
  *
@@ -77,38 +79,40 @@ export function paymentRequired<
     // terms to advertise. The failure path reuses whatever was built here.
     let quotes: Array<Quote<TRequirements>> | undefined;
     try {
-      const header = req.header("X-PAYMENT");
+      // The spec's name first. X-PAYMENT is the name this SDK used before, and
+      // is still read for a payment of this shape sent under it. A 0.1.x payer
+      // sends the older { payment, requirements } shape, which is refused
+      // either way.
+      const header = req.header("PAYMENT-SIGNATURE") || req.header("X-PAYMENT");
       // No payment yet. Nothing is built for the terms' own sake — the
       // challenge below is what gets built, references and all.
       if (!header) throw new PaymentRejection("payment_required");
 
-      // The payment carries the requirements it was built against; verify
-      // against those, after checking them against merchant policy. Nothing in
-      // the payload binds them on its own — what binds is the signed transfer
-      // the verifier decodes and compares to them.
-      let decoded: {
-        payload: X402PaymentPayload<unknown>;
-        requirements: X402PaymentRequirements<unknown>;
-      };
+      // The payment carries the requirements it was built against as
+      // `accepted`, the accepts[] entry the payer chose. Verify against those,
+      // after checking them against merchant policy. Nothing in the payment
+      // binds them on its own — what binds is the signed transfer the verifier
+      // decodes and compares to them.
+      let decoded: X402PaymentPayload<unknown>;
       try {
         decoded = decodePaymentHeader(header);
       } catch {
         throw new PaymentRejection("bad_payload");
       }
 
-      // The header is only ENVELOPE-validated on decode, and the envelope is a
-      // looseObject: `payload.payload` is `{}` as far as it is concerned, and
-      // `extra` is not required at all. decodePaymentHeader types the result
-      // optimistically; these guards are the only things that have checked it.
-      // Narrow before reading a field, or attacker-controlled input picks our
-      // status code by throwing a TypeError into the 500 path.
-      if (!scheme.acceptsPayload(decoded.payload))
-        throw new PaymentRejection("policy_payload_invalid");
-      if (!scheme.acceptsRequirements(decoded.requirements)) {
+      // The codec checks the envelope only: `payload.payload` is `{}` as far as
+      // it is concerned, `accepted` is checked for the fields every scheme's
+      // requirements share, and neither `extra` nor `resource` is checked at
+      // all. It types the result optimistically; these guards are the only
+      // things that have looked. Narrow before reading a field, or
+      // attacker-controlled input picks our status code by throwing a
+      // TypeError into the 500 path.
+      if (!scheme.acceptsPayload(decoded)) throw new PaymentRejection("policy_payload_invalid");
+      if (!scheme.acceptsRequirements(decoded.accepted)) {
         throw new PaymentRejection("policy_requirements_invalid");
       }
-      const payload = decoded.payload;
-      const requirements = decoded.requirements;
+      const payload = decoded;
+      const requirements = decoded.accepted;
 
       quotes = await buildQuotes(req, options, scheme);
       const refusal = selectQuote(requirements, quotes, rules);
@@ -129,7 +133,16 @@ export function paymentRequired<
       // response, so ask the scheme to read its own when it is left out. Before
       // settling, so a payment is never captured for a request we then fail.
       const payer = verify.payer ?? scheme.payerOf(payload);
-      if (!payer) throw new PaymentRejection("transfer_mismatch", "undecodable");
+      if (!payer) {
+        // Worded as the scheme's verifier words an undecodable transfer, with
+        // the protocol-level reason kept in `extensions` for a reader that
+        // knows that one and not the scheme's.
+        throw new PaymentRejection(
+          scheme.unreadablePayerReason ?? "transfer_mismatch",
+          "undecodable",
+          { reason: "transfer_mismatch", detail: "undecodable" },
+        );
+      }
 
       // The merchant's own say, on a payment the facilitator has vouched for.
       // After verify so the echoed requirements are bound to the signed

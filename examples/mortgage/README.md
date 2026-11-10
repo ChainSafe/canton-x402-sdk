@@ -23,7 +23,7 @@ UI  ──apply──▶  mortgage-backend ──GET /v1/credit-score──▶  
                        │                                        │ 402  (0.05 CC)
                        │◀───────────────── 402 ─────────────────┘
                        │ CantonX402Payer signs a 0.05 CC transfer
-                       │──── retry with X-PAYMENT header ──────▶ verify + settle (facilitator)
+                       │──── retry with PAYMENT-SIGNATURE ─────▶ verify + settle (facilitator)
                        │◀──── 200 report + X-PAYMENT-RESPONSE ───┘
                        │ apply lending policy (score / LTV)
 UI ◀── decision + on-chain receipt (updateId) ──┘
@@ -118,12 +118,14 @@ lending policy (`APPROVE_MIN_SCORE`, `MAX_LOAN`, `MAX_LTV`).
 
 ## Notes / gotchas (learned running this on LocalNet)
 
-- **Large `X-PAYMENT` header.** The Canton payment payload (the gzipped prepared tx with its
+- **Large `PAYMENT-SIGNATURE` header.** The Canton payment payload (the gzipped prepared tx with its
   disclosed contracts) makes the header about 10 KB, much of Node's default 16 KB limit for
   all headers together — so a merchant server should raise `maxHeaderSize` or a paid request
   with a few more headers is rejected with **431**. The
   bureau does this via `http.createServer({ maxHeaderSize })` (see `credit-bureau/src/server.ts`).
 - **x402-core version alignment.** The payer and the facilitator must speak the same
   `x402-core` payload contract. A facilitator built against an older `x402-core` rejects a
-  newer payload with `scheme_mismatch` at `/v2/verify`. Ensure the deployed facilitator runs
-  an `x402-core` compatible with the SDK version you install.
+  newer payload at `/v2/verify`: the payment's spec envelope (`accepted` in place of a
+  top-level scheme and network) fails its request check with a `400`, which the middleware
+  answers as a `502` `facilitator_error`. Ensure the deployed facilitator runs an
+  `x402-core` compatible with the SDK version you install.

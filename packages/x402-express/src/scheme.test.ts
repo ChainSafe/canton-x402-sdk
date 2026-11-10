@@ -96,12 +96,11 @@ function voucherHeader(
   } as unknown as VoucherRequirements;
   const payload = {
     x402Version: 2,
-    scheme: "voucher",
-    network: "vouchers:test",
+    accepted: requirements,
     payload: { code: "VCH-123" },
     ...envelope,
-  } as VoucherPayload;
-  return encodePaymentHeader(payload as never, requirements as never);
+  } as unknown as VoucherPayload;
+  return encodePaymentHeader(payload as never);
 }
 
 function voucherApp(over: Record<string, unknown> = {}): Express {
@@ -158,7 +157,7 @@ describe("paymentRequired with a non-canton scheme", () => {
 
   it("verifies a payment against the scheme's own extra", async () => {
     const fetchMock = stubFacilitator();
-    const res = await request(voucherApp()).get("/paid").set("X-PAYMENT", voucherHeader());
+    const res = await request(voucherApp()).get("/paid").set("PAYMENT-SIGNATURE", voucherHeader());
     expect(res.status).toBe(200);
     expect(res.body.payer).toBe("buyer::1");
     // The envelope the facilitator saw is the scheme's, unaltered.
@@ -171,7 +170,7 @@ describe("paymentRequired with a non-canton scheme", () => {
     stubFacilitator();
     const res = await request(voucherApp())
       .get("/paid")
-      .set("X-PAYMENT", voucherHeader({}, { book: "spring-2025" }));
+      .set("PAYMENT-SIGNATURE", voucherHeader({}, { book: "spring-2025" }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_wrong_book");
   });
@@ -181,7 +180,7 @@ describe("paymentRequired with a non-canton scheme", () => {
     stubFacilitator();
     const res = await request(voucherApp())
       .get("/paid")
-      .set("X-PAYMENT", voucherHeader({ amount: "1" }));
+      .set("PAYMENT-SIGNATURE", voucherHeader({ amount: "1" }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_underpriced");
   });
@@ -203,7 +202,7 @@ describe("paymentRequired with a non-canton scheme", () => {
 
     const paid = await request(app)
       .get("/paid")
-      .set("X-PAYMENT", voucherHeader({}, { book: "autumn-2026", ticket: "ticket-0" }));
+      .set("PAYMENT-SIGNATURE", voucherHeader({}, { book: "autumn-2026", ticket: "ticket-0" }));
     expect(paid.status).toBe(200);
     // Same discipline as canton's memo, with no canton code involved.
     expect(issued).toEqual(["ticket-0"]);
@@ -214,7 +213,7 @@ describe("paymentRequired with a non-canton scheme", () => {
     // how any scheme recovers it — canton decodes a transfer, this one reads a
     // field, and the flow is the same either way.
     stubFacilitator({ verify: { isValid: true } });
-    const res = await request(voucherApp()).get("/paid").set("X-PAYMENT", voucherHeader());
+    const res = await request(voucherApp()).get("/paid").set("PAYMENT-SIGNATURE", voucherHeader());
     expect(res.status).toBe(200);
     expect(res.body.payer).toBe("holder-of-VCH-123");
   });
@@ -223,7 +222,7 @@ describe("paymentRequired with a non-canton scheme", () => {
     const fetchMock = stubFacilitator({ verify: { isValid: true } });
     const res = await request(voucherApp())
       .get("/paid")
-      .set("X-PAYMENT", voucherHeader({}, undefined, { payload: { code: "NOT-A-VOUCHER" } }));
+      .set("PAYMENT-SIGNATURE", voucherHeader({}, undefined, { payload: { code: "NOT-A-VOUCHER" } }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("transfer_mismatch");
     // Refused before settle, so nothing was captured for a request we then failed.
@@ -232,14 +231,9 @@ describe("paymentRequired with a non-canton scheme", () => {
 
   it("refuses a payload the scheme does not accept, without asking the facilitator", async () => {
     const fetchMock = stubFacilitator();
-    const header = encodePaymentHeader(
-      {
-        x402Version: 2,
-        scheme: "voucher",
-        network: "vouchers:test",
-        payload: { notACode: true },
-      } as never,
-      {
+    const header = encodePaymentHeader({
+      x402Version: 2,
+      accepted: {
         scheme: "voucher",
         network: "vouchers:test",
         amount: "10",
@@ -248,9 +242,10 @@ describe("paymentRequired with a non-canton scheme", () => {
         payTo: "shop::1",
         resource: "https://shop.example/paid",
         maxTimeoutSeconds: 60,
-      } as never,
-    );
-    const res = await request(voucherApp()).get("/paid").set("X-PAYMENT", header);
+      },
+      payload: { notACode: true },
+    } as never);
+    const res = await request(voucherApp()).get("/paid").set("PAYMENT-SIGNATURE", header);
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_payload_invalid");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -260,7 +255,7 @@ describe("paymentRequired with a non-canton scheme", () => {
     stubFacilitator();
     const res = await request(voucherApp())
       .get("/paid")
-      .set("X-PAYMENT", voucherHeader({}, { noBook: 1 }));
+      .set("PAYMENT-SIGNATURE", voucherHeader({}, { noBook: 1 }));
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("policy_requirements_invalid");
   });

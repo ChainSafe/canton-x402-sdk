@@ -35,10 +35,6 @@ export {
   type SharedTerms,
 } from "./scheme.js";
 export { cantonExact, type CantonRequirementsSpec } from "./schemes/canton-exact.js";
-// The X-PAYMENT codec lives in @chainsafe/x402-core (shared by payer + merchant +
+// The payment header codec lives in @chainsafe/x402-core (shared by payer + merchant +
 // facilitator). Re-exported here for convenience.
-export {
-  decodePaymentHeader,
-  encodePaymentHeader,
-  type DecodedPaymentHeader,
-} from "@chainsafe/x402-core";
+export { decodePaymentHeader, encodePaymentHeader } from "@chainsafe/x402-core";

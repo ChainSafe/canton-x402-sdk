@@ -147,11 +147,16 @@ export interface PaymentRequiredOptions<
 export interface PaymentRejectionInfo {
   /** HTTP status sent: 402 (payment rejected), 502 (facilitator error), 500 (middleware error). */
   status: 402 | 502 | 500;
-  /** The `error` code in the response body (e.g. `bad_signature`, `facilitator_error`). */
+  /** The `error` code in the response body (e.g. `invalid_exact_canton_signature_invalid`, `facilitator_error`). */
   reason: string;
   /** The `details` string in the response body, when there is one. */
   details?: string;
-  /** The facilitator's full `extensions` for a verify rejection (may hold more than `details`). */
+  /**
+   * For a verify rejection, the facilitator's full `extensions` (may hold more
+   * than `details`, and `reason` holds the code it answered with before the
+   * spec's). The middleware's own refusal of a transfer it cannot decode sets
+   * one in the same shape.
+   */
   extensions?: Record<string, unknown>;
   /** The underlying error, for a 502 or 500. */
   error?: unknown;

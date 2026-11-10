@@ -79,8 +79,8 @@ add.
 Two consequences of that table: `extra.executeBeforeSeconds` is now compared (it
 reaches the ledger as the transfer's `executeBefore`, so a payer echoing its own
 value was choosing how long the quote stayed settleable — refused as
-`policy_execute_before`), and `description` / `maxTimeoutSeconds` are
-deliberately not, since neither reaches the ledger.
+`policy_execute_before`), and `description` is deliberately not, since it does
+not reach the ledger.
 
 ### The flow is no longer canton-shaped
 
@@ -101,6 +101,14 @@ merchant using it: `paymentRequired` keeps a non-generic overload, so an inline
 requirements object is contextually typed against the concrete canton shapes
 exactly as before. `RequirementsSpec` is now an alias of
 `CantonRequirementsSpec`.
+
+**A scheme names its own error code for an unreadable payer.** When neither the
+facilitator nor the adapter can say who paid, the refusal carries
+`SchemeAdapter.unreadablePayerReason` — canton-exact's
+`invalid_exact_canton_malformed_payload` — rather than a canton code on every
+scheme. The protocol-level `transfer_mismatch` stays in `extensions.reason` for
+a reader that knows that one and not the scheme's, and is the default for an
+adapter that names none.
 
 New exports: `SchemeAdapter`, `SchemeQuote`, `SchemeContext`,
 `BaseRequirementsSpec`, `FieldRule`, `RuleTable`, `X402RequestState`,

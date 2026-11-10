@@ -45,13 +45,12 @@ const COMMON_RULES: Record<
   },
   // Replaced per scheme in rulesFor().
   extra: { compare: "skip", why: "filled in from the scheme adapter" },
-  // Neither reaches the ledger, so neither changes what settles. Left
-  // uncompared so a payer library that normalises or drops them still pays.
+  // Does not reach the ledger, so it does not change what settles. Left
+  // uncompared so a payer library that normalises or drops it still pays.
   description: { compare: "skip", why: "informational" },
-  maxTimeoutSeconds: {
-    compare: "skip",
-    why: "advisory; nothing refuses a payment for exceeding it",
-  },
+  // The facilitator holds a payment for at most this long; the payer does not
+  // get to stretch it.
+  maxTimeoutSeconds: { compare: "equal", reason: "policy_timeout" },
 };
 
 /** The common rules with this scheme's `extra` rules spliced in. */

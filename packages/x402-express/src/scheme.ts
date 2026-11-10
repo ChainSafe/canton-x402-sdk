@@ -47,8 +47,9 @@ export interface SharedTerms {
   /** Human description. Default: `Access to <path>`. */
   description?: Resolvable<string>;
   /**
-   * Seconds the client has to complete payment. Default 60. Advisory: nothing
-   * refuses a payment for exceeding it.
+   * Seconds the client has to complete payment. Default 60. Compared: the
+   * facilitator holds a payment for at most this long, and a payer echoing a
+   * longer one is refused with `policy_timeout`.
    */
   maxTimeoutSeconds?: Resolvable<number>;
 }
@@ -213,6 +214,14 @@ export interface SchemeAdapter<
    * transaction and takes its sender. `undefined` when it cannot be read.
    */
   payerOf(payload: TPayload): string | undefined;
+  /**
+   * The error code to refuse with when neither the facilitator nor
+   * {@link SchemeAdapter.payerOf} can name the payer. The scheme's, because the
+   * spec's codes are per-scheme: canton-exact answers
+   * `invalid_exact_canton_malformed_payload`, and another scheme has its own.
+   * Defaults to the protocol-level `transfer_mismatch`.
+   */
+  unreadablePayerReason?: string;
   /**
    * How each field of the scheme's `extra` is held against the merchant's.
    * Key it off the scheme's own schema so the table cannot drift from the shape

@@ -79,11 +79,13 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
 
 6. **Raise your server's max header size**
 
-   The `X-PAYMENT` header runs to about 10 KB for a typical transfer — much of
-   Node's ~16 KB default, which covers all of a request's headers together — so
-   create the server with a larger `maxHeaderSize`, or a paid retry with a few
-   more headers dies with `431 Request Header Fields Too Large` before your
-   handler ever runs.
+   The `PAYMENT-SIGNATURE` header runs to about 10 KB for a typical transfer —
+   much of Node's ~16 KB default, which covers all of a request's headers
+   together — so create the server with a larger `maxHeaderSize`, or a paid
+   retry with a few more headers dies with `431 Request Header Fields Too Large`
+   before your handler ever runs. A proxy in front needs room for it too:
+   nginx's default `large_client_header_buffers 4 8k` refuses any single header
+   over 8 KiB.
 
 ### Putting it together
 

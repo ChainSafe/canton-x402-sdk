@@ -62,37 +62,49 @@ const { paymentRequired } = require("@chainsafe/x402-express");
 
 ## How it works
 
-1. **Unpaid request** (no/invalid `X-PAYMENT`) → `402` with
-   `{ x402Version: 2, accepts: [...] }`: your quote, plus any
-   one entry per way to pay, with the defaults filled in. A `memo` generator is
-   called here, and only here — once per entry, per challenge.
-2. **Paid request** → the `X-PAYMENT` header is decoded to a payment payload
-   plus the requirements it was signed against. The middleware works out which
-   of the quotes it would advertise that payment is for, holds it against that
-   one, then sends it to the facilitator's `/v2/verify`.
+1. **Unpaid request** (no payment, or an invalid one) → `402` with the spec's
+   `PaymentRequired`, `{ x402Version: 2, resource, accepts: [...] }`, base64-encoded
+   in the `PAYMENT-REQUIRED` header and as the body. One `accepts[]` entry per
+   way to pay, with the defaults filled in, and `resource` is the URL and
+   description they were quoted for. A `memo` generator is called here, and
+   only here — once per entry, per challenge.
+2. **Paid request** → the `PAYMENT-SIGNATURE` header is decoded to a payment,
+   which carries the requirements it was built against as `accepted`. The
+   middleware works out which of the quotes it would advertise that payment is
+   for, holds it against that one, then sends it to the facilitator's
+   `/v2/verify`. `X-PAYMENT`, the name this SDK used before the spec's, is still
+   read when `PAYMENT-SIGNATURE` is absent or empty, though only for a payment
+   of this shape: a 0.1.x payer sends the older one, which is `bad_payload`
+   either way.
 3. On a valid verify (and a successful `/v2/settle` when `settle: true`), the
    payer is attached to `req.x402` and `next()` is called. Settlement's ledger
    transaction id is returned in the `X-PAYMENT-RESPONSE` response header.
 
+A browser page on another origin can read `PAYMENT-REQUIRED` and
+`X-PAYMENT-RESPONSE` only if your CORS setup lists them in
+`Access-Control-Expose-Headers`, and can send `PAYMENT-SIGNATURE` only if the
+preflight allows it in `Access-Control-Allow-Headers`.
+
 The decoded header is **guarded before anything reads a field off it**. The
-`X-PAYMENT` envelope is a loose object — `payload.payload` is `{}` as far as it
+payment envelope is a loose object — `payload.payload` is `{}` as far as it
 is concerned, and `extra` is not required at all — so the scheme's
 `acceptsPayload` and `acceptsRequirements` are the only things that have checked
 what someone else sent. A header failing either is a `402`
 (`policy_payload_invalid` / `policy_requirements_invalid`) and costs no verify.
 
-Verification uses the requirements the client **echoes** in `X-PAYMENT`, not
+Verification uses the requirements the payment carries as **`accepted`**, not
 freshly-rebuilt ones: the payer signed a transfer against *those*, and the
 scheme's job is to check the signed transfer against them. They are not
 themselves signed, which is why they are first held against your own terms —
 `scheme`, `network`, `payTo`, `resource`, the instrument (not just its symbol),
-the quoted `executeBeforeSeconds`, and an amount that is not under the price.
+the quoted `executeBeforeSeconds`, `maxTimeoutSeconds`, and an amount that is
+not under the price.
 
 Each field is classified once, in a table keyed off a schema's own entries — the
 common fields in the middleware, `extra` in the scheme adapter — so a field
 added to either fails the build until someone decides what comparing it means
-rather than going unchecked. `description` and `maxTimeoutSeconds` are
-deliberately not compared: neither reaches the ledger. Nor is `memo`: the
+rather than going unchecked. `description` is deliberately not compared: it
+does not reach the ledger. Nor is `memo`: the
 middleware keeps no record of what it issued, so only your `preSettle` can
 judge it.
 
@@ -146,7 +158,7 @@ TPayload>` is exported for a route gated on another.
 | `scheme` | The payment scheme to gate on. Default `cantonExact` — Canton's registered `exact`. See [Another scheme](#another-scheme). |
 | `settle` | Capture via `/v2/settle` after verify. Default `false`. |
 | `requirements` | How to produce the `PaymentRequirements`: a **spec** or a **builder** (see below). |
-| `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error? }`, where `extensions` is the facilitator's full verify detail. May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
+| `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error? }`, where `extensions` is the facilitator's full verify detail, with the code it answered with before the spec's in `extensions.reason`. May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
 
 ### `requirements`
 

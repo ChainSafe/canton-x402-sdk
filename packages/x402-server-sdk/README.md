@@ -60,7 +60,7 @@ const payer = new CantonX402Payer({
 
 // 3. On a 402, authorize against the advertised requirements → get the payload.
 const payload = await payer.authorize(requirements); // CantonPaymentRequirements from the 402
-// hand `payload` to the merchant/facilitator (e.g. via the X-PAYMENT header)
+// hand `payload` to the merchant/facilitator (e.g. via the PAYMENT-SIGNATURE header)
 ```
 
 ### Auth by environment
@@ -109,6 +109,10 @@ interface X402Payer {
 }
 ```
 
+`authorize` must return a payment whose `accepted` is the `requirements` it was
+given, whole: `createX402Fetch` sends the payment alone, and the merchant takes
+the requirements to verify against from it.
+
 `CantonX402Payer.authorize()`:
 - validates the requirement (amount, scheme, network, `extra.assetTransferMethod`, expiry) via `x402-core`;
 - builds the Token Standard transfer (`sdk.token.transfer.create` — routes the
@@ -117,7 +121,8 @@ interface X402Payer {
 - Ed25519-signs the hash with the party key (`x402-core`'s `signHash`, then
   `signatureToBase64`, since the payload carries `signature` as base64 and
   `preparedTxHash` as hex);
-- assembles the payload (`assetTransferMethod: "transfer-factory"`, the prepared transaction gzipped with `gzipPreparedTransaction`,
+- assembles the payment: `accepted` (the requirements it answers, as the spec names
+  them), and the payload (`assetTransferMethod: "transfer-factory"`, the prepared transaction gzipped with `gzipPreparedTransaction`,
   required `publicKey`, and the `hashingSchemeVersion` prepare used)
   **without executing** — facilitator derives fingerprint from `publicKey` (`fingerprintForPublicKey`; no `keyFingerprint` on the wire). It names no payer: the
   facilitator takes the transfer's sender, and checks the key's fingerprint against it.
@@ -131,7 +136,7 @@ refuses it. The payer doesn't track in-flight requests.
 
 `createX402Fetch(payer)` wraps `fetch` so payments are transparent: it calls the
 resource, and on a `402` reads the accepted requirements, pays via the payer, and
-retries with the `X-PAYMENT` header. Non-402 responses — and 402s the payer can't
+retries with the `PAYMENT-SIGNATURE` header. Non-402 responses — and 402s the payer can't
 satisfy — pass through unchanged.
 
 ```ts

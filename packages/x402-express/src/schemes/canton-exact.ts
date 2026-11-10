@@ -123,6 +123,10 @@ export const cantonExact: SchemeAdapter<
     return isCantonPaymentPayload(payload);
   },
 
+  // The verifier's own word for a transfer it cannot decode.
+
+  unreadablePayerReason: "invalid_exact_canton_malformed_payload",
+
   payerOf(payload: CantonPaymentPayload): string | undefined {
     // Spec Rule 8: the payer is the signed transfer's sender. It sits inside
     // what was signed, where the dropped `payer` field was a claim beside it.

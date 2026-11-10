@@ -1,7 +1,7 @@
 // Credit bureau — the x402 MERCHANT in the mortgage demo.
 //
 // Sells one synthetic credit report per pull. `GET /v1/credit-score?subject=…` is
-// gated by @chainsafe/x402-express `paymentRequired()`: without a valid `X-PAYMENT`
+// gated by @chainsafe/x402-express `paymentRequired()`: without a valid `PAYMENT-SIGNATURE`
 // it answers 402 with the price (0.05 CC); with one, it verifies + settles via the
 // Canton facilitator and returns the report. The score is deterministic from the
 // subject id, so the demo is reproducible with no external data source.
@@ -129,7 +129,7 @@ app.get("/v1/credit-score", (req, res) => {
   res.json({ ...creditReport(subject), payer: req.x402?.payer, cost: `${PRICE_CC} CC` });
 });
 
-// The x402 `X-PAYMENT` header carries the whole Canton payload (the gzipped
+// The x402 `PAYMENT-SIGNATURE` header carries the whole Canton payload (the gzipped
 // prepared tx with its disclosed contracts), about 10 KB: much of Node's default
 // 16 KB limit, which covers all of a request's headers together. So create the
 // server with a generous maxHeaderSize, or a paid request with a few more

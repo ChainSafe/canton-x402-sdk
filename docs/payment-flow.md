@@ -18,8 +18,11 @@ server (step 4).
 
 1. **Client hits a gated route (402)**
 
-   Your route answers `402 Payment Required` with
-   `{ x402Version: 2, accepts: [...] }`. Each entry carries `scheme`,
+   Your route answers `402 Payment Required` with the spec's `PaymentRequired`,
+   `{ x402Version: 2, resource, accepts: [...] }`, base64-encoded in the
+   `PAYMENT-REQUIRED` header and as the body. `resource` names what is being
+   paid for: the request URL and the route's description. Each `accepts` entry
+   carries `scheme`,
    `network`, `amount`, `asset`, `extra.assetTransferMethod`,
    `extra.instrumentId`, `extra.executeBeforeSeconds` (120 by default, and
    optionally an `extra.memo`), `payTo` (your Canton party), `resource` and a
@@ -37,21 +40,24 @@ server (step 4).
    transaction blob and its hash, then Ed25519-signs that hash with its party
    key. Nothing is executed, and the private key never leaves the payer.
 
-4. **Retry with `X-PAYMENT`**
+4. **Retry with `PAYMENT-SIGNATURE`**
 
-   The payload — `assetTransferMethod`, `preparedTransaction`,
-   `preparedTxHash`, `signature`, `publicKey`, `hashingSchemeVersion` —
-   plus the requirements it was built against are JSON-encoded, base64'd into
-   an `X-PAYMENT` header, and the request is retried. That header carries the
-   prepared transaction, gzipped, with its disclosed contracts.
+   The payment — the requirements it was built against as `accepted` (the
+   `accepts[]` entry the payer chose), and the payload: `assetTransferMethod`,
+   `preparedTransaction`, `preparedTxHash`, `signature`, `publicKey`,
+   `hashingSchemeVersion` — is JSON-encoded, base64'd into a
+   `PAYMENT-SIGNATURE` header, and the request is retried. That header carries
+   the prepared transaction, gzipped, with its disclosed contracts. The
+   middleware also reads a payment of this shape sent under `X-PAYMENT`, the
+   name this SDK used before.
 
 5. **Merchant verifies, then settles**
 
    Your middleware re-checks the payment against your own terms — scheme,
-   network, `payTo`, resource, asset, and that it is neither underpriced nor
-   expired — using the exact requirements the payment was built against,
-   which the facilitator then holds the signed transfer to, so a payment built
-   for other terms can't pass. It then POSTs
+   network, `payTo`, resource, asset, `maxTimeoutSeconds`, and that it is
+   neither underpriced nor expired — using the exact requirements the payment was built against, its
+   `accepted`, which the facilitator then holds the signed transfer to, so a
+   payment built for other terms can't pass. It then POSTs
    `{ x402Version, paymentPayload, paymentRequirements }` to `/v2/verify` and,
    with `settle: true` (the default is `false`: verify only), to `/v2/settle`,
    with your API key. A payment that fails your terms or the facilitator's
@@ -66,10 +72,13 @@ server (step 4).
    runs with the verified payer on `req.x402`.
 
 ::: danger Raise your server's max header size
-The `X-PAYMENT` header from step 4 runs to about 10 KB for a typical transfer —
-much of Node's ~16 KB default, which covers all of a request's headers together
-— so a Node/Express merchant server should set `maxHeaderSize` (e.g.
-`--max-http-header-size`) or the paid retry dies with
+The `PAYMENT-SIGNATURE` header from step 4 runs to about 10 KB for a typical
+transfer — much of Node's ~16 KB default, which covers all of a request's
+headers together — so a Node/Express merchant server should set
+`maxHeaderSize` (e.g. `--max-http-header-size`) or the paid retry dies with
 `431 Request Header Fields Too Large` before your handler ever runs. Step 6 of
 [Getting started](/getting-started#wire-up-your-server) shows where it goes.
+The scheme spec asks every server and proxy on the way to accept at least
+16 KiB for this header. A proxy in front needs it too: nginx's default
+`large_client_header_buffers 4 8k` refuses any single header over 8 KiB.
 :::

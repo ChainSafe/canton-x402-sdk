@@ -11,12 +11,13 @@ import type { X402PaymentRequirements } from "./requirements";
 
 /**
  * Generic request body for POST /v2/verify and /v2/settle — payload + requirements,
- * parameterized by the same scheme seams. Generic → type-only; the concrete
- * canton-exact request below is schema-first.
+ * parameterized by the same scheme seams: `TExtra` is both the requirements' and
+ * the payment's `accepted`'s. Generic → type-only; the concrete canton-exact
+ * request below is schema-first.
  */
 export interface X402Request<TInner = CantonPaymentInner, TExtra = Record<string, unknown>> {
   x402Version: X402Version;
-  paymentPayload: X402PaymentPayload<TInner>;
+  paymentPayload: X402PaymentPayload<TInner, TExtra>;
   paymentRequirements: X402PaymentRequirements<TExtra>;
 }
 
@@ -49,11 +50,11 @@ const X402RequestEnvelopeSchema = v.looseObject({
   paymentPayload: X402PaymentEnvelopeSchema,
   paymentRequirements: X402PaymentRequirementsEnvelopeSchema,
 });
-export function isX402Request(x: unknown): x is X402Request<unknown> {
+export function isX402Request(x: unknown): x is X402Request<unknown, unknown> {
   return v.is(X402RequestEnvelopeSchema, x);
 }
-export function parseX402Request(input: unknown): X402Request<unknown> {
-  return v.parse(X402RequestEnvelopeSchema, input) as unknown as X402Request<unknown>;
+export function parseX402Request(input: unknown): X402Request<unknown, unknown> {
+  return v.parse(X402RequestEnvelopeSchema, input) as unknown as X402Request<unknown, unknown>;
 }
 
 /**
@@ -61,7 +62,7 @@ export function parseX402Request(input: unknown): X402Request<unknown> {
  * single source of truth; the facilitator and any client conform to it. Method
  * interface → type-only.
  *
- * The params are the widest envelope (`unknown` inner/asset), so a heterogeneous
+ * The params are the widest envelope (`unknown` inner and `extra`), so a heterogeneous
  * registry of verifiers type-checks and each verifier narrows via its own guard.
  */
 export interface SchemeVerifier {
@@ -69,19 +70,61 @@ export interface SchemeVerifier {
   /** The concrete network this verifier is bound to, e.g. `canton:devnet`. */
   readonly networkId: NetworkId;
   verify(
-    payload: X402PaymentPayload<unknown>,
+    payload: X402PaymentPayload<unknown, unknown>,
     requirements: X402PaymentRequirements<unknown>,
   ): Promise<VerifyResponse>;
 }
 
+/**
+ * The reason codes the specs define: the Canton `exact` scheme's Error Reason
+ * Codes table, then the x402 v2 general codes (§9) other than the EVM scheme's.
+ * The scheme's table is not split by endpoint, so verify and settle both take
+ * all of them.
+ */
+const SPEC_REASONS = [
+  "invalid_exact_canton_missing_proof",
+  "invalid_exact_canton_malformed_payload",
+  "invalid_exact_canton_signature_invalid",
+  "invalid_exact_canton_amount_mismatch",
+  "invalid_exact_canton_merchant_mismatch",
+  "invalid_exact_canton_instrument_id_mismatch",
+  "invalid_exact_canton_preapproval_missing",
+  "invalid_exact_canton_fee_payer_mismatch",
+  "invalid_exact_canton_expired",
+  "invalid_exact_canton_execute_before_too_far",
+  "invalid_exact_canton_insufficient_inputs",
+  "invalid_exact_canton_memo_mismatch",
+  "invalid_exact_canton_merchant_not_registered",
+  "invalid_exact_canton_self_payment",
+  "invalid_exact_canton_execute_failed",
+  "unexpected_canton_ledger_error",
+  "settlement_pending",
+  "invalid_network",
+  "unsupported_scheme",
+  "insufficient_funds",
+  "invalid_payload",
+  "invalid_payment_requirements",
+  "invalid_scheme",
+  "invalid_x402_version",
+  "invalid_transaction_state",
+  "unexpected_verify_error",
+  "unexpected_settle_error",
+] as const;
+
+/**
+ * Why a payment is invalid. The verifier answers with the spec's code, the one
+ * a client written against the spec matches on, and carries the code it
+ * answered with before in `extensions.reason`. Those older codes stay in the
+ * union, below the spec's, so an answer from a facilitator on an older core
+ * still parses; dropping them is a separate, breaking change.
+ */
 export const VerifyInvalidReasonSchema = v.picklist([
+  ...SPEC_REASONS,
   "scheme_mismatch",
   "network_mismatch",
   /**
    * Nothing produces this any more: the payload carries no `requirementsHash`
-   * to check. Kept pending #98, which reworks these codes against the spec's
-   * own `invalid_exact_canton_*` vocabulary — not because anything still emits
-   * it. `requirements_expired` went the other way, with the field it named.
+   * to check. It stays with the other older codes until they are dropped.
    */
   "requirements_hash_mismatch",
   "bad_fingerprint",
@@ -128,12 +171,14 @@ export const VerifyResponseSchema = v.variant("isValid", [
 ]);
 export type VerifyResponse = v.InferOutput<typeof VerifyResponseSchema>;
 
+/** Why a settle failed: the spec's codes, then this facilitator's own. */
 export const SettleErrorReasonSchema = v.picklist([
+  ...SPEC_REASONS,
   "bad_request",
   "unauthorized",
   "scheme_mismatch",
   "network_mismatch",
-  /** As in {@link VerifyInvalidReasonSchema}: unproducible, kept pending #98. */
+  /** As in {@link VerifyInvalidReasonSchema}: unproducible, kept with the older codes. */
   "requirements_hash_mismatch",
   "bad_fingerprint",
   "bad_signature",

@@ -8,7 +8,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Request, Response } from "express";
-import type { X402PaymentPayload, X402PaymentRequirements } from "@chainsafe/x402-core";
+import {
+  encodePaymentRequiredHeader,
+  type X402PaymentPayload,
+  type X402PaymentRequiredResponse,
+  type X402PaymentRequirements,
+} from "@chainsafe/x402-core";
 import { FacilitatorError } from "@chainsafe/x402-client";
 
 import type { BaseRequirementsSpec, SchemeAdapter } from "./scheme.js";
@@ -49,7 +54,7 @@ export async function respondToFailure<
   if (err instanceof PaymentRejection) {
     try {
       const accepts = await issueChallenge(built ?? (await buildQuotes(req, options, scheme)));
-      respond402(res, accepts, err.reason, err.details);
+      respond402(res, accepts, err.reason, err.details, absoluteUrl(req));
       // A bare challenge (no payment yet) is the normal flow, not a rejection.
       if (err.reason !== "payment_required") {
         rejection = {
@@ -95,20 +100,43 @@ function sendNonPaymentError(res: Response, err: unknown): PaymentRejectionInfo 
   return { status: 500, reason: "x402_middleware_error", details: errMsg(err), error: err };
 }
 
-function respond402<TRequirements>(
+/**
+ * Answer 402 with the spec's `PaymentRequired`: base64-encoded in the
+ * `PAYMENT-REQUIRED` header, where the HTTP transport puts it, and as the body,
+ * where clients of this middleware already read it. `details` is the body's
+ * alone; the spec object has no such field.
+ */
+function respond402<TRequirements extends X402PaymentRequirements<unknown>>(
   res: Response,
   accepts: TRequirements[],
   error: string,
   details: string | undefined,
+  requestUrl: string,
 ): void {
-  res.status(402).json({
+  // The terms name one resource and list the ways to pay for it, so the top
+  // level is the first entry's — shared terms put the same value on every
+  // entry, and an entry that overrides `resource` is quoting the exception.
+  // buildQuotes never returns an empty list, so there is always a first; its
+  // `resource` is optional only on the envelope type, since quotes.ts defaults
+  // it to this same URL.
+  const [first] = accepts;
+  const paymentRequired: X402PaymentRequiredResponse<TRequirements> = {
     x402Version: 2,
+    resource: {
+      url: first?.resource ?? requestUrl,
+      ...(first?.description ? { description: first.description } : {}),
+    },
     accepts,
     error,
-    ...(details ? { details } : {}),
-  });
+  };
+  res.setHeader("PAYMENT-REQUIRED", encodePaymentRequiredHeader(paymentRequired));
+  res.status(402).json({ ...paymentRequired, ...(details ? { details } : {}) });
 }
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function absoluteUrl(req: Request): string {
+  return `${req.protocol}://${req.get("host") ?? ""}${req.originalUrl}`;
 }
