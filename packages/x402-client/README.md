@@ -27,7 +27,11 @@ const result = await facilitator.verify({
   paymentRequirements,
 });
 
-// Which (scheme, network) pairs does this facilitator support?
+// What does this facilitator settle? The (scheme, network) kinds, and in
+// `kinds[].extra` the synchronizer, instruments and transfer methods a merchant
+// configures from. Cached for `supportedTtlMs` (default 5 minutes); concurrent
+// callers share one request, and a refresh that fails falls back to the last
+// value rather than stopping a merchant quoting.
 const kinds = await facilitator.supported();
 
 // Settle a verified payment on-ledger.

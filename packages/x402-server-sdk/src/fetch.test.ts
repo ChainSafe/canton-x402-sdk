@@ -24,7 +24,6 @@ const payload = {
   network: "canton:x",
   payload: {
     assetTransferMethod: "transfer-factory",
-    payer: "alice::x",
     preparedTransaction: "cHJlcA==",
     preparedTxHash: "deadbeef",
     signature: "cafe",

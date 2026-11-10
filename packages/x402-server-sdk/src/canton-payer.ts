@@ -125,7 +125,7 @@ export class CantonX402Payer implements X402Payer {
         // transfer.create built a TransferFactory_Transfer, the one method Canton's
         // exact defines.
         assetTransferMethod: ASSET_TRANSFER_METHOD,
-        payer: key.partyId,
+        // No payer: it is the transfer's sender (spec Rule 8).
         // prepare hands back the protobuf as base64; the payload carries it
         // gzipped, as the spec defines, which also keeps the header small.
         preparedTransaction: gzipPreparedTransaction(Buffer.from(response.preparedTransaction, "base64")),
