@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import * as v from "valibot";
 import { ValiError } from "valibot";
 import {
   isCantonPaymentPayload,
@@ -10,6 +11,8 @@ import {
   isCantonVerifyRequest,
   isX402Request,
   isCantonPaymentRequiredResponse,
+  SettleResponseSchema,
+  VerifyResponseSchema,
 } from "../index";
 import type { CantonPaymentInner } from "./payment";
 import type { CantonPaymentRequirements } from "./requirements";
@@ -273,5 +276,78 @@ describe("PaymentRequired (the 402)", () => {
   it("refuses another x402Version, and an extensions that is not an object", () => {
     expect(valid({ ...paymentRequired, x402Version: 1 })).toBe(false);
     expect(valid({ ...paymentRequired, extensions: "x" })).toBe(false);
+  });
+});
+
+describe("reason codes", () => {
+  // The Canton exact scheme spec's Error Reason Codes table, as written there.
+  const schemeTable = [
+    "invalid_exact_canton_missing_proof",
+    "invalid_exact_canton_malformed_payload",
+    "invalid_exact_canton_signature_invalid",
+    "invalid_exact_canton_amount_mismatch",
+    "invalid_exact_canton_merchant_mismatch",
+    "invalid_exact_canton_instrument_id_mismatch",
+    "invalid_exact_canton_preapproval_missing",
+    "invalid_exact_canton_fee_payer_mismatch",
+    "invalid_exact_canton_expired",
+    "invalid_exact_canton_execute_before_too_far",
+    "invalid_exact_canton_insufficient_inputs",
+    "invalid_exact_canton_memo_mismatch",
+    "invalid_exact_canton_merchant_not_registered",
+    "invalid_exact_canton_self_payment",
+    "invalid_exact_canton_execute_failed",
+    "unexpected_canton_ledger_error",
+    "settlement_pending",
+    "invalid_network",
+    "unsupported_scheme",
+  ];
+  const verifies = (invalidReason: string) => v.is(VerifyResponseSchema, { isValid: false, invalidReason });
+  const settles = (errorReason: string) => v.is(SettleResponseSchema, { success: false, errorReason });
+
+  it("takes every code in the scheme spec's table, on verify and on settle", () => {
+    for (const code of schemeTable) {
+      expect(verifies(code), code).toBe(true);
+      expect(settles(code), code).toBe(true);
+    }
+  });
+
+  it("still takes the older codes, so an older facilitator's answer parses", () => {
+    for (const code of [
+      "scheme_mismatch",
+      "network_mismatch",
+      "requirements_hash_mismatch",
+      "bad_fingerprint",
+      "bad_signature",
+      "prepared_transaction_hash_mismatch",
+      "invalid_prepared_transaction_structure",
+      "nonce_replayed",
+      "missing_public_key",
+      "transfer_mismatch",
+      "transfer_expired",
+      "internal_error",
+    ]) {
+      expect(verifies(code), code).toBe(true);
+    }
+    for (const code of [
+      "bad_request",
+      "unauthorized",
+      "scheme_mismatch",
+      "network_mismatch",
+      "requirements_hash_mismatch",
+      "bad_fingerprint",
+      "bad_signature",
+      "nonce_replayed",
+      "execution_failed",
+      "timeout",
+      "facilitator_error",
+    ]) {
+      expect(settles(code), code).toBe(true);
+    }
+  });
+
+  it("refuses a code neither spec nor this SDK defines", () => {
+    expect(verifies("invalid_exact_evm_payload_signature")).toBe(false);
+    expect(settles("made_up")).toBe(false);
   });
 });

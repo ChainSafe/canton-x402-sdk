@@ -185,6 +185,16 @@ describe("x402-core wire types", () => {
   it("narrows the discriminated response unions", () => {
     const verifyOk: VerifyResponse = { isValid: true, payer: "alice::1220beef" };
     const verifyBad: VerifyResponse = { isValid: false, invalidReason: "bad_signature" };
+    // The spec's codes, which this core's verifier answers with, and an older
+    // facilitator's, which still parse.
+    const verifySpec: VerifyResponse = {
+      isValid: false,
+      invalidReason: "invalid_exact_canton_amount_mismatch",
+      extensions: { reason: "transfer_mismatch", detail: "amount" },
+    };
+    const settleSpec: SettleResponse = { success: false, errorReason: "invalid_exact_canton_execute_failed" };
+    const settlePending: SettleResponse = { success: false, errorReason: "settlement_pending" };
+    expect([verifySpec, settleSpec, settlePending].every((r) => !("isValid" in r && r.isValid))).toBe(true);
     // `invalidReason` is only reachable after narrowing on `isValid`.
     if (verifyOk.isValid) expect(verifyOk.payer).toBe("alice::1220beef");
     if (!verifyBad.isValid) expect(verifyBad.invalidReason).toBe("bad_signature");
