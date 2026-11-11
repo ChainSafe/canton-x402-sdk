@@ -23,7 +23,7 @@
 // Isomorphic on purpose (browser + node): base64 via btoa/atob, UTF-8 via
 // TextEncoder/TextDecoder — no Node Buffer.
 
-import { isCantonPaymentRequiredResponse, isX402PaymentPayload } from "./types";
+import { isX402PaymentPayload, isX402PaymentRequiredResponse } from "./types";
 import type { CantonPaymentPayload } from "./types/payment";
 import type {
   CantonPaymentRequiredResponse,
@@ -70,11 +70,15 @@ export function encodePaymentRequiredHeader<TRequirements>(
  *
  * Throws on bad base64 / JSON, on nesting past {@link MAX_PAYMENT_DEPTH}, or
  * when the value is not an x402 v2 `PaymentRequired` (version 2, a `resource`
- * with a `url`, and an `accepts[]` of whole `PaymentRequirements`).
+ * with a `url`, and an `accepts[]` whose entries carry the fields every
+ * scheme's requirements share).
  *
- * Typed as canton-exact for caller convenience, as the payment decoder is: a
- * caller picking an `accepts[]` entry must still check it is one its scheme
- * can pay.
+ * Validation is envelope-level and scheme-agnostic, as {@link
+ * decodePaymentHeader}'s is: a 402 may offer canton-exact beside another
+ * scheme, and reading each entry as canton-exact would throw out an offer over
+ * an entry this reader was never going to pay. Typed as canton-exact for
+ * caller convenience, which is optimistic — a caller picking an entry must
+ * still check its own scheme can pay it.
  */
 export function decodePaymentRequiredHeader(headerValue: string): CantonPaymentRequiredResponse {
   let raw: string;
@@ -92,12 +96,14 @@ export function decodePaymentRequiredHeader(headerValue: string): CantonPaymentR
   if (nestsDeeperThan(parsed, MAX_PAYMENT_DEPTH)) {
     throw new Error(`PAYMENT-REQUIRED header nests deeper than ${MAX_PAYMENT_DEPTH} levels`);
   }
-  if (!isCantonPaymentRequiredResponse(parsed)) {
+  if (!isX402PaymentRequiredResponse(parsed)) {
     throw new Error(
       "PAYMENT-REQUIRED header is not an x402 v2 PaymentRequired (x402Version 2, resource, accepts)",
     );
   }
-  return parsed;
+  // Optimistically typed as canton-exact, as the payment decoder is: whether
+  // an entry is one this reader can pay is checked per entry, by the payer.
+  return parsed as CantonPaymentRequiredResponse;
 }
 
 /**

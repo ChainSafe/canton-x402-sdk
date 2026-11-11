@@ -178,6 +178,34 @@ describe("decodePaymentRequiredHeader", () => {
     expect(decodePaymentRequiredHeader(encodePaymentRequiredHeader(offer))).toEqual(offer);
   });
 
+  it("takes a 402 offering a scheme it does not know, beside one it does", async () => {
+    // A merchant may advertise canton-exact beside another scheme. Reading
+    // every entry as canton-exact would throw the whole offer out over one
+    // this reader was never going to pay, leaving nothing to pay with.
+    const evm = {
+      scheme: "exact",
+      network: "eip155:8453",
+      amount: "250000",
+      asset: "0xA0b8…",
+      payTo: "0xmerchant",
+      maxTimeoutSeconds: 120,
+      extra: { name: "USD Coin", version: "2" },
+    };
+    const mixed = { ...offer, accepts: [requirements, evm] };
+    const decoded = decodePaymentRequiredHeader(
+      encodePaymentRequiredHeader(mixed as never),
+    );
+    expect(decoded.accepts).toHaveLength(2);
+    expect(decoded.accepts.map((a) => a.network)).toEqual([requirements.network, "eip155:8453"]);
+    // An offer of ONLY the other scheme decodes too: which entries are payable
+    // is the payer's question, not the codec's.
+    expect(
+      decodePaymentRequiredHeader(
+        encodePaymentRequiredHeader({ ...offer, accepts: [evm] } as never),
+      ).accepts,
+    ).toHaveLength(1);
+  });
+
   it("refuses base64 that is not an x402 v2 PaymentRequired", () => {
     const b64 = (v: unknown) => btoa(JSON.stringify(v));
     for (const bad of [

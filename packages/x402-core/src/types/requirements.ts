@@ -159,6 +159,32 @@ export interface X402PaymentRequiredResponse<TRequirements = CantonPaymentRequir
   extensions?: PaymentExtensions | null;
 }
 
+/**
+ * Loose validator for a 402's envelope: x402 v2, a `resource` with a `url`,
+ * and an `accepts[]` of entries carrying the fields every scheme's
+ * requirements share.
+ *
+ * Deliberately NOT per-scheme, as {@link X402PaymentPayloadEnvelopeSchema} is
+ * not: one 402 may offer canton-exact beside another scheme, and checking each
+ * entry against canton-exact's shape would throw the whole offer out over an
+ * entry this reader was never going to pay. Which entries a payer can satisfy
+ * is the payer's question, asked per entry.
+ */
+export const X402PaymentRequiredResponseEnvelopeSchema = v.looseObject({
+  x402Version: v.literal(2),
+  resource: ResourceInfoSchema,
+  accepts: v.array(X402PaymentRequirementsEnvelopeSchema),
+  error: v.optional(v.string()),
+  extensions: v.nullish(PaymentExtensionsSchema),
+});
+
+/** True when `x` is a well-formed 402 envelope, whatever schemes it offers. */
+export function isX402PaymentRequiredResponse(
+  x: unknown,
+): x is X402PaymentRequiredResponse<X402PaymentRequirements<unknown>> {
+  return v.is(X402PaymentRequiredResponseEnvelopeSchema, x);
+}
+
 /** canton-exact 402 response: `accepts[]` of {@link CantonPaymentRequirements}. */
 export const CantonPaymentRequiredResponseSchema = v.object({
   x402Version: v.literal(2),

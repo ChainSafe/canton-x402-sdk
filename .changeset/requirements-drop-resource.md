@@ -75,7 +75,16 @@ to the body, which this SDK's own middleware sends as well.
 
 New in `@chainsafe/x402-core`: `decodePaymentRequiredHeader`, the counterpart of
 `encodePaymentRequiredHeader`, with the same depth cap and envelope checks the
-payment decoder has.
+payment decoder has — and, like it, scheme-agnostic. It validates the envelope
+(x402 v2, a `resource` with a `url`, an `accepts[]` of entries carrying the
+fields every scheme's requirements share) and leaves per-scheme judgement to
+the payer, which asks it per entry through `supports()`. Reading each entry as
+canton-exact would throw a mixed-scheme 402 out over an entry the reader was
+never going to pay, leaving it nothing to pay with.
+
+`isX402PaymentRequiredResponse` and `X402PaymentRequiredResponseEnvelopeSchema`
+are exported for that check; `isCantonPaymentRequiredResponse` stays for a
+caller that does want the strict canton-exact read.
 
 **`requirementsHash` changes for every payment**, because the canonical form
 lost two fields. The golden vector is regenerated and checked against the
