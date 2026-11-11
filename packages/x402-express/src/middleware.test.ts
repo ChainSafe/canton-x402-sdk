@@ -2232,4 +2232,54 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     ).toThrow(/reads no resource stamp/);
   });
 
+
+  it("resolves a per-request description for the envelope", async () => {
+    stubWithSupported();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          description: (req) => `Access to ${req.path} for ${req.query.who as string}`,
+          accepts: [{ amount: "1", asset: "Amulet" }],
+        },
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid?who=alice");
+    expect(res.body.resource.description).toBe("Access to / for alice");
+  });
+
+  it("names every way to pay when more than one cannot be quoted", async () => {
+    // A single cause is rethrown as it came; several are gathered, so the
+    // merchant sees each entry and its reason rather than only the first.
+    stubWithSupported();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          accepts: [
+            { amount: "1", asset: "GBPx" },
+            { amount: "2", asset: "JPYx" },
+          ],
+        },
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(500);
+    expect(res.body.details).toMatch(/no way to pay could be quoted/);
+    expect(res.body.details).toContain("1: ");
+    expect(res.body.details).toContain("2: ");
+    expect(res.body.details).toContain("GBPx");
+    expect(res.body.details).toContain("JPYx");
+  });
+
 });
