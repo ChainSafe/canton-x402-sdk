@@ -1,4 +1,4 @@
-// Holding an echoed requirement against the merchant's own terms.
+// Holding the requirements a payment accepted against the merchant's own terms.
 //
 // The middleware owns the fields x402 v2 gives every scheme; a scheme owns
 // `extra`, and its table is spliced in here. See scheme.ts for how a table is
@@ -13,6 +13,7 @@ import {
 
 import { compareQuote, type RuleTable } from "./scheme.js";
 import type { Quote } from "./quotes.js";
+import { PaymentRejection } from "./response.js";
 
 /**
  * The protocol's common requirement fields, keyed off the one concrete schema
@@ -53,34 +54,35 @@ export function rulesFor(scheme: { extraRules: RuleTable }): RuleTable {
 }
 
 /**
- * Which advertised quote is this payment for, if any? Returns the reason to
- * refuse it, or `undefined` when one accepts it.
+ * Hold the quote a payment says it accepted against the ones this request would
+ * advertise, and throw a {@link PaymentRejection} carrying a `policy_*` reason
+ * when none takes it.
  *
- * Nothing on the wire names one — there is no quote id in the payload — so the
- * answer is whichever quote the echoed requirement satisfies. That is what lets
- * a merchant advertise more than one.
+ * Nothing on the wire says which quote a payment is for — there is no quote id
+ * in the payload — so it passes if ANY advertised quote is satisfied. That is
+ * what lets a merchant advertise more than one.
  *
- * When none does, the reason comes from the quote the payment got FURTHEST
- * through, so a payer underpaying the second way to pay is told it underpaid
- * rather than told about the first way's instrument.
+ * The reason comes from the quote the payment got FURTHEST through, so a payer
+ * underpaying the second way to pay is told it underpaid rather than told about
+ * the first way's instrument.
  */
-export function selectQuote<TRequirements extends X402PaymentRequirements<unknown>>(
-  echoed: TRequirements,
+export function assertAcceptedQuote<TRequirements extends X402PaymentRequirements<unknown>>(
+  accepted: TRequirements,
   quotes: Array<Quote<TRequirements>>,
   rules: RuleTable,
-): string | undefined {
+): void {
   let furthest: { reason: string; depth: number } | undefined;
   for (const quote of quotes) {
     const result = compareQuote(
-      echoed as unknown as Record<string, unknown>,
+      accepted as unknown as Record<string, unknown>,
       quote.requirements as unknown as Record<string, unknown>,
       rules,
     );
-    if (result.ok) return undefined;
+    if (result.ok) return;
     if (!furthest || result.depth > furthest.depth) {
       furthest = { reason: result.reason, depth: result.depth };
     }
   }
   // buildQuotes never returns an empty list, so `furthest` is always set.
-  return furthest?.reason ?? "policy_requirements_invalid";
+  throw new PaymentRejection(furthest?.reason ?? "policy_requirements_invalid");
 }

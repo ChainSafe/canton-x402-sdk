@@ -182,6 +182,18 @@ export interface SchemeQuote {
    * may do something recordable in here. Absent when the quote carries none.
    */
   mintReference?: () => Promise<Record<string, unknown>>;
+  /**
+   * Which quotes share one reference, compared by identity.
+   *
+   * A 402 is one sale with several ways to pay, so entries inheriting the
+   * merchant's one generator must be issued one reference between them — a
+   * generator that books an order would otherwise book one per entry and be
+   * paid for one. Entries naming different generators get different keys, and
+   * so a reference each.
+   *
+   * Absent means "nothing to share with": this quote mints its own.
+   */
+  referenceKey?: unknown;
 }
 
 /**
@@ -214,6 +226,12 @@ export interface SchemeAdapter<
    * transaction and takes its sender. `undefined` when it cannot be read.
    */
   payerOf(payload: TPayload): string | undefined;
+  /**
+   * What makes this entry a distinct way to pay, for the check that a route
+   * offers no two of the same. `undefined` when the spec cannot say without a
+   * request — a resolver-valued field — and the entry is then not checked.
+   */
+  distinctKey?(spec: TSpec): string | undefined;
   /**
    * The error code to refuse with when neither the facilitator nor
    * {@link SchemeAdapter.payerOf} can name the payer. The scheme's, because the

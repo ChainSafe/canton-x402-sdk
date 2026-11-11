@@ -1,9 +1,8 @@
 // The canton-exact scheme, as the middleware sees it.
 //
-// Everything canton-specific that used to be spelled out in the middleware
-// lives here: the shape of `extra`, how an echoed one is compared, where the
-// merchant's reference sits inside it, and how the deployment's own terms are
-// read from the facilitator.
+// Everything canton-specific: the shape of `extra`, how an echoed one is
+// compared, where the merchant's reference sits inside it, and how the
+// deployment's own terms are read from the facilitator.
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -40,21 +39,32 @@ const DEFAULT_EXECUTE_BEFORE_SECONDS = 120;
 /** Declarative requirements for canton-exact. */
 export interface CantonRequirementsSpec extends BaseRequirementsSpec {
   /**
-   * Asset to charge in.
+   * What this way to pay is priced in. Required, since `amount` is atomic
+   * units of whatever this names.
    *
-   * Omit it to charge in what the facilitator says it settles: the instrument
-   * — the registry admin included — is read from `GET /v2/supported`. That is
-   * the party the facilitator validates the payer's holding against, so taking
-   * it from there means there is no second copy to keep true. Set it to pin the
-   * instrument yourself and skip the lookup.
+   * An **instrument id** names it and leaves the registry `admin` to
+   * `GET /v2/supported` — the party the facilitator validates the payer's
+   * holding against:
+   *
+   * ```ts
+   * asset: "Amulet"   // Canton Coin. NOT "CC" — that is the wire SYMBOL, and
+   *                   // Amulet is the one instrument whose id differs from it.
+   * asset: "USDCx"    // id and symbol match here
+   * ```
+   *
+   * An {@link AssetSpec} pins the admin too. With `network` it is the whole
+   * answer and nothing is looked up; on its own, `/v2/supported` is still read
+   * for the network — narrowed to this instrument, so the network quoted is
+   * one that settles it:
+   *
+   * ```ts
+   * asset: { instrumentId: { id: "Amulet", admin: "DSO::1220…" } }
+   * ```
+   *
+   * An id the deployment does not carry is refused, and the refusal lists what
+   * it does carry.
    */
-  asset?: Resolvable<AssetSpec>;
-  /**
-   * Which instrument to charge in when the facilitator settles several and
-   * `asset` is omitted — the instrument's `id`, e.g. `"Amulet"`. Without it, a
-   * facilitator advertising more than one is an error rather than a guess.
-   */
-  instrument?: Resolvable<string>;
+  asset: Resolvable<string | AssetSpec>;
   /**
    * Seconds of life the payer gives the transfer it signs. Default 120. Unlike
    * `maxTimeoutSeconds` this one reaches the ledger, as the transfer's
@@ -91,8 +101,10 @@ const EXTRA_RULES: Record<keyof typeof CantonRequirementsExtraSchema.entries, Ru
   // The instrument, not the symbol: `asset` alone cannot say which registry
   // issued it, so comparing symbols would admit a look-alike from another.
   instrumentId: { compare: "equal", reason: "policy_asset" },
-  // Reaches the ledger as the transfer's executeBefore, so a payer echoing its
-  // own value would be choosing how long the merchant's quote stays settleable.
+  // Echo fidelity only. The payer folds this into the transfer's absolute
+  // `executeBefore`, and the verifier checks that deadline is still ahead of
+  // now — with no upper bound, so a transfer signed far further out than the
+  // quote still verifies. Binding the two is core's to do (#115).
   executeBeforeSeconds: { compare: "equal", reason: "policy_execute_before" },
   // Minted per challenge, and the terms compared against were built without
   // one. Whether the payer echoed a memo the merchant actually issued is a
@@ -127,6 +139,13 @@ export const cantonExact: SchemeAdapter<
 
   unreadablePayerReason: "invalid_exact_canton_malformed_payload",
 
+  distinctKey(spec: CantonRequirementsSpec): string | undefined {
+    // The asset is what makes one way to pay different from another. A
+    // resolver cannot be read without a request, so such an entry is skipped.
+    const asset = spec.asset;
+    if (typeof asset === "function") return undefined;
+    return typeof asset === "string" ? asset : asset.instrumentId.id;
+  },
   payerOf(payload: CantonPaymentPayload): string | undefined {
     // Spec Rule 8: the payer is the signed transfer's sender. It sits inside
     // what was signed, where the dropped `payer` field was a claim beside it.
@@ -157,7 +176,12 @@ export const cantonExact: SchemeAdapter<
       },
     };
     const mint = spec.memo;
-    if (mint) quote.mintReference = async () => ({ memo: await mint(req) });
+    if (mint) {
+      quote.mintReference = async () => ({ memo: await mint(req) });
+      // The generator itself: entries that inherited the merchant's one memo
+      // from the shared terms carry the same function, so they share a memo.
+      quote.referenceKey = mint;
+    }
     return quote;
   },
 };
@@ -184,7 +208,12 @@ async function resolveDeploymentTerms(
 }> {
   const scheme = await resolve(spec.scheme ?? cantonExact.id, req);
   const network = spec.network === undefined ? undefined : await resolve(spec.network, req);
-  const pinned = spec.asset === undefined ? undefined : await resolve(spec.asset, req);
+  // A string names the instrument and leaves its admin to discovery; an
+  // AssetSpec carries the admin too. Either way the id is known, and is what
+  // narrows discovery below.
+  const asset = await resolve(spec.asset, req);
+  const pinned = typeof asset === "string" ? undefined : asset;
+  const instrument = typeof asset === "string" ? asset : asset.instrumentId.id;
 
   // Both pinned: nothing to discover.
   if (network !== undefined && pinned !== undefined) {
@@ -197,10 +226,12 @@ async function resolveDeploymentTerms(
   }
 
   const prefer: CantonDeploymentPreference = { schemes: [scheme] };
+  // Each key is a filter, and an absent one filters on nothing — so add a key
+  // only where the merchant named a value. The instrument always narrows: a
+  // pinned AssetSpec says which one as surely as a string does, and the
+  // network discovered here must be one that settles it.
   if (network !== undefined) prefer.networks = [network];
-  const instrument =
-    spec.instrument === undefined ? undefined : await resolve(spec.instrument, req);
-  if (instrument !== undefined) prefer.instruments = [instrument];
+  prefer.instruments = [instrument];
 
   const advertised = exactlyOne(
     await selectCantonDeployments(await ctx.facilitator.supported(), prefer),
@@ -214,25 +245,21 @@ async function resolveDeploymentTerms(
 }
 
 /**
- * One quote needs one set of terms.
+ * The single deployment these terms quote against, or a throw naming the
+ * alternatives.
  *
- * Core reports every way a facilitator will settle, because a 402 may advertise
- * several — but a declarative spec carries ONE price, and a price means nothing
- * without the instrument it is denominated in. So quoting from a facilitator
- * that settles two instruments, without saying which, is a question the merchant
- * has not answered yet; answering it by taking the first would quote 0.05 of
- * whichever token happened to be advertised first.
- *
- * Worded for the merchant, naming the fields it actually writes, because the
- * fix is in its own config and not in the facilitator's response.
+ * Core reports every way a facilitator will settle; one entry carries one
+ * price, which is meaningless without knowing which network and instrument it
+ * is denominated in. The message names the merchant's own fields, since that
+ * is where the fix goes.
  */
 function exactlyOne(advertised: CantonDeploymentTerms[]): CantonDeploymentTerms {
   if (advertised.length > 1) {
     throw new Error(
       `paymentRequired: the facilitator settles ${advertised.length} ways to pay (${advertised
         .map((t) => `${t.network} in ${t.extra.instrumentId.id}`)
-        .join(", ")}). Set \`network\` and/or \`instrument\` on your requirements to pick one, ` +
-        `or give each its own entry via \`additionalAccepts\` — each needs its own price.`,
+        .join(", ")}). Set \`network\` on your requirements to pick one, or give each ` +
+        `its own \`accepts[]\` entry — each needs its own price.`,
     );
   }
   return advertised[0];

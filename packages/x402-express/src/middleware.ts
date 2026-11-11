@@ -19,9 +19,14 @@ import {
 
 import type { BaseRequirementsSpec, SchemeAdapter } from "./scheme.js";
 import { cantonExact, type CantonRequirementsSpec } from "./schemes/canton-exact.js";
-import type { PaymentRequiredOptions, X402RequestState } from "./options.js";
+import {
+  assertUsableTerms,
+  type PaymentRejectionInfo,
+  type PaymentRequiredOptions,
+  type X402RequestState,
+} from "./options.js";
 import { buildQuotes, type Offer } from "./quotes.js";
-import { rulesFor, selectQuote } from "./policy.js";
+import { assertAcceptedQuote, rulesFor } from "./policy.js";
 import { PaymentRejection, respondToFailure } from "./response.js";
 
 /**
@@ -47,8 +52,8 @@ import { PaymentRejection, respondToFailure } from "./response.js";
  *     payTo: "merchant::1220…",
  *     resource: "https://merchant.example/report",
  *     accepts: [
- *       { amount: "500000000" },                      // 0.05 CC
- *       { amount: "250000", instrument: "USDCx" },    // priced separately
+ *       { amount: "500000000", asset: "Amulet" }, // 0.05 CC
+ *       { amount: "250000", asset: "USDCx" },     // priced separately
  *     ],
  *   },
  * }));
@@ -72,12 +77,17 @@ export function paymentRequired<
     TPayload
   >;
   const rules = rulesFor(scheme);
+  // Merchant config, so it is checked here, once, and not per request.
+  assertUsableTerms(options.requirements, scheme);
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     // Built at most once per request, and only when something needs them: a
     // paid request needs terms to hold the payment against, a challenge needs
     // terms to advertise. The failure path reuses whatever was built here.
     let offer: Offer<TRequirements> | undefined;
+    // Kept for the failure path: a refusal after this point names the payment
+    // it refused, so a merchant can undo whatever `preSettle` did.
+    let payment: PaymentRejectionInfo<TRequirements, TPayload>["payment"];
     try {
       // The spec's name first. X-PAYMENT is the name this SDK used before, and
       // is still read for a payment of this shape sent under it. A 0.1.x payer
@@ -111,30 +121,25 @@ export function paymentRequired<
       if (!scheme.acceptsRequirements(decoded.accepted)) {
         throw new PaymentRejection("policy_requirements_invalid");
       }
-      const payload = decoded;
-      const requirements = decoded.accepted;
+      const payload = decoded as TPayload;
+      const accepted = decoded.accepted as TRequirements;
+      payment = { payload, requirements: accepted };
 
       offer = await buildQuotes(req, options, scheme);
-      const refusal = selectQuote(requirements, offer.quotes, rules);
-      if (refusal !== undefined) throw new PaymentRejection(refusal);
+      assertAcceptedQuote(accepted, offer.quotes, rules);
 
-      // §5.2.2 lets a payment name the resource it is for, and it is now the
-      // only place one appears on the wire from the payer — `accepted` is a
-      // PaymentRequirements, which carries none. Optional, so a payment that
-      // names none is fine; one that names another resource is refused.
-      //
-      // This is echo fidelity, not a binding. Nothing the payer sends is
-      // signed — the transfer encodes the amount, payee, instrument, deadline
-      // and memo, never the resource — so a payer set on replaying a payment
-      // from elsewhere simply writes this URL here. What actually ties a
-      // payment to one challenge is `extra.memo`, which Rule 12 puts inside
-      // the signature and `preSettle` judges against merchant records.
+      // §5.2.2 lets a payment name the resource it is for, and it is the only
+      // place one reaches us from the payer — `accepted` is a
+      // PaymentRequirements, which carries none. Optional, so naming none is
+      // fine; naming another resource is refused. Echo fidelity, not a
+      // binding: nothing the payer sends is signed, and `extra.memo` is what
+      // ties a payment to one challenge.
       const named = payload.resource?.url;
       if (named !== undefined && named !== offer.resource.url) {
         throw new PaymentRejection("policy_resource");
       }
 
-      const verify = await facilitator.verify(payload, requirements);
+      const verify = await facilitator.verify(payload, accepted);
       if (!verify.isValid) {
         const detail = verify.extensions?.detail;
         throw new PaymentRejection(
@@ -149,6 +154,7 @@ export function paymentRequired<
       // response, so ask the scheme to read its own when it is left out. Before
       // settling, so a payment is never captured for a request we then fail.
       const payer = verify.payer ?? scheme.payerOf(payload);
+      payment = { ...payment, payer };
       if (!payer) {
         // Worded as the scheme's verifier words an undecodable transfer, with
         // the protocol-level reason kept in `extensions` for a reader that
@@ -160,19 +166,18 @@ export function paymentRequired<
         );
       }
 
-      // The merchant's own say, on a payment the facilitator has vouched for.
-      // After verify so the echoed requirements are bound to the signed
-      // transfer and `payer` is known; before settle so a refusal never moves
-      // funds. See `preSettle` for why that order and not the cheaper one.
+      // The merchant's own say, on a payment the facilitator has vouched for:
+      // after verify, so `accepted` is bound to the signed transfer and
+      // `payer` is known, and before settle, so a refusal moves no funds.
       const merchantRefusal = await options.preSettle?.(
-        { payload, requirements, payer, verify },
+        { payload, requirements: accepted, payer, verify },
         req,
       );
       if (merchantRefusal) throw new PaymentRejection(merchantRefusal);
 
       let settleResponse: SettleResponse | undefined;
       if (settle) {
-        settleResponse = await facilitator.settle(payload, requirements);
+        settleResponse = await facilitator.settle(payload, accepted);
         if (!settleResponse.success) {
           throw new PaymentRejection(
             settleResponse.errorReason ?? "settle_failed",
@@ -184,14 +189,14 @@ export function paymentRequired<
 
       req.x402 = {
         payer,
-        requirements,
+        requirements: accepted,
         payload,
         verify,
         settle: settleResponse,
       } as X402RequestState;
       next();
     } catch (err) {
-      await respondToFailure(err, req, res, options, scheme, offer);
+      await respondToFailure(err, req, res, options, scheme, offer, payment);
     }
   };
 }

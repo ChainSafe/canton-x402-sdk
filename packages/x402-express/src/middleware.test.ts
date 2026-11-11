@@ -12,7 +12,12 @@ import {
 } from "@chainsafe/x402-core";
 import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "./middleware";
-import type { PaymentRequiredOptions, RequirementsBuilder, RequirementsSpec } from "./options";
+import type {
+  PaymentRejectionInfo,
+  PaymentRequiredOptions,
+  RequirementsBuilder,
+  RequirementsSpec,
+} from "./options";
 
 // The real decoder, spied on so a test can stand in a decodable transfer without
 // building a prepared transaction: the fixture's `preparedTransaction` is not one.
@@ -224,8 +229,8 @@ describe("paymentRequired", () => {
     expect(res.body.details).toMatch(/atomic units/);
   });
 
-  it("rejects a decimal amount in an additionalAccepts entry", async () => {
-    // Advertised in the same 402, so it is held to the same rule.
+  it("rejects a decimal amount in any way to pay, not just the first", async () => {
+    // Every entry is advertised in the same 402, so each is held to the rule.
     stubFacilitator();
     const app = express();
     app.use(
@@ -239,7 +244,7 @@ describe("paymentRequired", () => {
           accepts: [
             { asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } }, amount: "500000000" },
             // The second way to pay carries the decimal.
-            { asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } }, amount: "0.10" },
+            { asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } }, amount: "0.10" },
           ],
         },
       }),
@@ -522,7 +527,7 @@ describe("paymentRequired", () => {
     expect(res.body.accepts[0]).toMatchObject({ resource: "/r", description: "d" });
   });
 
-  it("responds 402 with well-formed requirements when there is no X-PAYMENT", async () => {
+  it("responds 402 with well-formed requirements when there is no payment", async () => {
     stubFacilitator();
     const res = await request(makeApp()).get("/paid");
     expect(res.status).toBe(402);
@@ -589,13 +594,19 @@ describe("paymentRequired", () => {
     const fetchMock = stubFacilitator({ verify: { isValid: true } });
     const decode = vi.mocked(decodePayloadTransfer);
     decode.mockClear();
-    const res = await request(makeApp({ settle: true }))
+    const onReject = vi.fn();
+    const res = await request(makeApp({ settle: true, onReject }))
       .get("/paid")
       .set("PAYMENT-SIGNATURE", paymentHeader());
     expect(res.status).toBe(402);
+    // Worded as the verifier words it: the spec's code, the older one beside it.
     expect(res.body).toMatchObject({
       error: "invalid_exact_canton_malformed_payload",
       details: "undecodable",
+    });
+    expect(onReject.mock.calls[0][0]).toMatchObject({
+      reason: "invalid_exact_canton_malformed_payload",
+      extensions: { reason: "transfer_mismatch", detail: "undecodable" },
     });
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/v2/settle"))).toBe(false);
     // The real decoder ran on the payload's transaction and found no transfer in it.
@@ -617,10 +628,18 @@ describe("paymentRequired", () => {
   });
 
   it("responds 402 with the reason when verify is invalid", async () => {
-    stubFacilitator({ verify: { isValid: false, invalidReason: "bad_signature" } });
+    // The scheme spec's code reaches the merchant as the 402's `error`; the
+    // code the facilitator answered with before it stays in extensions.reason.
+    stubFacilitator({
+      verify: {
+        isValid: false,
+        invalidReason: "invalid_exact_canton_amount_mismatch",
+        extensions: { reason: "transfer_mismatch", detail: "amount" },
+      },
+    });
     const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
     expect(res.status).toBe(402);
-    expect(res.body.error).toBe("bad_signature");
+    expect(res.body).toMatchObject({ error: "invalid_exact_canton_amount_mismatch", details: "amount" });
   });
 
   it("forwards the facilitator's extensions.detail on a verify rejection", async () => {
@@ -685,7 +704,7 @@ describe("paymentRequired", () => {
     ).toBe(true);
   });
 
-  it("responds 402 bad_payload on an undecodable X-PAYMENT", async () => {
+  it("responds 402 bad_payload on an undecodable payment header", async () => {
     stubFacilitator();
     const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", "!!!not-base64-json!!!");
     expect(res.status).toBe(402);
@@ -871,6 +890,72 @@ describe("paymentRequired", () => {
     });
   });
 
+
+  it("forwards exactly the payment's accepted to the facilitator as paymentRequirements", async () => {
+    const fetchMock = stubFacilitator();
+    const header = paymentHeader(
+      { extra: { ...ECHOED_EXTRA, memo: "order-42" } },
+      {},
+      {
+        resource: { url: "https://f.example/paid", description: "Access" },
+        extensions: { "x-ext": { info: { a: 1 }, schema: {} } },
+      },
+    );
+    const res = await request(makeApp({ settle: true })).get("/paid").set("PAYMENT-SIGNATURE", header);
+    expect(res.status).toBe(200);
+    const sent = JSON.parse(atob(header));
+    for (const path of ["/v2/verify", "/v2/settle"]) {
+      const call = fetchMock.mock.calls.find((c) => String(c[0]).includes(path));
+      const init = (call as unknown as [string, RequestInit] | undefined)?.[1];
+      const body = JSON.parse(String(init?.body));
+      expect(body.paymentRequirements).toEqual(sent.accepted);
+      expect(body.paymentPayload).toEqual(sent);
+    }
+  });
+
+  it("answers 402 bad_payload, not 500, for the pre-spec { payment, requirements } header", async () => {
+    const fetchMock = stubFacilitator();
+    const { accepted, ...rest } = JSON.parse(atob(paymentHeader()));
+    const legacy = { payment: { ...rest, scheme: "exact", network: "canton:x" }, requirements: accepted };
+    const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", btoa(JSON.stringify(legacy)));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("bad_payload");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("answers 402 bad_payload, not 500, for a payment nested too deep to forward", async () => {
+    // JSON.parse takes it, but JSON.stringify overflows the stack serialising
+    // the facilitator request; the codec refuses it first.
+    const fetchMock = stubFacilitator();
+    const json = atob(paymentHeader());
+    const deep = json.slice(0, -1) + `,"extensions":{"x":${"[".repeat(5000)}0${"]".repeat(5000)}}}`;
+    const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", btoa(deep));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("bad_payload");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an EMPTY amount in accepted on decode, before policy", async () => {
+    // BigInt("") is 0, so this one matters — but the codec's envelope check
+    // catches it first (every PaymentRequirements has a non-empty amount), which
+    // is why the code is bad_payload and not policy_amount_invalid. Asserted so
+    // the earlier guard cannot quietly go.
+    const fetchMock = stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set("PAYMENT-SIGNATURE", paymentHeader({ amount: "" }));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("bad_payload");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("passes an older facilitator's reason through as it came", async () => {
+    stubFacilitator({ verify: { isValid: false, invalidReason: "bad_signature" } });
+    const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("bad_signature");
+  });
+
   describe("onReject", () => {
     it("reports a verify rejection with its details and full extensions", async () => {
       const extensions = {
@@ -882,12 +967,40 @@ describe("paymentRequired", () => {
       const onReject = vi.fn();
       await request(makeApp({ onReject })).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
       expect(onReject).toHaveBeenCalledOnce();
-      expect(onReject.mock.calls[0][0]).toEqual({
+      const { payment, ...rest } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(rest).toEqual({
         status: 402,
         reason: "internal_error",
         details: "authorization_amount_too_low",
         extensions,
       });
+      // The payment it refused travels with it; asserted on its own below.
+      expect(payment?.requirements.payTo).toBe("merchant::x");
+    });
+
+    it("names the payment a refusal is about, so preSettle's work can be undone", async () => {
+      // The docs invite reserving stock in preSettle. When settle fails after
+      // that, this is what says which order to release.
+      stubFacilitator({
+        settle: { success: false, errorReason: "execution_failed", errorDetails: "boom" },
+      });
+      const onReject = vi.fn();
+      await request(makeApp({ settle: true, onReject }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-42" } }));
+      const { payment } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(payment?.requirements.extra.memo).toBe("order-42");
+      expect(payment?.payer).toBe("alice::x");
+      expect(payment?.payload.payload.publicKey).toBe("pk");
+    });
+
+    it("carries no payment when none was decoded", async () => {
+      // A header that will not decode, and a 402 with no payment at all: there
+      // is nothing to name, so the field is absent rather than half-filled.
+      stubFacilitator();
+      const onReject = vi.fn();
+      await request(makeApp({ onReject })).get("/paid").set("PAYMENT-SIGNATURE", "!!!");
+      expect(onReject.mock.calls[0][0]).not.toHaveProperty("payment");
     });
 
     it("reports a settle rejection", async () => {
@@ -1023,15 +1136,18 @@ describe("paymentRequired: which quote a payment is for", () => {
 
   it("refuses to start with no ways to pay", async () => {
     // A 402 that advertises nothing is not a challenge; it is a dead end the
-    // payer cannot act on, so it fails as the merchant's config error.
-    stubFacilitator();
-    const res = await request(
+    // payer cannot act on. Merchant config, so it throws when the route is
+    // mounted rather than answering 500 to every request.
+    expect(() =>
       makeApp({
-        requirements: { network: "canton:x", payTo: "merchant::x", resource: "https://f.example/paid", accepts: [] },
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          accepts: [],
+        },
       }),
-    ).get("/paid");
-    expect(res.status).toBe(500);
-    expect(res.body.details).toMatch(/must advertise a way to pay/);
+    ).toThrow(/must advertise a way to pay/);
   });
 
   it("accepts a payment made against the second way to pay, not just the first", async () => {
@@ -1287,7 +1403,9 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-          accepts: [{ amount: "500000000" }],
+          // Names the instrument, not the whole asset: the registry admin still
+          // comes from /v2/supported, which is what these tests are about.
+          accepts: [{ amount: "500000000", asset: "Amulet" }],
         },
         ...over,
       }),
@@ -1322,6 +1440,45 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     await request(app).get("/paid");
     const discovery = fetchMock.mock.calls.filter(([url]) => String(url).includes("/v2/supported"));
     expect(discovery).toHaveLength(1);
+  });
+
+
+  it("narrows discovery by a pinned asset, as it does by a named one", async () => {
+    // The richer form must not do less: an AssetSpec says which instrument as
+    // surely as a string id does, so the network discovered has to be one
+    // that settles it. Both forms quote the same terms here.
+    const both = {
+      kinds: [
+        {
+          ...SUPPORTED.kinds[0],
+          extra: {
+            ...SUPPORTED.kinds[0].extra,
+            instruments: [
+              { admin: DSO, instrumentId: { id: "Amulet", admin: DSO }, symbol: "CC" },
+              { admin: "ISSUER::x", instrumentId: { id: "USDCx", admin: "ISSUER::x" }, symbol: "USDCx" },
+            ],
+          },
+        },
+      ],
+    };
+    for (const asset of ["Amulet", { instrumentId: { id: "Amulet", admin: DSO } }] as const) {
+      stubWithSupported(both);
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          // No `network`: it is discovered, and the pinned asset must narrow it.
+          requirements: { payTo: "merchant::x", resource: "https://f.example/paid", accepts: [{ amount: "1", asset }] },
+        }),
+      );
+      app.get("/paid", (_q, r) => r.json({ ok: true }));
+      const res = await request(app).get("/paid");
+      expect(res.status).toBe(402);
+      expect(res.body.accepts).toHaveLength(1);
+      expect(res.body.accepts[0].asset).toBe("CC");
+      expect(res.body.accepts[0].extra.instrumentId).toEqual({ id: "Amulet", admin: DSO });
+    }
   });
 
   it("never calls /v2/supported when the merchant pins both fields", async () => {
@@ -1367,11 +1524,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
           network: "canton:mainnet",
-          accepts: [
-            {
-              amount: "500000000",
-            },
-          ],
+          accepts: [{ amount: "500000000", asset: "Amulet" }],
         },
       }),
     ).get("/paid");
@@ -1379,32 +1532,47 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     expect(res.body.accepts[0].network).toBe("canton:mainnet");
   });
 
-  it("answers 500 naming the instruments when the facilitator settles several", async () => {
-    // The guard that used to live in core. A declarative spec carries ONE
-    // price, and a price means nothing without the instrument it is denominated
-    // in — so taking the first would quote 0.05 of whichever token happened to
-    // be advertised first.
+  it("answers 500 naming the networks when the facilitator settles the instrument on several", async () => {
+    // An entry always names its instrument, so that dimension cannot be
+    // ambiguous — but the network still can, and a price means nothing without
+    // knowing which chain it settles on either.
     stubWithSupported({
       kinds: [
-        {
-          ...SUPPORTED.kinds[0],
-          extra: {
-            ...SUPPORTED.kinds[0].extra,
-            instruments: [
-              { instrumentId: { id: "Amulet", admin: DSO } },
-              { instrumentId: { id: "USDCx", admin: "ISSUER::x" }, symbol: "USDCx" },
-            ],
-          },
-        },
+        SUPPORTED.kinds[0],
+        { ...SUPPORTED.kinds[0], network: "canton:mainnet" },
       ],
     });
     const res = await request(discoveringApp()).get("/paid");
     expect(res.status).toBe(500);
-    expect(res.body.details).toContain("Amulet");
-    expect(res.body.details).toContain("USDCx");
+    expect(res.body.details).toContain("canton:devnet");
+    expect(res.body.details).toContain("canton:mainnet");
     // Worded for the merchant: the fix is in its own config, so name the fields
     // it writes rather than core's parameters.
-    expect(res.body.details).toContain("instrument");
+    expect(res.body.details).toContain("network");
+  });
+
+  it("answers 500 naming what it does settle when the entry's instrument is not one", async () => {
+    // The merchant named an instrument; the facilitator does not carry it.
+    // Config, not a payer's doing, so it fails loudly rather than quoting
+    // something else.
+    stubWithSupported();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          accepts: [{ amount: "250000", asset: "GBPx" }],
+        },
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(500);
+    expect(res.body.details).toContain("GBPx");
+    expect(res.body.details).toContain("Amulet");
   });
 
   it("takes the merchant's instrument as the choice when it settles several", async () => {
@@ -1430,7 +1598,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           accepts: [
             {
               amount: "500000000",
-              instrument: "USDCx",
+              asset: "USDCx",
             },
           ],
         },
@@ -1591,7 +1759,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     });
 
     it("lists every way to pay, in the order the terms name them", async () => {
-      // Was additionalAccepts on main; those entries are ordinary accepts[] now.
+      // Two entries, advertised in the order the terms list them.
       stubFacilitator();
       const spec = baseOptions.requirements as RequirementsSpec;
       const app = express();
@@ -1599,7 +1767,19 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         "/paid",
         paymentRequired({
           ...baseOptions,
-          requirements: { ...spec, accepts: [...spec.accepts, { ...spec.accepts[0], amount: "700000000" }] },
+          requirements: {
+            ...spec,
+            accepts: [
+              ...spec.accepts,
+              // A second INSTRUMENT, not a second price for the first: two
+              // entries alike but for `amount` are refused, since a payer
+              // could only choose between them on price.
+              {
+                amount: "700000000",
+                asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } },
+              },
+            ],
+          },
         }),
       );
       app.get("/paid", (_req, res) => res.json({ ok: true }));
@@ -1623,5 +1803,355 @@ describe("paymentRequired: configuring from /v2/supported", () => {
       expect(paid.headers).not.toHaveProperty("payment-required");
     });
   });
+
+
+  it("refuses two ways to pay in the same asset, when the route is mounted", async () => {
+    // Merchant config, so it throws at paymentRequired() — not once per
+    // request, and without asking the facilitator anything.
+    const fetchMock = stubWithSupported();
+    expect(() =>
+      paymentRequired({
+        facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          accepts: [
+            { amount: "500000000", asset: "Amulet" },
+            { amount: "250000", asset: "Amulet" },
+          ],
+        },
+      }),
+    ).toThrow(/ways to pay 1 and 2 are both in Amulet/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("catches it across the two ways of naming one asset", async () => {
+    // One names the instrument by id, the other pins it whole. Both normalise
+    // to the same id without a request.
+    stubWithSupported();
+    expect(() =>
+      paymentRequired({
+        facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          accepts: [
+            { amount: "500000000", asset: "Amulet" },
+            { amount: "250000", asset: { instrumentId: { id: "Amulet", admin: DSO } } },
+          ],
+        },
+      }),
+    ).toThrow(/both in Amulet/);
+  });
+
+  it("does not check an entry whose asset is a resolver", async () => {
+    // Nothing to compare until a request arrives, so it mounts.
+    stubWithSupported();
+    expect(() =>
+      paymentRequired({
+        facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          accepts: [
+            { amount: "500000000", asset: "Amulet" },
+            { amount: "250000", asset: () => "Amulet" },
+          ],
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("allows two ways to pay that differ by instrument", async () => {
+    stubWithSupported({
+      kinds: [
+        {
+          ...SUPPORTED.kinds[0],
+          extra: {
+            ...SUPPORTED.kinds[0].extra,
+            instruments: [
+              { admin: DSO, instrumentId: { id: "Amulet", admin: DSO }, symbol: "CC" },
+              { admin: "ISSUER::x", instrumentId: { id: "USDCx", admin: "ISSUER::x" }, symbol: "USDCx" },
+            ],
+          },
+        },
+      ],
+    });
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          accepts: [
+            { amount: "500000000", asset: "Amulet" },
+            { amount: "250000", asset: "USDCx" },
+          ],
+        },
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(402);
+    expect(res.body.accepts.map((a: { asset: string }) => a.asset)).toEqual(["CC", "USDCx"]);
+  });
+
+
+  describe("a way to pay that cannot be quoted", () => {
+    const twoEntries = (onQuoteError?: (e: Error) => void) => {
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          ...(onQuoteError ? { onQuoteError } : {}),
+          requirements: {
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            network: "canton:devnet",
+            accepts: [
+              { amount: "500000000", asset: "Amulet" },
+              // The deployment does not carry this one.
+              { amount: "250000", asset: "GBPx" },
+            ],
+          },
+        }),
+      );
+      app.get("/paid", (req, res) => res.json({ ok: true, payer: req.x402?.payer }));
+      return app;
+    };
+
+    it("is left out of the 402, and the others are still offered", async () => {
+      stubWithSupported();
+      const res = await request(twoEntries()).get("/paid");
+      expect(res.status).toBe(402);
+      expect(res.body.accepts.map((a: { asset: string }) => a.asset)).toEqual(["CC"]);
+    });
+
+    it("does not stop a payment for one that can", async () => {
+      // The point of not failing the whole route: a payer holding good terms
+      // is paying, and a sibling entry's trouble is not its concern.
+      stubWithSupported();
+      const res = await request(twoEntries())
+        .get("/paid")
+        .set(
+          "PAYMENT-SIGNATURE",
+          paymentHeader({
+            network: "canton:devnet",
+            asset: "CC",
+            extra: {
+              assetTransferMethod: "transfer-factory",
+              executeBeforeSeconds: 120,
+              instrumentId: { id: "Amulet", admin: DSO },
+            },
+          }),
+        );
+      expect(res.status).toBe(200);
+      expect(res.body.payer).toBe("alice::x");
+    });
+
+    it("tells the merchant through onQuoteError, naming the entry", async () => {
+      stubWithSupported();
+      const seen: string[] = [];
+      await request(twoEntries((e) => seen.push(e.message))).get("/paid");
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatch(/way to pay 2/);
+      expect(seen[0]).toMatch(/GBPx/);
+    });
+
+    it("still answers when the hook throws", async () => {
+      stubWithSupported();
+      const res = await request(
+        twoEntries(() => {
+          throw new Error("logger down");
+        }),
+      ).get("/paid");
+      expect(res.status).toBe(402);
+    });
+
+    it("fails the request when NO entry can be quoted", async () => {
+      stubWithSupported();
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          requirements: {
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            accepts: [{ amount: "1", asset: "GBPx" }],
+          },
+        }),
+      );
+      app.get("/paid", (_q, r) => r.json({ ok: true }));
+      const res = await request(app).get("/paid");
+      expect(res.status).toBe(500);
+      expect(res.body.details).toContain("GBPx");
+    });
+
+    it("never skips a merchant's own mistake", async () => {
+      // A decimal price is config, not the facilitator changing under us, so
+      // it takes the request down rather than quietly dropping the entry. Both
+      // instruments are advertised, so the entry resolves and only its amount
+      // is wrong.
+      stubWithSupported({
+        kinds: [
+          {
+            ...SUPPORTED.kinds[0],
+            extra: {
+              ...SUPPORTED.kinds[0].extra,
+              instruments: [
+                { admin: DSO, instrumentId: { id: "Amulet", admin: DSO }, symbol: "CC" },
+                { admin: "ISSUER::x", instrumentId: { id: "USDCx", admin: "ISSUER::x" }, symbol: "USDCx" },
+              ],
+            },
+          },
+        ],
+      });
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          requirements: {
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            accepts: [
+              { amount: "500000000", asset: "Amulet" },
+              { amount: "0.10", asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } } },
+            ],
+          },
+        }),
+      );
+      app.get("/paid", (_q, r) => r.json({ ok: true }));
+      const res = await request(app).get("/paid");
+      expect(res.status).toBe(500);
+      expect(res.body.details).toMatch(/atomic units/);
+    });
+  });
+
+
+  // A builder's ways to pay can no longer disagree about the resource: it is
+  // not a field of PaymentRequirements, and the builder names it once in the
+  // object form. Covered by "takes a builder's resource and description".
+
+  it("keeps a shared term when an entry holds an explicit undefined", async () => {
+    // `payTo: someVar` where someVar is undefined used to erase the shared
+    // payee, and exactOptionalPropertyTypes is off so nothing caught it.
+    stubFacilitator();
+    const app = express();
+    const absent = undefined as string | undefined;
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::shared",
+          resource: "https://f.example/paid",
+          accepts: [
+            {
+              amount: "500000000",
+              asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+              payTo: absent,
+            },
+          ],
+        },
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(402);
+    expect(res.body.accepts[0].payTo).toBe("merchant::shared");
+  });
+
+
+  it("books ONE order for a challenge, however many ways it offers to pay", async () => {
+    // The generator only gets `req`, so it cannot tell entries apart. Minting
+    // per entry would book N orders and be paid for one.
+    stubFacilitator();
+    const booked: string[] = [];
+    let n = 0;
+    // The merchant's one generator, given to both entries — `memo` is a
+    // per-entry field, so this is how one is shared.
+    const bookOrder = () => {
+      const ref = `order-${++n}`;
+      booked.push(ref);
+      return ref;
+    };
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          accepts: [
+            {
+              amount: "500000000",
+              asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+              memo: bookOrder,
+            },
+            {
+              amount: "250000",
+              asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } },
+              memo: bookOrder,
+            },
+          ],
+        },
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(402);
+    expect(booked).toEqual(["order-1"]);
+    // And both ways to pay carry it, so whichever the payer picks reconciles.
+    expect(res.body.accepts.map((a: { extra: { memo: string } }) => a.extra.memo)).toEqual([
+      "order-1",
+      "order-1",
+    ]);
+  });
+
+  it("gives entries their own reference when they name their own generator", async () => {
+    // Different generators is the merchant asking for different references.
+    stubFacilitator();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          accepts: [
+            {
+              amount: "500000000",
+              asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+              memo: () => "cc-order",
+            },
+            {
+              amount: "250000",
+              asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } },
+              memo: () => "usdc-order",
+            },
+          ],
+        },
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.body.accepts.map((a: { extra: { memo: string } }) => a.extra.memo)).toEqual([
+      "cc-order",
+      "usdc-order",
+    ]);
+  });
+
+
+
 
 });

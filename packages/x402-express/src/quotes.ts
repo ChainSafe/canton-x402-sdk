@@ -1,10 +1,8 @@
 // Turning a merchant's terms into the quotes a 402 advertises.
 //
-// Building and issuing are separate on purpose: a scheme's per-challenge
-// reference generator is the merchant's, and is documented to record what it
-// issues. It must run when a challenge is ISSUED, not when a payment is merely
-// held against the terms — doing both at once is what made a successful payment
-// book a second order.
+// Building and issuing are separate: a scheme's per-challenge reference
+// generator is the merchant's and may record what it issues, so it runs only
+// when a challenge is ISSUED, never when a payment is held against the terms.
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -17,7 +15,11 @@ import {
 } from "@chainsafe/x402-core";
 
 import { resolve, type BaseRequirementsSpec, type SchemeAdapter } from "./scheme.js";
-import { DEFAULT_MAX_TIMEOUT_SECONDS, type PaymentRequiredOptions } from "./options.js";
+import {
+  DEFAULT_MAX_TIMEOUT_SECONDS,
+  TermsError,
+  type PaymentRequiredOptions,
+} from "./options.js";
 
 /**
  * One way to pay this request would be offered, before any per-challenge
@@ -28,6 +30,8 @@ export interface Quote<TRequirements> {
   requirements: TRequirements;
   /** Mint the reference, returning the `extra` fields carrying it. */
   mintReference?: () => Promise<Record<string, unknown>>;
+  /** Quotes sharing this (by identity) are issued one reference between them. */
+  referenceKey?: unknown;
 }
 
 /**
@@ -66,7 +70,7 @@ export async function buildQuotes<
     // A bare array leaves the resource implicit; the object form names it.
     const named = Array.isArray(built) ? { accepts: built } : built;
     if (named.accepts.length === 0) {
-      throw new Error("paymentRequired: the requirements builder returned no ways to pay");
+      throw new TermsError("paymentRequired: the requirements builder returned no ways to pay");
     }
     return {
       resource: {
@@ -75,10 +79,6 @@ export async function buildQuotes<
       },
       quotes: named.accepts.map((r) => ({ requirements: assertAtomicAmount(r) })),
     };
-  }
-
-  if (source.accepts.length === 0) {
-    throw new Error("paymentRequired: `accepts` is empty — a 402 must advertise a way to pay");
   }
 
   // The shared terms describe the sale; each entry describes one way to pay for
@@ -93,9 +93,9 @@ export async function buildQuotes<
       ? await resolve(shared.description, req)
       : `Access to ${req.path}`,
   };
-  const quotes = await Promise.all(
+  const settled = await Promise.all(
     accepts.map(async (entry) => {
-      const spec = { ...shared, ...entry } as unknown as TSpec;
+      const spec = mergeTerms<TSpec>(shared, entry);
       const part = await scheme.quote(req, spec, { facilitator: options.facilitator });
       const quote: Quote<TRequirements> = {
         requirements: assertAtomicAmount({
@@ -111,10 +111,76 @@ export async function buildQuotes<
         } as unknown as TRequirements),
       };
       if (part.mintReference) quote.mintReference = part.mintReference;
+      if (part.referenceKey !== undefined) quote.referenceKey = part.referenceKey;
       return quote;
-    }),
+    }).map((quote) => quote.then(
+      (value) => ({ value }),
+      (error: unknown) => {
+        if (error instanceof TermsError) throw error;
+        return { error };
+      },
+    )),
   );
+
+  // One way to pay that cannot be quoted does not take the others with it. A
+  // TermsError already threw above, so what is left here is the facilitator's
+  // answer changing under a running merchant — an instrument withdrawn, a
+  // deployment moved — and refusing every request then, paid ones included,
+  // loses sales another entry would have taken.
+  const quotes = settled.flatMap((r) => ("value" in r ? [r.value] : []));
+  const failed = settled.flatMap((r, i) => ("error" in r ? [{ at: i, error: r.error }] : []));
+
+  if (quotes.length === 0) {
+    // Nothing left to advertise, so the request cannot be answered. A single
+    // cause is rethrown as it came: an ambiguity the merchant must resolve
+    // reads better unwrapped than wrapped in a count.
+    if (failed.length === 1) throw failed[0].error;
+    throw new Error(
+      `paymentRequired: no way to pay could be quoted — ${failed
+        .map((f) => `${f.at + 1}: ${errMsg(f.error)}`)
+        .join("; ")}`,
+    );
+  }
+  for (const { at, error } of failed) report(options, req, at, error);
   return { resource, quotes };
+}
+
+/** Tell the merchant a way to pay was dropped, without letting that throw. */
+function report<
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>,
+  req: Request,
+  at: number,
+  error: unknown,
+): void {
+  if (!options.onQuoteError) return;
+  const hook = options.onQuoteError;
+  void Promise.resolve()
+    .then(() => hook(new Error(`way to pay ${at + 1}: ${errMsg(error)}`, { cause: error }), req))
+    .catch(() => {});
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * The shared terms with whatever an entry actually names laid over them.
+ *
+ * Not a spread: `{ ...shared, ...entry }` lets an entry holding an explicit
+ * `undefined` — `payTo: someVar` where `someVar` is undefined — erase the
+ * shared value, and without `exactOptionalPropertyTypes` the compiler says
+ * nothing. Only keys the entry gives a value to override.
+ */
+function mergeTerms<TSpec>(shared: object, entry: object): TSpec {
+  const merged: Record<string, unknown> = { ...shared };
+  for (const [key, value] of Object.entries(entry)) {
+    if (value !== undefined) merged[key] = value;
+  }
+  return merged as TSpec;
 }
 
 /**
@@ -127,13 +193,26 @@ export async function buildQuotes<
 export async function issueChallenge<TRequirements extends X402PaymentRequirements<unknown>>(
   quotes: Array<Quote<TRequirements>>,
 ): Promise<TRequirements[]> {
+  // Quotes sharing a reference generator are issued one reference between
+  // them. A generator may book an order, and a 402 is one sale however many
+  // ways it offers to pay for it — minting per entry would book N and be paid
+  // for one, with nothing in the generator's arguments to tell them apart.
+  const shared = new Map<unknown, Promise<Record<string, unknown>>>();
   return Promise.all(
     quotes.map(async (quote) => {
-      if (!quote.mintReference) return quote.requirements;
-      const minted = await quote.mintReference();
+      const mint = quote.mintReference;
+      if (!mint) return quote.requirements;
+      const key = quote.referenceKey;
+      let minted: Promise<Record<string, unknown>>;
+      if (key === undefined) {
+        minted = mint();
+      } else {
+        minted = shared.get(key) ?? mint();
+        shared.set(key, minted);
+      }
       return {
         ...quote.requirements,
-        extra: { ...(quote.requirements.extra as Record<string, unknown>), ...minted },
+        extra: { ...(quote.requirements.extra as Record<string, unknown>), ...(await minted) },
       };
     }),
   );
@@ -150,7 +229,7 @@ function assertAtomicAmount<TRequirements extends X402PaymentRequirements<unknow
   r: TRequirements,
 ): TRequirements {
   if (!isValidAmount(r.amount)) {
-    throw new Error(
+    throw new TermsError(
       `paymentRequired: amount "${r.amount}" is not an integer string of atomic units`,
     );
   }

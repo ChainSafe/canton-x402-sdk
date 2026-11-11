@@ -1,10 +1,8 @@
 // What a merchant configures, and what it gets back on a paid request.
 //
-// The shape follows the 402 the spec defines: x402 v2 §5.1.2's `PaymentRequired`
-// is ONE resource with a LIST of ways to pay, and `PaymentRequirements` carries
-// no resource of its own. So the resource is named once and the ways to pay are
-// a list, with no privileged first entry — the merchant's terms, not "the"
-// payment plus some extras.
+// The shape follows x402 v2 §5.1.2's `PaymentRequired`: ONE resource and a
+// LIST of ways to pay. So the resource is named once and the entries are a
+// list, with no privileged first entry.
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -22,17 +20,32 @@ import type { FacilitatorClient } from "@chainsafe/x402-client";
 import type { BaseRequirementsSpec, Resolvable, SchemeAdapter, SharedTerms } from "./scheme.js";
 import type { CantonRequirementsSpec } from "./schemes/canton-exact.js";
 
+/**
+ * The merchant's configuration is wrong.
+ *
+ * Separated from a failure to quote against the facilitator, which is the
+ * environment changing and leaves the other ways to pay standing. A merchant
+ * error is never skipped: it would drop a way to pay silently and the fix is
+ * in the merchant's own hands.
+ */
+export class TermsError extends Error {
+  override readonly name = "TermsError";
+}
+
 /** Seconds a client is given to pay, when the merchant names none. */
 export const DEFAULT_MAX_TIMEOUT_SECONDS = 60;
 
 /**
  * One way to pay: a scheme's spec minus the fields named once for all of them.
  *
- * Any shared field may still be set here to override it — a second instrument
- * settling to a different party, say — but nothing has to be repeated.
+ * Most shared fields may still be set here to override them — a second
+ * instrument settling to a different party, say — but nothing has to be
+ * repeated. `resource` and `description` are not among them: a 402 names ONE
+ * resource (x402 v2 §5.1.2), so entries disagreeing about it would make the
+ * envelope describe one sale and its entries another.
  */
 export type AcceptSpec<TSpec extends BaseRequirementsSpec> = Omit<TSpec, keyof SharedTerms> &
-  Partial<SharedTerms>;
+  Partial<Omit<SharedTerms, "resource" | "description">>;
 
 /**
  * The merchant's terms: what is being sold, and the ways to pay for it.
@@ -121,17 +134,11 @@ export interface PaymentRequiredOptions<
    * },
    * ```
    *
-   * After verify, not before, because `requirements` is what the PAYER echoed.
-   * Until the facilitator has held the signed transfer against it, a memo here
-   * is one the payer claims rather than one it committed to — and this hook is
-   * where merchants reserve stock or mark an order claimed, which must not
-   * happen on an unverified claim. It is also the first point at which `payer`
-   * is known at all: the payload names none (spec Rule 8), so the payer is the
-   * verified transfer's sender.
-   *
-   * The cost is that a refusal here spends a verify round-trip. Wrong scheme,
-   * payTo, resource or price are all refused earlier by policy, and verify
-   * moves no funds — settle is what does, and a refusal still precedes it.
+   * Running after verify means `requirements` has been held against the signed
+   * transfer, so a memo here is one the payer committed to rather than one it
+   * claims — safe to reserve stock or mark an order claimed on. `payer` is the
+   * verified transfer's sender, and is unavailable before this point: the
+   * payload names none (spec Rule 8).
    *
    * With `settle: false` nothing settles, and this is the last gate before the
    * request is let through.
@@ -153,11 +160,31 @@ export interface PaymentRequiredOptions<
    * logs nothing itself. A throw (or a rejected promise from an async hook) is
    * swallowed so it can't break the response or crash the process.
    */
-  onReject?: (rejection: PaymentRejectionInfo, req: Request) => void | Promise<void>;
+  onReject?: (
+    rejection: PaymentRejectionInfo<TRequirements, TPayload>,
+    req: Request,
+  ) => void | Promise<void>;
+  /**
+   * Called when a way to pay could not be quoted and was left out of the 402,
+   * e.g. the facilitator no longer settles the instrument it names. The
+   * request is still answered, from the entries that did quote.
+   *
+   * Nothing else reports this: the 402 simply has fewer entries, so without a
+   * hook a way to pay can disappear unnoticed. Fires once per dropped entry
+   * per request, so throttle if you log it. A throw (or a rejected promise) is
+   * swallowed, as with {@link PaymentRequiredOptions.onReject}.
+   *
+   * Not called when NO entry can be quoted — there is nothing to answer with
+   * then, and the request fails as a `500`.
+   */
+  onQuoteError?: (error: Error, req: Request) => void | Promise<void>;
 }
 
 /** What `PaymentRequiredOptions.onReject` receives. */
-export interface PaymentRejectionInfo {
+export interface PaymentRejectionInfo<
+  TRequirements extends X402PaymentRequirements<unknown> = CantonPaymentRequirements,
+  TPayload extends X402PaymentPayload<unknown> = CantonPaymentPayload,
+> {
   /** HTTP status sent: 402 (payment rejected), 502 (facilitator error), 500 (middleware error). */
   status: 402 | 502 | 500;
   /** The `error` code in the response body (e.g. `invalid_exact_canton_signature_invalid`, `facilitator_error`). */
@@ -173,6 +200,23 @@ export interface PaymentRejectionInfo {
   extensions?: Record<string, unknown>;
   /** The underlying error, for a 502 or 500. */
   error?: unknown;
+  /**
+   * The payment this refusal is about, once one has been decoded and the
+   * scheme has vouched for its shape. Absent for a request that carried none,
+   * one whose header would not decode, and a failure to build the terms.
+   *
+   * It is what lets a merchant undo work {@link PaymentRequiredOptions.preSettle}
+   * did — releasing stock it reserved, reopening an order it marked claimed —
+   * when settle fails afterwards. `requirements.extra` carries whatever
+   * reference the merchant quoted.
+   */
+  payment?: {
+    payload: TPayload;
+    /** The `accepts[]` entry the payer chose, as `preSettle` received it. */
+    requirements: TRequirements;
+    /** The verified transfer's sender, once verify has named it. */
+    payer?: string;
+  };
 }
 
 /**
@@ -204,3 +248,48 @@ declare global {
 
 /** Re-exported so a merchant writing a spec does not need two imports. */
 export type { Resolvable };
+
+/**
+ * Throws when the terms cannot produce a 402.
+ *
+ * Both checks are on what the merchant wrote, so both run once, when the route
+ * is mounted — a request cannot change either answer, and answering 500 to
+ * every request for a config mistake hides it.
+ *
+ * - `accepts` must offer something: a 402 with no way to pay cannot be paid.
+ * - No two entries may be the same way to pay. A payer chooses by what an
+ *   entry says, and the asset is what says it, so two in one asset leave only
+ *   price to choose on and the dearer can never be paid. The scheme reads each
+ *   entry's key ({@link SchemeAdapter.distinctKey}); an entry whose asset is a
+ *   resolver has none and is not checked.
+ *
+ * A builder is skipped entirely: it answers per request.
+ */
+export function assertUsableTerms<
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  source: PaymentRequiredOptions<TSpec, TRequirements, TPayload>["requirements"],
+  scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
+): void {
+  if (typeof source === "function") return;
+  const { accepts, ...shared } = source;
+  if (accepts.length === 0) {
+    throw new TermsError("paymentRequired: `accepts` is empty — a 402 must advertise a way to pay");
+  }
+  const seen = new Map<string, number>();
+  accepts.forEach((entry, i) => {
+    const key = scheme.distinctKey?.({ ...shared, ...entry } as unknown as TSpec);
+    if (key === undefined) return;
+    const first = seen.get(key);
+    if (first !== undefined) {
+      throw new TermsError(
+        `paymentRequired: ways to pay ${first + 1} and ${i + 1} are both in ${key}. ` +
+          `A payer cannot tell them apart, so only the cheaper would ever be paid — ` +
+          `give them different assets, or quote one.`,
+      );
+    }
+    seen.set(key, i);
+  });
+}

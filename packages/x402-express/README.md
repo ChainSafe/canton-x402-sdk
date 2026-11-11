@@ -40,7 +40,7 @@ app.use(
     requirements: {
       payTo: "merchant::1220…",
       accepts: [
-        { amount: "500000000" }, // atomic units: 1 CC = 1e10, so this is 0.05 CC
+        { amount: "500000000", asset: "Amulet" }, // atomic units: 1 CC = 1e10
       ],
       // `network` and `asset` are read from the facilitator's /v2/supported.
       // Set them to pin them yourself.
@@ -85,6 +85,12 @@ A browser page on another origin can read `PAYMENT-REQUIRED` and
 `Access-Control-Expose-Headers`, and can send `PAYMENT-SIGNATURE` only if the
 preflight allows it in `Access-Control-Allow-Headers`.
 
+A header in the pre-spec `{ payment, requirements }` shape, a payment with no
+`accepted`, or one whose `accepted` is not a whole `PaymentRequirements` (one of
+`scheme`, `network`, `amount`, `asset` and `payTo` missing or empty, or a
+`maxTimeoutSeconds` that is not a whole number of at least 1), is `bad_payload`
+— the codec refuses it before the middleware reads anything.
+
 The decoded header is **guarded before anything reads a field off it**. The
 payment envelope is a loose object — `payload.payload` is `{}` as far as it
 is concerned, and `extra` is not required at all — so the scheme's
@@ -118,7 +124,7 @@ can actually pay.
 
 Canton's `exact` is the default and needs no wiring, but nothing in the
 middleware is canton-shaped. It owns the HTTP flow and the fields x402 v2 gives
-every scheme — `scheme`, `network`, `payTo`, `asset`, `amount`,
+every scheme — `scheme`, `network`, `payTo`, `asset`, `amount` and
 `maxTimeoutSeconds`. A **scheme adapter** owns `extra`:
 
 ```ts
@@ -127,23 +133,32 @@ interface SchemeAdapter<TSpec, TRequirements, TPayload> {
   // The only things that have checked a header someone else sent.
   acceptsRequirements(r: X402PaymentRequirements<unknown>): r is TRequirements;
   acceptsPayload(p: X402PaymentPayload<unknown>): p is TPayload;
+  // Who paid, read from the payload when the facilitator does not say.
+  payerOf(payload: TPayload): string | undefined;
   // How each field of `extra` is held against the merchant's.
   extraRules: RuleTable;
   // Build the scheme's part of a quote, including its per-challenge reference.
   quote(req, spec: TSpec, ctx): Promise<SchemeQuote>;
+  // Optional. What makes one entry a distinct way to pay, and the code to
+  // refuse with when no payer can be read.
+  distinctKey?(spec: TSpec): string | undefined;
+  unreadablePayerReason?: string;
 }
 ```
 
 `quote()` returns the `scheme`, `network` and `asset` to advertise, the `extra`
 to carry, and optionally a `mintReference()` the middleware calls **only when it
 issues a challenge** — the same once-per-challenge discipline canton-exact's
-`memo` gets, under whatever key your scheme uses.
+`memo` gets, under whatever key your scheme uses. A quote may also carry a
+`referenceKey`: quotes sharing one (by identity) are issued a single reference
+between them, so a 402 offering several ways to pay books one order rather than
+one per entry.
 
 ```ts
 app.use("/paid", paymentRequired<VoucherSpec, VoucherRequirements, VoucherPayload>({
   facilitator,
   scheme: voucherScheme,
-  requirements: { payTo: "shop::1", amount: "10", book: "autumn-2026" },
+  requirements: { payTo: "shop::1", accepts: [{ amount: "10", book: "autumn-2026" }] },
 }));
 ```
 
@@ -158,7 +173,9 @@ TPayload>` is exported for a route gated on another.
 | `scheme` | The payment scheme to gate on. Default `cantonExact` — Canton's registered `exact`. See [Another scheme](#another-scheme). |
 | `settle` | Capture via `/v2/settle` after verify. Default `false`. |
 | `requirements` | How to produce the `PaymentRequirements`: a **spec** or a **builder** (see below). |
-| `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error? }`, where `extensions` is the facilitator's full verify detail, with the code it answered with before the spec's in `extensions.reason`. May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
+| `preSettle` | `(payment, req) => string \| undefined`, your own say on a verified payment, run after verify and before anything settles. Return a short reason to refuse it, or nothing to let it through; see below. |
+| `onQuoteError` | `(error, req) => void`, called when a way to pay could not be quoted and was left out of the 402 — the facilitator no longer settles the instrument it names, say. The request is still answered from the entries that did quote, so without this a way to pay can disappear unnoticed. Fires once per dropped entry per request; a throw is swallowed. |
+| `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error?, payment? }`, where `extensions` is the facilitator's full verify detail, with the code it answered with before the spec's in `extensions.reason`, and `payment` is the payload, requirements and payer this refusal is about when one was decoded. May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
 
 ### `requirements`
 
@@ -173,8 +190,8 @@ requirements: {
 
   // the ways to pay, each advertised as one accepts[] entry
   accepts: [
-    { amount: "500000000" },                      // 0.05 CC
-    { amount: "250000", instrument: "USDCx" },    // priced separately
+    { amount: "500000000", asset: "Amulet" },   // 0.05 CC
+    { amount: "250000", asset: "USDCx" },       // priced separately
   ],
 }
 ```
@@ -204,7 +221,9 @@ preSettle: async ({ requirements, payer }) => {
 },
 ```
 
-**After verify, not before.** `requirements` is what the payer echoed; until the facilitator has held the signed transfer against it, a memo there is claimed rather than committed to — and this is where merchants reserve stock or mark an order claimed, which must not run on an unverified claim. It is also the only point at which `payer` exists: the payload names none, so the payer is the verified transfer's sender. The price is that a refusal here spends a verify round-trip; wrong scheme, payee or amount are refused earlier by policy, and verify moves no funds.
+**After verify, not before.** Running there means `requirements` has been held against the signed transfer, so a memo is one the payer committed to rather than one it claims — safe to reserve stock or mark an order claimed on. `payer` is the verified transfer's sender, and does not exist before this point: the payload names none.
+
+**Undoing it.** Settle can still fail after `preSettle` has reserved something. `onReject` then receives `payment` — the payload, the requirements as `preSettle` saw them, and the payer — so the order to release is `payment.requirements.extra.memo`, with no need to decode the header again. It is absent when there was no payment to name: an unpaid request, a header that would not decode, or a failure to build the terms.
 
 It is not memo-specific — it is where any check needing your own records belongs. With `settle: false` it is simply the last gate before the request is let through.
 
