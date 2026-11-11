@@ -125,7 +125,7 @@ can actually pay.
 Canton's `exact` is the default and needs no wiring, but nothing in the
 middleware is canton-shaped. It owns the HTTP flow and the fields x402 v2 gives
 every scheme — `scheme`, `network`, `payTo`, `resource`, `asset`, `amount`,
-`description`, `maxTimeoutSeconds`. A **scheme adapter** owns `extra`:
+`description` and `maxTimeoutSeconds`. A **scheme adapter** owns `extra`:
 
 ```ts
 interface SchemeAdapter<TSpec, TRequirements, TPayload> {
@@ -133,10 +133,16 @@ interface SchemeAdapter<TSpec, TRequirements, TPayload> {
   // The only things that have checked a header someone else sent.
   acceptsRequirements(r: X402PaymentRequirements<unknown>): r is TRequirements;
   acceptsPayload(p: X402PaymentPayload<unknown>): p is TPayload;
+  // Who paid, read from the payload when the facilitator does not say.
+  payerOf(payload: TPayload): string | undefined;
   // How each field of `extra` is held against the merchant's.
   extraRules: RuleTable;
   // Build the scheme's part of a quote, including its per-challenge reference.
   quote(req, spec: TSpec, ctx): Promise<SchemeQuote>;
+  // Optional. What makes one entry a distinct way to pay, and the code to
+  // refuse with when no payer can be read.
+  distinctKey?(spec: TSpec): string | undefined;
+  unreadablePayerReason?: string;
 }
 ```
 
@@ -149,7 +155,7 @@ issues a challenge** — the same once-per-challenge discipline canton-exact's
 app.use("/paid", paymentRequired<VoucherSpec, VoucherRequirements, VoucherPayload>({
   facilitator,
   scheme: voucherScheme,
-  requirements: { payTo: "shop::1", amount: "10", book: "autumn-2026" },
+  requirements: { payTo: "shop::1", accepts: [{ amount: "10", book: "autumn-2026" }] },
 }));
 ```
 

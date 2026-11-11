@@ -38,11 +38,14 @@ export const DEFAULT_MAX_TIMEOUT_SECONDS = 60;
 /**
  * One way to pay: a scheme's spec minus the fields named once for all of them.
  *
- * Any shared field may still be set here to override it — a second instrument
- * settling to a different party, say — but nothing has to be repeated.
+ * Most shared fields may still be set here to override them — a second
+ * instrument settling to a different party, say — but nothing has to be
+ * repeated. `resource` and `description` are not among them: a 402 names ONE
+ * resource (x402 v2 §5.1.2), so entries disagreeing about it would make the
+ * envelope describe one sale and its entries another.
  */
 export type AcceptSpec<TSpec extends BaseRequirementsSpec> = Omit<TSpec, keyof SharedTerms> &
-  Partial<SharedTerms>;
+  Partial<Omit<SharedTerms, "resource" | "description">>;
 
 /**
  * The merchant's terms: what is being sold, and the ways to pay for it.

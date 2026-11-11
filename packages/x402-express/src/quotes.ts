@@ -29,6 +29,8 @@ export interface Quote<TRequirements> {
   requirements: TRequirements;
   /** Mint the reference, returning the `extra` fields carrying it. */
   mintReference?: () => Promise<Record<string, unknown>>;
+  /** Quotes sharing this (by identity) are issued one reference between them. */
+  referenceKey?: unknown;
 }
 
 /**
@@ -55,6 +57,16 @@ export async function buildQuotes<
     if (built.length === 0) {
       throw new TermsError("paymentRequired: the requirements builder returned no ways to pay");
     }
+    // A 402 names ONE resource. The declarative form cannot disagree — entries
+    // do not override it — but a builder returns finished requirements, so it
+    // can, and the envelope would quietly take the first.
+    const resources = new Set(built.map((r) => r.resource));
+    if (resources.size > 1) {
+      throw new TermsError(
+        `paymentRequired: the requirements builder returned ${resources.size} different resources ` +
+          `(${[...resources].map((r) => r ?? "none").join(", ")}). A 402 names one.`,
+      );
+    }
     return built.map((r) => ({ requirements: assertAtomicAmount(r) }));
   }
 
@@ -64,7 +76,7 @@ export async function buildQuotes<
   const { accepts, ...shared } = source;
   const settled = await Promise.all(
     accepts.map(async (entry) => {
-      const spec = { ...shared, ...entry } as unknown as TSpec;
+      const spec = mergeTerms<TSpec>(shared, entry);
       const part = await scheme.quote(req, spec, { facilitator: options.facilitator });
       const quote: Quote<TRequirements> = {
         requirements: assertAtomicAmount({
@@ -84,6 +96,7 @@ export async function buildQuotes<
         } as unknown as TRequirements),
       };
       if (part.mintReference) quote.mintReference = part.mintReference;
+      if (part.referenceKey !== undefined) quote.referenceKey = part.referenceKey;
       return quote;
     }).map((quote) => quote.then(
       (value) => ({ value }),
@@ -142,6 +155,22 @@ function errMsg(err: unknown): string {
 
 
 /**
+ * The shared terms with whatever an entry actually names laid over them.
+ *
+ * Not a spread: `{ ...shared, ...entry }` lets an entry holding an explicit
+ * `undefined` — `payTo: someVar` where `someVar` is undefined — erase the
+ * shared value, and without `exactOptionalPropertyTypes` the compiler says
+ * nothing. Only keys the entry gives a value to override.
+ */
+function mergeTerms<TSpec>(shared: object, entry: object): TSpec {
+  const merged: Record<string, unknown> = { ...shared };
+  for (const [key, value] of Object.entries(entry)) {
+    if (value !== undefined) merged[key] = value;
+  }
+  return merged as TSpec;
+}
+
+/**
  * Turn quotes into a challenge's `accepts[]`, minting each reference.
  *
  * The only caller of a scheme's reference generator, which is what makes "once
@@ -151,13 +180,26 @@ function errMsg(err: unknown): string {
 export async function issueChallenge<TRequirements extends X402PaymentRequirements<unknown>>(
   quotes: Array<Quote<TRequirements>>,
 ): Promise<TRequirements[]> {
+  // Quotes sharing a reference generator are issued one reference between
+  // them. A generator may book an order, and a 402 is one sale however many
+  // ways it offers to pay for it — minting per entry would book N and be paid
+  // for one, with nothing in the generator's arguments to tell them apart.
+  const shared = new Map<unknown, Promise<Record<string, unknown>>>();
   return Promise.all(
     quotes.map(async (quote) => {
-      if (!quote.mintReference) return quote.requirements;
-      const minted = await quote.mintReference();
+      const mint = quote.mintReference;
+      if (!mint) return quote.requirements;
+      const key = quote.referenceKey;
+      let minted: Promise<Record<string, unknown>>;
+      if (key === undefined) {
+        minted = mint();
+      } else {
+        minted = shared.get(key) ?? mint();
+        shared.set(key, minted);
+      }
       return {
         ...quote.requirements,
-        extra: { ...(quote.requirements.extra as Record<string, unknown>), ...minted },
+        extra: { ...(quote.requirements.extra as Record<string, unknown>), ...(await minted) },
       };
     }),
   );

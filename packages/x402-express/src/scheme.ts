@@ -182,6 +182,18 @@ export interface SchemeQuote {
    * may do something recordable in here. Absent when the quote carries none.
    */
   mintReference?: () => Promise<Record<string, unknown>>;
+  /**
+   * Which quotes share one reference, compared by identity.
+   *
+   * A 402 is one sale with several ways to pay, so entries inheriting the
+   * merchant's one generator must be issued one reference between them — a
+   * generator that books an order would otherwise book one per entry and be
+   * paid for one. Entries naming different generators get different keys, and
+   * so a reference each.
+   *
+   * Absent means "nothing to share with": this quote mints its own.
+   */
+  referenceKey?: unknown;
 }
 
 /**

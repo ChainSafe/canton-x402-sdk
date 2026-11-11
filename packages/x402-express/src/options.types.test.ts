@@ -53,8 +53,15 @@ const overrides: Accept = {
   payTo: "merchant::other",
   network: "canton:devnet",
   maxTimeoutSeconds: 120,
-  resource: "https://elsewhere.example",
 };
+
+/* ── except the two that describe the sale, not the way to pay ───────────── */
+
+// @ts-expect-error — a 402 names ONE resource, so entries cannot disagree
+const perEntryResource: Accept = { amount: "1", asset: "Amulet", resource: "https://elsewhere.example" };
+
+// @ts-expect-error — same for the text describing it
+const perEntryDescription: Accept = { amount: "1", asset: "Amulet", description: "something else" };
 
 /* ── the scheme's own fields survive the Omit ────────────────────────────── */
 
@@ -110,6 +117,8 @@ it("is a typecheck assertion; `pnpm typecheck` is what enforces it", () => {
     pinned,
     halfPinned,
     overrides,
+    perEntryResource,
+    perEntryDescription,
     cantonFields,
     unknownField,
     terms,
@@ -119,5 +128,5 @@ it("is a typecheck assertion; `pnpm typecheck` is what enforces it", () => {
     singleBuilder,
     payerIsCertain,
     noFacilitator,
-  ]).toHaveLength(15);
+  ]).toHaveLength(17);
 });

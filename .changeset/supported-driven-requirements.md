@@ -142,6 +142,29 @@ decode, a failure to build the terms. `PaymentRejectionInfo` is generic over
 the scheme's types now, defaulting to canton-exact's. Found in review by
 @dimartiro.
 
+**One reference per challenge, not one per way to pay.** A reference generator
+may book an order, and a 402 is one sale however many ways it offers to pay for
+it. Entries given the merchant's one `memo` generator — the same function, since
+`memo` is a per-entry field — now share the reference it mints, so a two-entry
+402 books one order and whichever way the payer picks reconciles against it. Minting per entry booked N
+and was paid for one, with nothing in the generator's arguments — it is given
+only `req` — to tell the entries apart. Entries naming their own generator still
+get their own reference, since that is the merchant asking for one. Schemes say
+which quotes share through the new `SchemeQuote.referenceKey`.
+
+**An entry no longer erases a shared term with an explicit `undefined`.**
+`{ payTo: someVar }` where `someVar` is undefined used to wipe the shared
+`payTo`, and `exactOptionalPropertyTypes` is off so nothing caught it. Only keys
+an entry gives a value to override.
+
+**`resource` and `description` are not per-entry overrides.** A 402 names ONE
+resource (§5.1.2), so entries disagreeing about it would have the envelope
+describe one sale and its entries another. A builder returns finished
+requirements and so can still disagree; it is refused when it does, rather than
+the envelope quietly taking the first entry's.
+
+Found in review by @dimartiro.
+
 ### Three fixes
 
 **A successful payment no longer mints a second merchant reference.** The `memo`

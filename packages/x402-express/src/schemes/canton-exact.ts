@@ -176,7 +176,12 @@ export const cantonExact: SchemeAdapter<
       },
     };
     const mint = spec.memo;
-    if (mint) quote.mintReference = async () => ({ memo: await mint(req) });
+    if (mint) {
+      quote.mintReference = async () => ({ memo: await mint(req) });
+      // The generator itself: entries that inherited the merchant's one memo
+      // from the shared terms carry the same function, so they share a memo.
+      quote.referenceKey = mint;
+    }
     return quote;
   },
 };

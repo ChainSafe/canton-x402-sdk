@@ -1969,4 +1969,185 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     });
   });
 
+
+  it("keeps a shared term when an entry holds an explicit undefined", async () => {
+    // `payTo: someVar` where someVar is undefined used to erase the shared
+    // payee, and exactOptionalPropertyTypes is off so nothing caught it.
+    stubFacilitator();
+    const app = express();
+    const absent = undefined as string | undefined;
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::shared",
+          resource: "https://f.example/paid",
+          accepts: [
+            {
+              amount: "500000000",
+              asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+              payTo: absent,
+            },
+          ],
+        },
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(402);
+    expect(res.body.accepts[0].payTo).toBe("merchant::shared");
+  });
+
+
+  it("books ONE order for a challenge, however many ways it offers to pay", async () => {
+    // The generator only gets `req`, so it cannot tell entries apart. Minting
+    // per entry would book N orders and be paid for one.
+    stubFacilitator();
+    const booked: string[] = [];
+    let n = 0;
+    // The merchant's one generator, given to both entries — `memo` is a
+    // per-entry field, so this is how one is shared.
+    const bookOrder = () => {
+      const ref = `order-${++n}`;
+      booked.push(ref);
+      return ref;
+    };
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          accepts: [
+            {
+              amount: "500000000",
+              asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+              memo: bookOrder,
+            },
+            {
+              amount: "250000",
+              asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } },
+              memo: bookOrder,
+            },
+          ],
+        },
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(402);
+    expect(booked).toEqual(["order-1"]);
+    // And both ways to pay carry it, so whichever the payer picks reconciles.
+    expect(res.body.accepts.map((a: { extra: { memo: string } }) => a.extra.memo)).toEqual([
+      "order-1",
+      "order-1",
+    ]);
+  });
+
+  it("gives entries their own reference when they name their own generator", async () => {
+    // Different generators is the merchant asking for different references.
+    stubFacilitator();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          accepts: [
+            {
+              amount: "500000000",
+              asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+              memo: () => "cc-order",
+            },
+            {
+              amount: "250000",
+              asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } },
+              memo: () => "usdc-order",
+            },
+          ],
+        },
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.body.accepts.map((a: { extra: { memo: string } }) => a.extra.memo)).toEqual([
+      "cc-order",
+      "usdc-order",
+    ]);
+  });
+
+
+  it("refuses a builder whose ways to pay name different resources", async () => {
+    // Entries cannot override `resource`, but a builder returns finished
+    // requirements — and the envelope takes one resource, so it would silently
+    // be the first.
+    stubFacilitator();
+    const built = {
+      scheme: "exact",
+      network: "canton:x",
+      amount: "500000000",
+      asset: "CC",
+      payTo: "merchant::x",
+      maxTimeoutSeconds: 60,
+      extra: {
+        assetTransferMethod: "transfer-factory",
+        executeBeforeSeconds: 120,
+        instrumentId: { id: "Amulet", admin: "DSO::x" },
+      },
+    } as CantonPaymentRequirements;
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: () => [
+          { ...built, resource: "https://merchant.example/report" },
+          { ...built, amount: "250000", resource: "https://merchant.example/other" },
+        ],
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(500);
+    expect(res.body.details).toMatch(/A 402 names one/);
+  });
+
+  it("takes a builder whose ways to pay agree on the resource", async () => {
+    stubFacilitator();
+    const built = {
+      scheme: "exact",
+      network: "canton:x",
+      amount: "500000000",
+      asset: "CC",
+      payTo: "merchant::x",
+      resource: "https://merchant.example/report",
+      maxTimeoutSeconds: 60,
+      extra: {
+        assetTransferMethod: "transfer-factory",
+        executeBeforeSeconds: 120,
+        instrumentId: { id: "Amulet", admin: "DSO::x" },
+      },
+    } as CantonPaymentRequirements;
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        requirements: () => [built, { ...built, amount: "250000", asset: "USDCx" }],
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(402);
+    expect(res.body.resource.url).toBe("https://merchant.example/report");
+  });
+
 });
