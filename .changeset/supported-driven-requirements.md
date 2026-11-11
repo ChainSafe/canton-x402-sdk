@@ -132,6 +132,16 @@ worse than refusing. Pin `network` to settle it.
 
 Found in review by @dimartiro.
 
+**`onReject` names the payment it is about.** `PaymentRejectionInfo` gains an
+optional `payment` — the payload, the requirements as `preSettle` received
+them, and the payer. `preSettle`'s docs invite reserving stock or marking an
+order claimed, and settle can fail afterwards; before this there was no way to
+tell which order to release short of decoding the header out of `req` again.
+Absent when nothing was decoded: an unpaid request, a header that would not
+decode, a failure to build the terms. `PaymentRejectionInfo` is generic over
+the scheme's types now, defaulting to canton-exact's. Found in review by
+@dimartiro.
+
 ### Three fixes
 
 **A successful payment no longer mints a second merchant reference.** The `memo`

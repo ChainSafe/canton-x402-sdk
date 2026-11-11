@@ -19,7 +19,12 @@ import {
 
 import type { BaseRequirementsSpec, SchemeAdapter } from "./scheme.js";
 import { cantonExact, type CantonRequirementsSpec } from "./schemes/canton-exact.js";
-import { assertUsableTerms, type PaymentRequiredOptions, type X402RequestState } from "./options.js";
+import {
+  assertUsableTerms,
+  type PaymentRejectionInfo,
+  type PaymentRequiredOptions,
+  type X402RequestState,
+} from "./options.js";
 import { buildQuotes, type Quote } from "./quotes.js";
 import { assertAcceptedQuote, rulesFor } from "./policy.js";
 import { PaymentRejection, respondToFailure } from "./response.js";
@@ -80,6 +85,9 @@ export function paymentRequired<
     // paid request needs terms to hold the payment against, a challenge needs
     // terms to advertise. The failure path reuses whatever was built here.
     let quotes: Array<Quote<TRequirements>> | undefined;
+    // Kept for the failure path: a refusal after this point names the payment
+    // it refused, so a merchant can undo whatever `preSettle` did.
+    let payment: PaymentRejectionInfo<TRequirements, TPayload>["payment"];
     try {
       // The spec's name first. X-PAYMENT is the name this SDK used before, and
       // is still read for a payment of this shape sent under it. A 0.1.x payer
@@ -113,8 +121,9 @@ export function paymentRequired<
       if (!scheme.acceptsRequirements(decoded.accepted)) {
         throw new PaymentRejection("policy_requirements_invalid");
       }
-      const payload = decoded;
-      const accepted = decoded.accepted;
+      const payload = decoded as TPayload;
+      const accepted = decoded.accepted as TRequirements;
+      payment = { payload, requirements: accepted };
 
       quotes = await buildQuotes(req, options, scheme);
       assertAcceptedQuote(accepted, quotes, rules);
@@ -134,6 +143,7 @@ export function paymentRequired<
       // response, so ask the scheme to read its own when it is left out. Before
       // settling, so a payment is never captured for a request we then fail.
       const payer = verify.payer ?? scheme.payerOf(payload);
+      payment = { ...payment, payer };
       if (!payer) {
         // Worded as the scheme's verifier words an undecodable transfer, with
         // the protocol-level reason kept in `extensions` for a reader that
@@ -175,7 +185,7 @@ export function paymentRequired<
       } as X402RequestState;
       next();
     } catch (err) {
-      await respondToFailure(err, req, res, options, scheme, quotes);
+      await respondToFailure(err, req, res, options, scheme, quotes, payment);
     }
   };
 }

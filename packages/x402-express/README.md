@@ -164,7 +164,7 @@ TPayload>` is exported for a route gated on another.
 | `scheme` | The payment scheme to gate on. Default `cantonExact` — Canton's registered `exact`. See [Another scheme](#another-scheme). |
 | `settle` | Capture via `/v2/settle` after verify. Default `false`. |
 | `requirements` | How to produce the `PaymentRequirements`: a **spec** or a **builder** (see below). |
-| `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error? }`, where `extensions` is the facilitator's full verify detail, with the code it answered with before the spec's in `extensions.reason`. May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
+| `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error?, payment? }`, where `extensions` is the facilitator's full verify detail, with the code it answered with before the spec's in `extensions.reason`, and `payment` is the payload, requirements and payer this refusal is about when one was decoded. May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
 
 ### `requirements`
 
@@ -210,7 +210,9 @@ preSettle: async ({ requirements, payer }) => {
 },
 ```
 
-**After verify, not before.** `requirements` is what the payer echoed; until the facilitator has held the signed transfer against it, a memo there is claimed rather than committed to — and this is where merchants reserve stock or mark an order claimed, which must not run on an unverified claim. It is also the only point at which `payer` exists: the payload names none, so the payer is the verified transfer's sender. The price is that a refusal here spends a verify round-trip; wrong scheme, payee, resource or amount are refused earlier by policy, and verify moves no funds.
+**After verify, not before.** Running there means `requirements` has been held against the signed transfer, so a memo is one the payer committed to rather than one it claims — safe to reserve stock or mark an order claimed on. `payer` is the verified transfer's sender, and does not exist before this point: the payload names none.
+
+**Undoing it.** Settle can still fail after `preSettle` has reserved something. `onReject` then receives `payment` — the payload, the requirements as `preSettle` saw them, and the payer — so the order to release is `payment.requirements.extra.memo`, with no need to decode the header again. It is absent when there was no payment to name: an unpaid request, a header that would not decode, or a failure to build the terms.
 
 It is not memo-specific — it is where any check needing your own records belongs. With `settle: false` it is simply the last gate before the request is let through.
 

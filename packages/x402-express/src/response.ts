@@ -48,8 +48,11 @@ export async function respondToFailure<
   options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>,
   scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
   built: Array<Quote<TRequirements>> | undefined,
+  // What the flow had decoded when it gave up, so a merchant can tell which
+  // payment a refusal is about. Absent before the scheme's guards have passed.
+  payment: PaymentRejectionInfo<TRequirements, TPayload>["payment"],
 ): Promise<void> {
-  let rejection: PaymentRejectionInfo | undefined;
+  let rejection: PaymentRejectionInfo<TRequirements, TPayload> | undefined;
 
   if (err instanceof PaymentRejection) {
     try {
@@ -62,6 +65,7 @@ export async function respondToFailure<
           reason: err.reason,
           details: err.details,
           extensions: err.extensions,
+          ...(payment ? { payment } : {}),
         };
       }
     } catch (buildErr) {
@@ -70,10 +74,10 @@ export async function respondToFailure<
       // left to advertise, so this cannot be a 402; it is classified the same
       // way as a throw from the main path, so discovery failing on a bare
       // request reports as the facilitator's fault and not the merchant's.
-      rejection = sendNonPaymentError(res, buildErr);
+      rejection = { ...sendNonPaymentError(res, buildErr), ...(payment ? { payment } : {}) };
     }
   } else {
-    rejection = sendNonPaymentError(res, err);
+    rejection = { ...sendNonPaymentError(res, err), ...(payment ? { payment } : {}) };
   }
 
   if (rejection && options.onReject) {
@@ -90,7 +94,7 @@ export async function respondToFailure<
  * Answer anything that is not a payment rejection: the facilitator's fault
  * (502) or ours/the merchant's (500).
  */
-function sendNonPaymentError(res: Response, err: unknown): PaymentRejectionInfo {
+function sendNonPaymentError(res: Response, err: unknown): Omit<PaymentRejectionInfo, "payment"> {
   if (err instanceof FacilitatorError) {
     res.status(502).json({ error: "facilitator_error", status: err.status, details: err.message });
     return { status: 502, reason: "facilitator_error", details: err.message, error: err };

@@ -12,7 +12,7 @@ import {
 } from "@chainsafe/x402-core";
 import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "./middleware";
-import type { PaymentRequiredOptions, RequirementsSpec } from "./options";
+import type { PaymentRejectionInfo, PaymentRequiredOptions, RequirementsSpec } from "./options";
 
 // The real decoder, spied on so a test can stand in a decodable transfer without
 // building a prepared transaction: the fixture's `preparedTransaction` is not one.
@@ -927,12 +927,40 @@ describe("paymentRequired", () => {
       const onReject = vi.fn();
       await request(makeApp({ onReject })).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
       expect(onReject).toHaveBeenCalledOnce();
-      expect(onReject.mock.calls[0][0]).toEqual({
+      const { payment, ...rest } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(rest).toEqual({
         status: 402,
         reason: "internal_error",
         details: "authorization_amount_too_low",
         extensions,
       });
+      // The payment it refused travels with it; asserted on its own below.
+      expect(payment?.requirements.payTo).toBe("merchant::x");
+    });
+
+    it("names the payment a refusal is about, so preSettle's work can be undone", async () => {
+      // The docs invite reserving stock in preSettle. When settle fails after
+      // that, this is what says which order to release.
+      stubFacilitator({
+        settle: { success: false, errorReason: "execution_failed", errorDetails: "boom" },
+      });
+      const onReject = vi.fn();
+      await request(makeApp({ settle: true, onReject }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-42" } }));
+      const { payment } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(payment?.requirements.extra.memo).toBe("order-42");
+      expect(payment?.payer).toBe("alice::x");
+      expect(payment?.payload.payload.publicKey).toBe("pk");
+    });
+
+    it("carries no payment when none was decoded", async () => {
+      // A header that will not decode, and a 402 with no payment at all: there
+      // is nothing to name, so the field is absent rather than half-filled.
+      stubFacilitator();
+      const onReject = vi.fn();
+      await request(makeApp({ onReject })).get("/paid").set("PAYMENT-SIGNATURE", "!!!");
+      expect(onReject.mock.calls[0][0]).not.toHaveProperty("payment");
     });
 
     it("reports a settle rejection", async () => {

@@ -144,7 +144,10 @@ export interface PaymentRequiredOptions<
    * logs nothing itself. A throw (or a rejected promise from an async hook) is
    * swallowed so it can't break the response or crash the process.
    */
-  onReject?: (rejection: PaymentRejectionInfo, req: Request) => void | Promise<void>;
+  onReject?: (
+    rejection: PaymentRejectionInfo<TRequirements, TPayload>,
+    req: Request,
+  ) => void | Promise<void>;
   /**
    * Called when a way to pay could not be quoted and was left out of the 402,
    * e.g. the facilitator no longer settles the instrument it names. The
@@ -162,7 +165,10 @@ export interface PaymentRequiredOptions<
 }
 
 /** What `PaymentRequiredOptions.onReject` receives. */
-export interface PaymentRejectionInfo {
+export interface PaymentRejectionInfo<
+  TRequirements extends X402PaymentRequirements<unknown> = CantonPaymentRequirements,
+  TPayload extends X402PaymentPayload<unknown> = CantonPaymentPayload,
+> {
   /** HTTP status sent: 402 (payment rejected), 502 (facilitator error), 500 (middleware error). */
   status: 402 | 502 | 500;
   /** The `error` code in the response body (e.g. `invalid_exact_canton_signature_invalid`, `facilitator_error`). */
@@ -178,6 +184,23 @@ export interface PaymentRejectionInfo {
   extensions?: Record<string, unknown>;
   /** The underlying error, for a 502 or 500. */
   error?: unknown;
+  /**
+   * The payment this refusal is about, once one has been decoded and the
+   * scheme has vouched for its shape. Absent for a request that carried none,
+   * one whose header would not decode, and a failure to build the terms.
+   *
+   * It is what lets a merchant undo work {@link PaymentRequiredOptions.preSettle}
+   * did — releasing stock it reserved, reopening an order it marked claimed —
+   * when settle fails afterwards. `requirements.extra` carries whatever
+   * reference the merchant quoted.
+   */
+  payment?: {
+    payload: TPayload;
+    /** The `accepts[]` entry the payer chose, as `preSettle` received it. */
+    requirements: TRequirements;
+    /** The verified transfer's sender, once verify has named it. */
+    payer?: string;
+  };
 }
 
 /**
