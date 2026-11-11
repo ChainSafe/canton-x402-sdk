@@ -48,10 +48,27 @@ export interface DecodedTransfer {
   executeBeforeMicros?: bigint;
   /** `meta.values["x402.memo"]`, when the payer committed one (Rule 12). */
   memo?: string;
+  /**
+   * `meta.values["x402.resourceUrl"]`, when the payer stamped the resource it
+   * is paying for. Unlike the echoed `resource`, this is INSIDE the signature,
+   * so it binds the transfer to one resource: a transfer for A cannot unlock
+   * B. Carried as the SHA-256 of the URL rather than the URL, which would
+   * publish on-ledger which API an agent is buying from.
+   */
+  resourceUrlStamp?: string;
 }
 
 /** The metadata key the scheme reserves for the merchant's memo. */
 const MEMO_KEY = "x402.memo";
+
+/**
+ * The metadata key carrying the resource stamp.
+ *
+ * An upstream convention rather than a field of the registered scheme spec,
+ * which names only `x402.memo`. The registered facilitator stamps and checks
+ * it, and tolerates its absence, so this reads it the same way.
+ */
+const RESOURCE_URL_KEY = "x402.resourceUrl";
 
 const TRANSFER_CHOICE = "TransferFactory_Transfer";
 
@@ -363,10 +380,20 @@ function readTransfer(chosenValue: Uint8Array): DecodedTransfer | null {
   // `meta` is a Metadata RECORD whose single field `values` holds the TextMap —
   // not a TextMap directly.
   const meta = pick(transfer, "meta", 7)?.record;
-  const memo = meta && pick(meta, "values", 0)?.textMap?.get(MEMO_KEY)?.str;
+  const values = meta && pick(meta, "values", 0)?.textMap;
+  const memo = values?.get(MEMO_KEY)?.str;
+  const resourceUrlStamp = values?.get(RESOURCE_URL_KEY)?.str;
 
   if (!sender || !receiver || !amount || !id || !admin) return null;
-  return { sender, receiver, amount, instrumentId: { id, admin }, executeBeforeMicros, memo };
+  return {
+    sender,
+    receiver,
+    amount,
+    instrumentId: { id, admin },
+    executeBeforeMicros,
+    memo,
+    resourceUrlStamp,
+  };
 }
 
 /**

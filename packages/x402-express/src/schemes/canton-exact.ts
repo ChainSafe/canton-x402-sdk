@@ -118,6 +118,23 @@ const EXTRA_RULES: Record<keyof typeof CantonRequirementsExtraSchema.entries, Ru
  * Pass your own {@link SchemeAdapter} to `paymentRequired` to gate a route on
  * something else; nothing in the middleware is canton-shaped.
  */
+/**
+ * The payload's decoded transfer, decoded at most once.
+ *
+ * Both `payerOf` and `resourceStampOf` want it, and decoding means gunzipping
+ * and walking a protobuf — worth doing once per payment rather than per
+ * question. Keyed on the payload object, so nothing outlives the request.
+ */
+const transfers = new WeakMap<object, ReturnType<typeof decodePayloadTransfer>>();
+
+function transferOf(payload: CantonPaymentPayload) {
+  const seen = transfers.get(payload);
+  if (seen !== undefined) return seen;
+  const decoded = decodePayloadTransfer(payload.payload.preparedTransaction);
+  transfers.set(payload, decoded);
+  return decoded;
+}
+
 export const cantonExact: SchemeAdapter<
   CantonRequirementsSpec,
   CantonPaymentRequirements,
@@ -146,10 +163,13 @@ export const cantonExact: SchemeAdapter<
     if (typeof asset === "function") return undefined;
     return typeof asset === "string" ? asset : asset.instrumentId.id;
   },
+  resourceStampOf(payload: CantonPaymentPayload): string | undefined {
+    return transferOf(payload)?.resourceUrlStamp;
+  },
   payerOf(payload: CantonPaymentPayload): string | undefined {
     // Spec Rule 8: the payer is the signed transfer's sender. It sits inside
     // what was signed, where the dropped `payer` field was a claim beside it.
-    return decodePayloadTransfer(payload.payload.preparedTransaction)?.sender;
+    return transferOf(payload)?.sender;
   },
 
   extraRules: EXTRA_RULES,

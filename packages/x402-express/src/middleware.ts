@@ -10,6 +10,7 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import {
   decodePaymentHeader,
+  resourceUrlMatchesStamp,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
   type SettleResponse,
@@ -78,7 +79,7 @@ export function paymentRequired<
   >;
   const rules = rulesFor(scheme);
   // Merchant config, so it is checked here, once, and not per request.
-  assertUsableTerms(options.requirements, scheme);
+  assertUsableTerms(options, scheme);
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     // Built at most once per request, and only when something needs them: a
@@ -128,15 +129,28 @@ export function paymentRequired<
       offer = await buildQuotes(req, options, scheme);
       assertAcceptedQuote(accepted, offer.quotes, rules);
 
-      // §5.2.2 lets a payment name the resource it is for, and it is the only
-      // place one reaches us from the payer — `accepted` is a
-      // PaymentRequirements, which carries none. Optional, so naming none is
-      // fine; naming another resource is refused. Echo fidelity, not a
-      // binding: nothing the payer sends is signed, and `extra.memo` is what
-      // ties a payment to one challenge.
+      // Two resource checks, and only the second binds anything.
+      //
+      // §5.2.2's `PaymentPayload.resource` is what the payer SAYS it is paying
+      // for. Unsigned, so a payer set on using a payment elsewhere just writes
+      // this URL — it catches a client re-sending another route's terms, not
+      // an adversary.
       const named = payload.resource?.url;
       if (named !== undefined && named !== offer.resource.url) {
         throw new PaymentRejection("policy_resource");
+      }
+
+      // The stamp is inside what the payer SIGNED, so a transfer for one
+      // resource cannot unlock another. Absent means the payment carries no
+      // binding — tolerated unless the merchant asked otherwise, since payers
+      // predating the convention do not stamp.
+      const stamp = scheme.resourceStampOf?.(payload);
+      if (stamp === undefined) {
+        if (options.requireResourceStamp) {
+          throw new PaymentRejection("policy_resource", "unstamped");
+        }
+      } else if (!resourceUrlMatchesStamp(stamp, offer.resource.url)) {
+        throw new PaymentRejection("policy_resource", "stamp");
       }
 
       const verify = await facilitator.verify(payload, accepted);
