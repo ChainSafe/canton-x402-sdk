@@ -1,6 +1,7 @@
 import {
   ASSET_TRANSFER_METHOD,
   EXACT_SCHEME_ID,
+  MEMO_KEY,
   WIRE_DECIMALS,
   atomicToLedger,
   signHash,
@@ -106,7 +107,7 @@ export class CantonX402Payer implements X402Payer {
       expirationDate: new Date(Date.now() + requirements.extra.executeBeforeSeconds * 1000),
       ...(requirements.extra.memo === undefined
         ? {}
-        : { meta: { values: { "x402.memo": requirements.extra.memo } } }),
+        : { meta: { values: { [MEMO_KEY]: requirements.extra.memo } } }),
     });
 
     // 2. Prepare (interactive submission) → prepared tx + hash to sign.
