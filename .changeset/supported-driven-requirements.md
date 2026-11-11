@@ -16,14 +16,16 @@ canton-shaped.
   }
 ```
 
-`network` is now optional and `asset` takes an instrument id. Left out or named
-by id, the rest is read from the facilitator's `/v2/supported`: the network it
-settles, and the registry party it validates holdings against. That party is the
-one the facilitator checks a payment against, so reading it from there removes
-the second copy that had to be kept true by hand when a deployment moved. Pin
-`network` and pass the whole `AssetSpec` to skip the lookup entirely — a test
-asserts `/v2/supported` is never called then. An `AssetSpec` on its own still
-reads it, for the network, narrowed to the instrument it pins.
+`network` is now optional and `asset` takes an instrument id. `asset` itself
+stays required — `amount` is atomic units of something — but naming it by id is
+enough, and the rest is read from the facilitator's `/v2/supported`: the
+network it settles, and the registry party it validates holdings against. That
+party is the one the facilitator checks a payment against, so reading it from
+there removes the second copy that had to be kept true by hand when a
+deployment moved. Pin `network` and pass the whole `AssetSpec` to skip the
+lookup entirely — a test asserts `/v2/supported` is never called then. An
+`AssetSpec` on its own still reads it, for the network, narrowed to the
+instrument it pins.
 
 Note the id, not the symbol: Canton Coin is `"Amulet"`, and `"CC"` is what goes
 on the wire. It is the one instrument where the two differ, and an id the
