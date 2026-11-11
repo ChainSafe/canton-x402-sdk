@@ -55,9 +55,11 @@ export type AcceptSpec<TSpec extends BaseRequirementsSpec> = Omit<TSpec, keyof S
  * and may name any of the scheme's once for the whole sale.
  *
  * That last part is what `memo` needs. Entries are issued ONE reference
- * between them when they carry the same generator, and naming it here is the
- * only way to hand them the same one — written out in two entries it is two
- * functions, so two references, and a generator that books an order books two.
+ * between them when they carry the same generator, and naming it here hands
+ * every entry that one function without repeating it — written out in two
+ * entries it is two functions, so two references, and a generator that books
+ * an order books two. (Hoisting it into a variable and naming that in each
+ * entry works too; this spares the repetition.)
  * A field named here that every entry restates anyway, `amount`, is simply
  * overridden.
  *
@@ -68,8 +70,10 @@ export type RequirementsSpec<TSpec extends BaseRequirementsSpec = CantonRequirem
     Partial<Omit<TSpec, keyof SharedTerms>> & {
       /**
        * The ways to pay, each advertised as one `accepts[]` entry. A payer
-       * picks one; the middleware works out which and holds the payment
-       * against it.
+       * picks one and echoes it back as the payment's `accepted`; the
+       * middleware holds that against every entry this request would
+       * advertise, and lets it through if any of them takes it. Nothing on the
+       * wire says which one it was for.
        *
        * Each carries its own price, because they are prices in different units
        * — 0.05 of one token is not 0.05 of another, and nothing here checks

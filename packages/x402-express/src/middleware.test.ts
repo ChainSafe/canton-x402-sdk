@@ -1332,7 +1332,7 @@ describe("paymentRequired: minting a merchant reference", () => {
     expect(booked).toEqual(["order-0"]);
   });
 
-  it("does not mint when the payment is refused before the facilitator is asked", async () => {
+  it("mints exactly one when the payment is refused before the facilitator is asked", async () => {
     // A policy refusal still has to hand back a payable quote, so it mints one
     // — but exactly one, and no verify was spent to find out.
     const fetchMock = stubFacilitator();
@@ -1368,9 +1368,12 @@ describe("paymentRequired: minting a merchant reference", () => {
 
     it("books one order for a memo named once in the shared terms", async () => {
       // The whole point of allowing it there: a 402 is one sale however many
-      // ways it offers to pay for it, and the generator may book an order. The
-      // shared terms are the only way to hand both entries the same function,
-      // which is what makes them share the reference it mints.
+      // ways it offers to pay for it, and the generator may book an order.
+      // Naming it once hands every entry that one function without repeating
+      // it, and carrying the same function is what makes them share the
+      // reference it mints — a merchant may also hoist it into a variable and
+      // name that in each entry, which "books ONE order for a challenge,
+      // however many ways it offers to pay" covers.
       stubFacilitator();
       const booked: string[] = [];
       const memos = await memosOf({

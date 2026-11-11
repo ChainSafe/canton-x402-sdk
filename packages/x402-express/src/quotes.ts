@@ -190,8 +190,9 @@ function mergeTerms<TSpec>(shared: object, entry: object): TSpec {
  * Turn quotes into a challenge's `accepts[]`, minting each reference.
  *
  * The only caller of a scheme's reference generator, which is what makes "once
- * per challenge" true: a request that pays an existing challenge never reaches
- * here.
+ * per challenge" true: a request that pays an existing challenge and is let
+ * through never reaches here. A refused one does — a refused payer is handed a
+ * fresh challenge, and that is a new challenge with a new reference.
  */
 export async function issueChallenge<TRequirements extends X402PaymentRequirements<unknown>>(
   quotes: Array<Quote<TRequirements>>,

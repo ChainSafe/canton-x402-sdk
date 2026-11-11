@@ -31,9 +31,11 @@ const COMMON_RULES: Record<
   scheme: { compare: "equal", reason: "policy_scheme" },
   network: { compare: "equal", reason: "policy_network" },
   payTo: { compare: "equal", reason: "policy_payTo" },
-  // The resource the payment was quoted for must be this request's. Echo
-  // fidelity only: nothing the payer sends is signed, so this catches a client
-  // re-sending another route's terms, not a payer intent on replaying one.
+  // The resource the quote names must be the one the payment echoed. Echo
+  // fidelity only: `resource` never reaches the ledger, so unlike `payTo` and
+  // `amount` — which the verifier reads off the signed transfer — nothing
+  // binds it. This catches a client re-sending another route's terms, not a
+  // payer intent on replaying one.
   resource: { compare: "equal", reason: "policy_resource" },
   asset: { compare: "equal", reason: "policy_asset" },
   // Overpaying is the payer's business; underpaying is not. Compared as BigInt,
@@ -50,8 +52,9 @@ const COMMON_RULES: Record<
   // Does not reach the ledger, so it does not change what settles. Left
   // uncompared so a payer library that normalises or drops it still pays.
   description: { compare: "skip", why: "informational" },
-  // The facilitator holds a payment for at most this long; the payer does not
-  // get to stretch it.
+  // The seconds the client is given to complete payment. It never reaches the
+  // ledger — `extra.executeBeforeSeconds` is the deadline that does — so it is
+  // compared for echo fidelity: the payer does not get to name its own.
   maxTimeoutSeconds: { compare: "equal", reason: "policy_timeout" },
 };
 
