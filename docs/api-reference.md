@@ -64,10 +64,10 @@ None required. There is no request body.
 | `kinds[]`                  | One entry per (scheme, network) pair the deployment settles. A deployment on one Canton network returns exactly one.                                                                       |
 | `scheme`                   | `exact` — the scheme id defined by the registered Canton scheme spec. Copy into `paymentRequirements.scheme`.                                                                              |
 | `network`                  | A network name: `canton:mainnet`, `canton:testnet`, `canton:devnet` or `canton:localnet`. It does not carry the synchronizer id — read it from here rather than deriving it.              |
-| `extra.instruments[]`      | What the deployment settles, one entry per instrument: `instrumentId` as `{ id, admin }`, the registry `admin` party, and a display `symbol`. `admin` is the party the facilitator checks a payment's holding against, so configure from here rather than by hand. `paymentRequired()` reads it for you when you leave `asset` out. |
+| `extra.instruments[]`      | What the deployment settles, one entry per instrument: `instrumentId` as `{ id, admin }`, the registry `admin` party, and a display `symbol`. `admin` is the party the facilitator checks a payment's holding against, so configure from here rather than by hand. `paymentRequired()` reads the `admin` for you when a way to pay names its `asset` by id. |
 | `extra.synchronizerId`     | The synchronizer the deployment submits to — the id a payer prepares its transfer against. |
 | `extra.transferMethods[]`  | The asset transfer methods it speaks; `transfer-factory` for canton-exact. |
-| `extra.carriages[]`        | How a prepared transaction travels. `inline` means it is carried in the `X-PAYMENT` header itself. |
+| `extra.carriages[]`        | How a prepared transaction travels. `inline` means it is carried in the `PAYMENT-SIGNATURE` header itself. |
 | `extra.asset.instrumentId` | **Superseded by `extra.instruments[]`**, which says the same thing and can say it for more than one instrument. Still sent for merchants reading it; prefer `instruments`. |
 | `extra.*`                  | `extra` is Optional and scheme-defined in x402 v2 §7.3, so a deployment may add its own keys and omit any of the above. Read what you need and ignore the rest. |
 

@@ -149,7 +149,10 @@ interface SchemeAdapter<TSpec, TRequirements, TPayload> {
 `quote()` returns the `scheme`, `network` and `asset` to advertise, the `extra`
 to carry, and optionally a `mintReference()` the middleware calls **only when it
 issues a challenge** — the same once-per-challenge discipline canton-exact's
-`memo` gets, under whatever key your scheme uses.
+`memo` gets, under whatever key your scheme uses. A quote may also carry a
+`referenceKey`: quotes sharing one (by identity) are issued a single reference
+between them, so a 402 offering several ways to pay books one order rather than
+one per entry.
 
 ```ts
 app.use("/paid", paymentRequired<VoucherSpec, VoucherRequirements, VoucherPayload>({
@@ -170,6 +173,8 @@ TPayload>` is exported for a route gated on another.
 | `scheme` | The payment scheme to gate on. Default `cantonExact` — Canton's registered `exact`. See [Another scheme](#another-scheme). |
 | `settle` | Capture via `/v2/settle` after verify. Default `false`. |
 | `requirements` | How to produce the `PaymentRequirements`: a **spec** or a **builder** (see below). |
+| `preSettle` | `(payment, req) => string \| undefined`, your own say on a verified payment, run after verify and before anything settles. Return a short reason to refuse it, or nothing to let it through; see below. |
+| `onQuoteError` | `(error, req) => void`, called when a way to pay could not be quoted and was left out of the 402 — the facilitator no longer settles the instrument it names, say. The request is still answered from the entries that did quote, so without this a way to pay can disappear unnoticed. Fires once per dropped entry per request; a throw is swallowed. |
 | `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error?, payment? }`, where `extensions` is the facilitator's full verify detail, with the code it answered with before the spec's in `extensions.reason`, and `payment` is the payload, requirements and payer this refusal is about when one was decoded. May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
 
 ### `requirements`
