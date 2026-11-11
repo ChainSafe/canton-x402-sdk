@@ -28,15 +28,28 @@ type Accept = AcceptSpec<CantonRequirementsSpec>;
 
 /* ── a way to pay must carry a price ─────────────────────────────────────── */
 
-const priced: Accept = { amount: "500000000" };
+const priced: Accept = { amount: "500000000", asset: "Amulet" };
 
 // @ts-expect-error — a way to pay with no price is not a way to pay
-const unpriced: Accept = { instrument: "USDCx" };
+const unpriced: Accept = { asset: "USDCx" };
+
+/* ── and must say what it is priced IN ───────────────────────────────────── */
+
+// @ts-expect-error — a price with no asset is 0.05 of whatever turns up
+const unnamedInstrument: Accept = { amount: "500000000" };
+
+// The same field pins it whole, admin included.
+const pinned: Accept = { amount: "1", asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } } };
+
+// @ts-expect-error — a symbol is not an instrument id, and a half-pinned
+// instrument is not one either: the two forms are a string or a whole AssetSpec.
+const halfPinned: Accept = { amount: "1", asset: { id: "Amulet" } };
 
 /* ── shared terms are overridable per entry, never required there ────────── */
 
 const overrides: Accept = {
   amount: "1",
+  asset: "Amulet",
   payTo: "merchant::other",
   network: "canton:devnet",
   maxTimeoutSeconds: 120,
@@ -47,18 +60,20 @@ const overrides: Accept = {
 
 const cantonFields: Accept = {
   amount: "1",
-  asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
-  instrument: "Amulet",
+  asset: "Amulet",
   executeBeforeSeconds: 300,
   memo: () => "ref",
 };
 
 // @ts-expect-error — a field no scheme defines is still refused
-const unknownField: Accept = { amount: "1", nonsense: true };
+const unknownField: Accept = { amount: "1", asset: "Amulet", nonsense: true };
 
 /* ── the terms name a payee and at least the shape of a list ─────────────── */
 
-const terms: RequirementsSpec = { payTo: "merchant::x", accepts: [{ amount: "1" }] };
+const terms: RequirementsSpec = {
+  payTo: "merchant::x",
+  accepts: [{ amount: "1", asset: "Amulet" }],
+};
 
 // @ts-expect-error — `accepts` is the whole point; terms without it are not terms
 const noAccepts: RequirementsSpec = { payTo: "merchant::x" };
@@ -91,6 +106,9 @@ it("is a typecheck assertion; `pnpm typecheck` is what enforces it", () => {
   expect([
     priced,
     unpriced,
+    unnamedInstrument,
+    pinned,
+    halfPinned,
     overrides,
     cantonFields,
     unknownField,
@@ -101,5 +119,5 @@ it("is a typecheck assertion; `pnpm typecheck` is what enforces it", () => {
     singleBuilder,
     payerIsCertain,
     noFacilitator,
-  ]).toHaveLength(12);
+  ]).toHaveLength(15);
 });

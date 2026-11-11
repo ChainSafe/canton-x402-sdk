@@ -1,10 +1,8 @@
 // Turning a merchant's terms into the quotes a 402 advertises.
 //
-// Building and issuing are separate on purpose: a scheme's per-challenge
-// reference generator is the merchant's, and is documented to record what it
-// issues. It must run when a challenge is ISSUED, not when a payment is merely
-// held against the terms — doing both at once is what made a successful payment
-// book a second order.
+// Building and issuing are separate: a scheme's per-challenge reference
+// generator is the merchant's and may record what it issues, so it runs only
+// when a challenge is ISSUED, never when a payment is held against the terms.
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -56,15 +54,11 @@ export async function buildQuotes<
     return built.map((r) => ({ requirements: assertAtomicAmount(r) }));
   }
 
-  if (source.accepts.length === 0) {
-    throw new Error("paymentRequired: `accepts` is empty — a 402 must advertise a way to pay");
-  }
-
   // The shared terms describe the sale; each entry describes one way to pay for
   // it and may override any of them. Merged before the scheme sees it, so an
   // adapter is handed one complete spec and never has to know the difference.
   const { accepts, ...shared } = source;
-  return Promise.all(
+  const quotes = await Promise.all(
     accepts.map(async (entry) => {
       const spec = { ...shared, ...entry } as unknown as TSpec;
       const part = await scheme.quote(req, spec, { facilitator: options.facilitator });
@@ -89,7 +83,9 @@ export async function buildQuotes<
       return quote;
     }),
   );
+  return quotes;
 }
+
 
 /**
  * Turn quotes into a challenge's `accepts[]`, minting each reference.

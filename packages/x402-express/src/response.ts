@@ -113,12 +113,10 @@ function respond402<TRequirements extends X402PaymentRequirements<unknown>>(
   details: string | undefined,
   requestUrl: string,
 ): void {
-  // The terms name one resource and list the ways to pay for it, so the top
-  // level is the first entry's — shared terms put the same value on every
-  // entry, and an entry that overrides `resource` is quoting the exception.
-  // buildQuotes never returns an empty list, so there is always a first; its
-  // `resource` is optional only on the envelope type, since quotes.ts defaults
-  // it to this same URL.
+  // The envelope names one resource: the first entry's, since shared terms put
+  // the same value on every entry. buildQuotes never returns an empty list, so
+  // there is always a first; `resource` is optional only on the envelope type,
+  // and quotes.ts defaults it to this same URL.
   const [first] = accepts;
   const paymentRequired: X402PaymentRequiredResponse<TRequirements> = {
     x402Version: 2,

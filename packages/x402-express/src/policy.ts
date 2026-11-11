@@ -30,8 +30,9 @@ const COMMON_RULES: Record<
   scheme: { compare: "equal", reason: "policy_scheme" },
   network: { compare: "equal", reason: "policy_network" },
   payTo: { compare: "equal", reason: "policy_payTo" },
-  // Bind the payment to THIS resource: without it, a payment minted for path A
-  // (matching price/payTo/asset) could be replayed against path B.
+  // The resource the payment was quoted for must be this request's. Echo
+  // fidelity only: nothing the payer sends is signed, so this catches a client
+  // re-sending another route's terms, not a payer intent on replaying one.
   resource: { compare: "equal", reason: "policy_resource" },
   asset: { compare: "equal", reason: "policy_asset" },
   // Overpaying is the payer's business; underpaying is not. Compared as BigInt,

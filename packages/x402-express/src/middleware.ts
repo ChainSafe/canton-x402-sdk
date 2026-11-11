@@ -19,7 +19,7 @@ import {
 
 import type { BaseRequirementsSpec, SchemeAdapter } from "./scheme.js";
 import { cantonExact, type CantonRequirementsSpec } from "./schemes/canton-exact.js";
-import type { PaymentRequiredOptions, X402RequestState } from "./options.js";
+import { assertUsableTerms, type PaymentRequiredOptions, type X402RequestState } from "./options.js";
 import { buildQuotes, type Quote } from "./quotes.js";
 import { rulesFor, selectQuote } from "./policy.js";
 import { PaymentRejection, respondToFailure } from "./response.js";
@@ -47,8 +47,8 @@ import { PaymentRejection, respondToFailure } from "./response.js";
  *     payTo: "merchant::1220…",
  *     resource: "https://merchant.example/report",
  *     accepts: [
- *       { amount: "500000000" },                      // 0.05 CC
- *       { amount: "250000", instrument: "USDCx" },    // priced separately
+ *       { amount: "500000000", asset: "Amulet" }, // 0.05 CC
+ *       { amount: "250000", asset: "USDCx" },     // priced separately
  *     ],
  *   },
  * }));
@@ -72,6 +72,8 @@ export function paymentRequired<
     TPayload
   >;
   const rules = rulesFor(scheme);
+  // Merchant config, so it is checked here, once, and not per request.
+  assertUsableTerms(options.requirements, scheme);
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     // Built at most once per request, and only when something needs them: a
@@ -144,10 +146,9 @@ export function paymentRequired<
         );
       }
 
-      // The merchant's own say, on a payment the facilitator has vouched for.
-      // After verify so the echoed requirements are bound to the signed
-      // transfer and `payer` is known; before settle so a refusal never moves
-      // funds. See `preSettle` for why that order and not the cheaper one.
+      // The merchant's own say, on a payment the facilitator has vouched for:
+      // after verify, so the requirements are bound to the signed transfer and
+      // `payer` is known, and before settle, so a refusal moves no funds.
       const merchantRefusal = await options.preSettle?.(
         { payload, requirements, payer, verify },
         req,

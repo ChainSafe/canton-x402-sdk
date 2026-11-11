@@ -215,6 +215,12 @@ export interface SchemeAdapter<
    */
   payerOf(payload: TPayload): string | undefined;
   /**
+   * What makes this entry a distinct way to pay, for the check that a route
+   * offers no two of the same. `undefined` when the spec cannot say without a
+   * request — a resolver-valued field — and the entry is then not checked.
+   */
+  distinctKey?(spec: TSpec): string | undefined;
+  /**
    * The error code to refuse with when neither the facilitator nor
    * {@link SchemeAdapter.payerOf} can name the payer. The scheme's, because the
    * spec's codes are per-scheme: canton-exact answers

@@ -33,7 +33,7 @@ app.use(
       payTo: PAY_TO,
       description: "Access to /paid",
       // ...and the ways to pay for it. One here; add an entry per instrument.
-      accepts: [{ amount: "500000000" }], // atomic units: 1 CC = 1e10, so 0.05 CC
+      accepts: [{ amount: "500000000", asset: "Amulet" }], // 1 CC = 1e10, so 0.05 CC
     },
   }),
 );

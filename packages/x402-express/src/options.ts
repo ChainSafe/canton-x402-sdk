@@ -1,10 +1,8 @@
 // What a merchant configures, and what it gets back on a paid request.
 //
-// The shape follows the 402 the spec defines: x402 v2 §5.1.2's `PaymentRequired`
-// is ONE resource with a LIST of ways to pay, and `PaymentRequirements` carries
-// no resource of its own. So the resource is named once and the ways to pay are
-// a list, with no privileged first entry — the merchant's terms, not "the"
-// payment plus some extras.
+// The shape follows x402 v2 §5.1.2's `PaymentRequired`: ONE resource and a
+// LIST of ways to pay. So the resource is named once and the entries are a
+// list, with no privileged first entry.
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -108,17 +106,11 @@ export interface PaymentRequiredOptions<
    * },
    * ```
    *
-   * After verify, not before, because `requirements` is what the PAYER echoed.
-   * Until the facilitator has held the signed transfer against it, a memo here
-   * is one the payer claims rather than one it committed to — and this hook is
-   * where merchants reserve stock or mark an order claimed, which must not
-   * happen on an unverified claim. It is also the first point at which `payer`
-   * is known at all: the payload names none (spec Rule 8), so the payer is the
-   * verified transfer's sender.
-   *
-   * The cost is that a refusal here spends a verify round-trip. Wrong scheme,
-   * payTo, resource or price are all refused earlier by policy, and verify
-   * moves no funds — settle is what does, and a refusal still precedes it.
+   * Running after verify means `requirements` has been held against the signed
+   * transfer, so a memo here is one the payer committed to rather than one it
+   * claims — safe to reserve stock or mark an order claimed on. `payer` is the
+   * verified transfer's sender, and is unavailable before this point: the
+   * payload names none (spec Rule 8).
    *
    * With `settle: false` nothing settles, and this is the last gate before the
    * request is let through.
@@ -191,3 +183,48 @@ declare global {
 
 /** Re-exported so a merchant writing a spec does not need two imports. */
 export type { Resolvable };
+
+/**
+ * Throws when the terms cannot produce a 402.
+ *
+ * Both checks are on what the merchant wrote, so both run once, when the route
+ * is mounted — a request cannot change either answer, and answering 500 to
+ * every request for a config mistake hides it.
+ *
+ * - `accepts` must offer something: a 402 with no way to pay cannot be paid.
+ * - No two entries may be the same way to pay. A payer chooses by what an
+ *   entry says, and the asset is what says it, so two in one asset leave only
+ *   price to choose on and the dearer can never be paid. The scheme reads each
+ *   entry's key ({@link SchemeAdapter.distinctKey}); an entry whose asset is a
+ *   resolver has none and is not checked.
+ *
+ * A builder is skipped entirely: it answers per request.
+ */
+export function assertUsableTerms<
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  source: PaymentRequiredOptions<TSpec, TRequirements, TPayload>["requirements"],
+  scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
+): void {
+  if (typeof source === "function") return;
+  const { accepts, ...shared } = source;
+  if (accepts.length === 0) {
+    throw new Error("paymentRequired: `accepts` is empty — a 402 must advertise a way to pay");
+  }
+  const seen = new Map<string, number>();
+  accepts.forEach((entry, i) => {
+    const key = scheme.distinctKey?.({ ...shared, ...entry } as unknown as TSpec);
+    if (key === undefined) return;
+    const first = seen.get(key);
+    if (first !== undefined) {
+      throw new Error(
+        `paymentRequired: ways to pay ${first + 1} and ${i + 1} are both in ${key}. ` +
+          `A payer cannot tell them apart, so only the cheaper would ever be paid — ` +
+          `give them different assets, or quote one.`,
+      );
+    }
+    seen.set(key, i);
+  });
+}

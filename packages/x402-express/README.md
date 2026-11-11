@@ -40,7 +40,7 @@ app.use(
     requirements: {
       payTo: "merchant::1220…",
       accepts: [
-        { amount: "500000000" }, // atomic units: 1 CC = 1e10, so this is 0.05 CC
+        { amount: "500000000", asset: "Amulet" }, // atomic units: 1 CC = 1e10
       ],
       // `network` and `asset` are read from the facilitator's /v2/supported.
       // Set them to pin them yourself.
@@ -179,8 +179,8 @@ requirements: {
 
   // the ways to pay, each advertised as one accepts[] entry
   accepts: [
-    { amount: "500000000" },                      // 0.05 CC
-    { amount: "250000", instrument: "USDCx" },    // priced separately
+    { amount: "500000000", asset: "Amulet" },   // 0.05 CC
+    { amount: "250000", asset: "USDCx" },       // priced separately
   ],
 }
 ```

@@ -11,22 +11,27 @@ canton-shaped.
 -   network: "canton:devnet",
     payTo: "merchant::1220…",
 -   asset: { instrumentId: { id: "Amulet", admin: "DSO::1220…" } },
++   asset: "Amulet",
     amount: "500000000",
   }
 ```
 
-`network` and `asset` are now optional. Left out, they are read from the
-facilitator's `/v2/supported`: the network it settles, and the instrument with
-the registry party it validates holdings against. That party is the one the
-facilitator checks a payment against, so reading it from there removes the
-second copy that had to be kept true by hand when a deployment moved. Pin either
-field to keep today's behaviour and skip the lookup entirely — a test asserts
-`/v2/supported` is never called then.
+`network` is now optional and `asset` takes an instrument id. Left out or named
+by id, the rest is read from the facilitator's `/v2/supported`: the network it
+settles, and the registry party it validates holdings against. That party is the
+one the facilitator checks a payment against, so reading it from there removes
+the second copy that had to be kept true by hand when a deployment moved. Pin
+`network` and pass the whole `AssetSpec` to skip the lookup entirely — a test
+asserts `/v2/supported` is never called then. Either on its own still reads it:
+an `AssetSpec` alone leaves the network to discover.
 
-A facilitator settling more than one network or instrument is an error rather
-than a guess, because a declarative spec carries one price and a price means
-nothing without the instrument it is denominated in. Name one with `network` or
-`instrument`.
+Note the id, not the symbol: Canton Coin is `"Amulet"`, and `"CC"` is what goes
+on the wire. It is the one instrument where the two differ, and an id the
+deployment does not carry is refused with the ids it does.
+
+A facilitator settling more than one network is an error rather than a guess,
+because a price means nothing without knowing which chain it settles on. Name
+one with `network`.
 
 ### One resource, a list of ways to pay
 
@@ -38,8 +43,8 @@ nothing without the instrument it is denominated in. Name one with `network` or
 -   amount: "500000000",
 +   resource: "https://merchant.example/report",
 +   accepts: [
-+     { amount: "500000000" },                     // 0.05 CC
-+     { amount: "250000", instrument: "USDCx" },   // priced separately
++     { amount: "500000000", asset: "Amulet" },  // 0.05 CC
++     { amount: "250000", asset: "USDCx" },     // priced separately
 +   ],
   }
 ```
@@ -55,6 +60,43 @@ Now every entry is a spec. Each gets discovery and its own minted `memo`, the
 shared fields are named once and overridable per entry, and no entry is
 privileged. A builder returns the whole list: `(req) => CantonPaymentRequirements[]`.
 
+### Every way to pay says what it is priced in
+
+`asset` is required on every `accepts[]` entry, as an instrument id or as a
+whole `AssetSpec`.
+
+`amount` is atomic units of *something*, and an entry that left the asset to
+the facilitator's list meant 0.05 CC against a deployment settling Amulet and
+0.05 USDCx against one settling USDCx — the same config, a different sale.
+Worse, two entries could resolve to the same instrument at different prices,
+which a payer settles by taking the cheaper, and a facilitator settling two
+instruments made every request a 500 rather than only the ambiguous entry.
+
+Naming it by id does not skip discovery: the registry `admin` still comes from
+`GET /v2/supported`, which is the point — that party is what the facilitator
+validates holdings against, so there is no second copy to keep true. Only
+`network` and a whole `AssetSpec` together skip it.
+
+The network can still be ambiguous, and still is an error rather than a guess:
+a facilitator settling the instrument on two networks needs `network` naming
+one.
+
+**And no two entries may name the same asset.** Two ways to pay in one asset
+leave a payer nothing to choose on but price, so the dearer can never be paid.
+`paymentRequired()` throws when the route is mounted — this is merchant config,
+not anything a request changes, so it fails at startup rather than answering
+500 to every request. Naming an asset by id and pinning the equivalent
+`AssetSpec` are caught as the same asset. An entry whose `asset` is a
+`(req) => …` resolver cannot be read without a request and is not checked.
+
+An empty `accepts` throws there too, for the same reason — it was a 500 per
+request before.
+
+Schemes say what distinguishes their own entries, through the new optional
+`SchemeAdapter.distinctKey`.
+
+Found in review by @dimartiro.
+
 ### Three fixes
 
 **A successful payment no longer mints a second merchant reference.** The `memo`
@@ -63,9 +105,9 @@ ran whenever requirements were built — including on the paid request that
 completed the sale, booking a second order for it. It is now called only when a
 challenge is issued.
 
-**A payer can pay an `additionalAccepts` entry.** The echoed requirement was
-held against the first quote alone, so paying an advertised alternative was
-refused as if it undercut the price. The middleware now works out which
+**A payer can pay the second way to pay, not just the first.** The echoed
+requirement was held against the first quote alone, so paying an advertised
+alternative was refused as if it undercut the price. The middleware now works out which
 advertised quote a payment is for and holds it against that one; when a payment
 matches none, the reported reason comes from the quote it got furthest through.
 
@@ -92,15 +134,16 @@ in it, how an echoed one is compared, and where a per-challenge reference lives.
 app.use("/paid", paymentRequired<VoucherSpec, VoucherRequirements, VoucherPayload>({
   facilitator,
   scheme: voucherScheme,
-  requirements: { payTo: "shop::1", amount: "10", book: "autumn-2026" },
+  requirements: { payTo: "shop::1", accepts: [{ amount: "10", book: "autumn-2026" }] },
 }));
 ```
 
 Canton's `exact` is the default (`cantonExact`) and nothing changes for a
 merchant using it: `paymentRequired` keeps a non-generic overload, so an inline
 requirements object is contextually typed against the concrete canton shapes
-exactly as before. `RequirementsSpec` is now an alias of
-`CantonRequirementsSpec`.
+exactly as before. `RequirementsSpec` is the shared terms plus `accepts`,
+generic over the scheme's spec and defaulting to `CantonRequirementsSpec`; one
+entry is an `AcceptSpec<TSpec>`, that spec without the shared terms.
 
 **A scheme names its own error code for an unreadable payer.** When neither the
 facilitator nor the adapter can say who paid, the refusal carries
@@ -111,9 +154,10 @@ a reader that knows that one and not the scheme's, and is the default for an
 adapter that names none.
 
 New exports: `SchemeAdapter`, `SchemeQuote`, `SchemeContext`,
-`BaseRequirementsSpec`, `FieldRule`, `RuleTable`, `X402RequestState`,
-`cantonExact`, `CantonRequirementsSpec`, and the `compareQuote` / `sameValue` /
-`resolve` helpers an adapter needs.
+`BaseRequirementsSpec`, `AcceptSpec`, `SharedTerms`, `Resolvable`, `FieldRule`,
+`RuleTable`, `RequirementsBuilder`, `PaymentRejectionInfo`, `X402RequestState`,
+`DEFAULT_MAX_TIMEOUT_SECONDS`, `cantonExact`, `CantonRequirementsSpec`, and the
+`compareQuote` / `sameValue` / `resolve` helpers an adapter needs.
 
 **A new guard.** The decoded payment is checked by the scheme before
 anything reads a field off it. The envelope is a loose object — `payload.payload`
