@@ -1374,6 +1374,45 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     expect(discovery).toHaveLength(1);
   });
 
+
+  it("narrows discovery by a pinned asset, as it does by a named one", async () => {
+    // The richer form must not do less: an AssetSpec says which instrument as
+    // surely as a string id does, so the network discovered has to be one
+    // that settles it. Both forms quote the same terms here.
+    const both = {
+      kinds: [
+        {
+          ...SUPPORTED.kinds[0],
+          extra: {
+            ...SUPPORTED.kinds[0].extra,
+            instruments: [
+              { admin: DSO, instrumentId: { id: "Amulet", admin: DSO }, symbol: "CC" },
+              { admin: "ISSUER::x", instrumentId: { id: "USDCx", admin: "ISSUER::x" }, symbol: "USDCx" },
+            ],
+          },
+        },
+      ],
+    };
+    for (const asset of ["Amulet", { instrumentId: { id: "Amulet", admin: DSO } }] as const) {
+      stubWithSupported(both);
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          // No `network`: it is discovered, and the pinned asset must narrow it.
+          requirements: { payTo: "merchant::x", resource: "https://f.example/paid", accepts: [{ amount: "1", asset }] },
+        }),
+      );
+      app.get("/paid", (_q, r) => r.json({ ok: true }));
+      const res = await request(app).get("/paid");
+      expect(res.status).toBe(402);
+      expect(res.body.accepts).toHaveLength(1);
+      expect(res.body.accepts[0].asset).toBe("CC");
+      expect(res.body.accepts[0].extra.instrumentId).toEqual({ id: "Amulet", admin: DSO });
+    }
+  });
+
   it("never calls /v2/supported when the merchant pins both fields", async () => {
     // Pinning stays a zero-dependency path: no cold-start round trip, and no
     // facilitator outage between the merchant and its own 402.
@@ -1863,8 +1902,23 @@ describe("paymentRequired: configuring from /v2/supported", () => {
 
     it("never skips a merchant's own mistake", async () => {
       // A decimal price is config, not the facilitator changing under us, so
-      // it takes the request down rather than quietly dropping the entry.
-      stubWithSupported();
+      // it takes the request down rather than quietly dropping the entry. Both
+      // instruments are advertised, so the entry resolves and only its amount
+      // is wrong.
+      stubWithSupported({
+        kinds: [
+          {
+            ...SUPPORTED.kinds[0],
+            extra: {
+              ...SUPPORTED.kinds[0].extra,
+              instruments: [
+                { admin: DSO, instrumentId: { id: "Amulet", admin: DSO }, symbol: "CC" },
+                { admin: "ISSUER::x", instrumentId: { id: "USDCx", admin: "ISSUER::x" }, symbol: "USDCx" },
+              ],
+            },
+          },
+        ],
+      });
       const app = express();
       app.use(
         "/paid",

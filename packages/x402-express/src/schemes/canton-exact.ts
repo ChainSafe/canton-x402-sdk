@@ -52,9 +52,10 @@ export interface CantonRequirementsSpec extends BaseRequirementsSpec {
    * asset: "USDCx"    // id and symbol match here
    * ```
    *
-   * An {@link AssetSpec} pins the admin too. Pinned alongside `network` it is
-   * the whole answer and nothing is looked up; on its own, `/v2/supported` is
-   * still read for the network:
+   * An {@link AssetSpec} pins the admin too. With `network` it is the whole
+   * answer and nothing is looked up; on its own, `/v2/supported` is still read
+   * for the network — narrowed to this instrument, so the network quoted is
+   * one that settles it:
    *
    * ```ts
    * asset: { instrumentId: { id: "Amulet", admin: "DSO::1220…" } }
@@ -201,10 +202,11 @@ async function resolveDeploymentTerms(
   const scheme = await resolve(spec.scheme ?? cantonExact.id, req);
   const network = spec.network === undefined ? undefined : await resolve(spec.network, req);
   // A string names the instrument and leaves its admin to discovery; an
-  // AssetSpec is the whole answer, so there is nothing left to look up.
+  // AssetSpec carries the admin too. Either way the id is known, and is what
+  // narrows discovery below.
   const asset = await resolve(spec.asset, req);
   const pinned = typeof asset === "string" ? undefined : asset;
-  const named = typeof asset === "string" ? asset : undefined;
+  const instrument = typeof asset === "string" ? asset : asset.instrumentId.id;
 
   // Both pinned: nothing to discover.
   if (network !== undefined && pinned !== undefined) {
@@ -218,9 +220,11 @@ async function resolveDeploymentTerms(
 
   const prefer: CantonDeploymentPreference = { schemes: [scheme] };
   // Each key is a filter, and an absent one filters on nothing — so add a key
-  // only where the merchant named a value.
+  // only where the merchant named a value. The instrument always narrows: a
+  // pinned AssetSpec says which one as surely as a string does, and the
+  // network discovered here must be one that settles it.
   if (network !== undefined) prefer.networks = [network];
-  if (named !== undefined) prefer.instruments = [named];
+  prefer.instruments = [instrument];
 
   const advertised = exactlyOne(
     await selectCantonDeployments(await ctx.facilitator.supported(), prefer),

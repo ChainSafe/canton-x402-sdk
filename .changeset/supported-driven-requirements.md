@@ -22,8 +22,8 @@ settles, and the registry party it validates holdings against. That party is the
 one the facilitator checks a payment against, so reading it from there removes
 the second copy that had to be kept true by hand when a deployment moved. Pin
 `network` and pass the whole `AssetSpec` to skip the lookup entirely — a test
-asserts `/v2/supported` is never called then. Either on its own still reads it:
-an `AssetSpec` alone leaves the network to discover.
+asserts `/v2/supported` is never called then. An `AssetSpec` on its own still
+reads it, for the network, narrowed to the instrument it pins.
 
 Note the id, not the symbol: Canton Coin is `"Amulet"`, and `"CC"` is what goes
 on the wire. It is the one instrument where the two differ, and an id the
@@ -76,6 +76,12 @@ Naming it by id does not skip discovery: the registry `admin` still comes from
 `GET /v2/supported`, which is the point — that party is what the facilitator
 validates holdings against, so there is no second copy to keep true. Only
 `network` and a whole `AssetSpec` together skip it.
+
+Either form narrows discovery to the instrument it names. A pinned `AssetSpec`
+used not to, so the richer form did less than the plain id: against a
+facilitator settling two instruments, `asset: "Amulet"` quoted and
+`asset: { instrumentId: … }` failed as ambiguous. Found in review by
+@dimartiro.
 
 The network can still be ambiguous, and still is an error rather than a guess:
 a facilitator settling the instrument on two networks needs `network` naming
