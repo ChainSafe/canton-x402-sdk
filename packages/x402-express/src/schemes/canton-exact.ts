@@ -103,6 +103,13 @@ export interface CantonRequirementsSpec extends BaseRequirementsSpec {
    * makes it usable as a reconciliation key and as a replay key. UTF-8, at most
    * 256 bytes. Omit it to quote none.
    *
+   * Name it ONCE in the shared terms if it books anything. A 402 is one sale
+   * however many ways it offers to pay for it, and entries carrying the same
+   * function are issued one memo between them — so the same body written out
+   * in two entries is two functions, two memos, and two orders booked for a
+   * sale that is paid once. An entry naming its own overrides the shared one
+   * and gets its own, which is the merchant asking for that.
+   *
    * (Function-only by design: a static value would tag every payment alike,
    * which is the one thing reference data must not do.)
    */
@@ -199,8 +206,10 @@ export const cantonExact: SchemeAdapter<
     const mint = spec.memo;
     if (mint) {
       quote.mintReference = async () => ({ memo: await mint(req) });
-      // The generator itself: entries that inherited the merchant's one memo
-      // from the shared terms carry the same function, so they share a memo.
+      // The generator itself. Entries that inherited the merchant's one memo
+      // from the shared terms carry the SAME function, so they are issued one
+      // memo between them; an entry naming its own carries another function
+      // and gets its own, which is the merchant asking for that.
       quote.referenceKey = mint;
     }
     return quote;

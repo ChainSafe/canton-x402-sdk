@@ -165,13 +165,28 @@ wrong. Found in review by @dimartiro.
 
 **One reference per challenge, not one per way to pay.** A reference generator
 may book an order, and a 402 is one sale however many ways it offers to pay for
-it. Entries given the merchant's one `memo` generator — the same function, since
-`memo` is a per-entry field — now share the reference it mints, so a two-entry
-402 books one order and whichever way the payer picks reconciles against it. Minting per entry booked N
-and was paid for one, with nothing in the generator's arguments — it is given
-only `req` — to tell the entries apart. Entries naming their own generator still
-get their own reference, since that is the merchant asking for one. Schemes say
-which quotes share through the new `SchemeQuote.referenceKey`.
+it. Minting per entry booked N and was paid for one, with nothing in the
+generator's arguments — it is given only `req` — to tell the entries apart.
+Entries carrying the same generator now share the reference it mints, so a
+two-entry 402 books one order and whichever way the payer picks reconciles
+against it. Schemes say which quotes share through the new
+`SchemeQuote.referenceKey`.
+
+**And the shared terms take a scheme's optional fields, so that is writable.**
+Sharing is by function identity, and `memo` was a per-entry field: the natural
+way of writing it — the same body in each entry — is two functions, so it still
+booked two orders. A merchant could get one only by hoisting the function into
+a variable, which nothing said and the type could not express.
+
+A scheme's own fields may now be named once beside `payTo` — `memo` is the one
+that needs it — and an entry naming its own overrides it and gets its own
+reference, which is the merchant asking for one. `RequirementsSpec` is the
+mirror of `AcceptSpec` now: an entry must carry the scheme's fields and may
+override the shared ones, so the terms carry the shared ones and may default
+the scheme's. It is an intersection rather than an interface for it, since that
+half is computed from the scheme's own spec. `amount` and `asset` stay required
+on every entry, so naming them at the top level does nothing. Found in review
+by @dimartiro.
 
 **An entry no longer erases a shared term with an explicit `undefined`.**
 `{ payTo: someVar }` where `someVar` is undefined used to wipe the shared

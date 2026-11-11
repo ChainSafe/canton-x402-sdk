@@ -50,21 +50,33 @@ export type AcceptSpec<TSpec extends BaseRequirementsSpec> = Omit<TSpec, keyof S
 /**
  * The merchant's terms: what is being sold, and the ways to pay for it.
  *
+ * The mirror of {@link AcceptSpec}: an entry must carry the scheme's own
+ * fields and may override the shared ones, so the terms carry the shared ones
+ * and may name any of the scheme's once for the whole sale.
+ *
+ * That last part is what `memo` needs. Entries are issued ONE reference
+ * between them when they carry the same generator, and naming it here is the
+ * only way to hand them the same one — written out in two entries it is two
+ * functions, so two references, and a generator that books an order books two.
+ * A field named here that every entry restates anyway, `amount`, is simply
+ * overridden.
+ *
  * Fields may be a fixed value or a `(req) => value` resolver.
  */
-export interface RequirementsSpec<
-  TSpec extends BaseRequirementsSpec = CantonRequirementsSpec,
-> extends SharedTerms {
-  /**
-   * The ways to pay, each advertised as one `accepts[]` entry. A payer picks
-   * one; the middleware works out which and holds the payment against it.
-   *
-   * Each carries its own price, because they are prices in different units —
-   * 0.05 of one token is not 0.05 of another, and nothing here checks that two
-   * entries are worth the same.
-   */
-  accepts: Array<AcceptSpec<TSpec>>;
-}
+export type RequirementsSpec<TSpec extends BaseRequirementsSpec = CantonRequirementsSpec> =
+  SharedTerms &
+    Partial<Omit<TSpec, keyof SharedTerms>> & {
+      /**
+       * The ways to pay, each advertised as one `accepts[]` entry. A payer
+       * picks one; the middleware works out which and holds the payment
+       * against it.
+       *
+       * Each carries its own price, because they are prices in different units
+       * — 0.05 of one token is not 0.05 of another, and nothing here checks
+       * that two entries are worth the same.
+       */
+      accepts: Array<AcceptSpec<TSpec>>;
+    };
 
 /**
  * Full control: build the whole `accepts[]` per request.

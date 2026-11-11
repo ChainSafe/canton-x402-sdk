@@ -68,7 +68,7 @@ const { paymentRequired } = require("@chainsafe/x402-express");
    in the `PAYMENT-REQUIRED` header and as the body. One `accepts[]` entry per
    way to pay, with the defaults filled in, and `resource` is the URL and
    description they were quoted for. A `memo` generator is called here, and
-   only here — once per entry, per challenge.
+   only here — once per challenge for the entries sharing it.
 2. **Paid request** → the `PAYMENT-SIGNATURE` header is decoded to a payment,
    which carries the requirements it was built against as `accepted`. The
    middleware works out which of the quotes it would advertise that payment is
@@ -202,9 +202,9 @@ requirements: {
 }
 ```
 
-Every entry is a spec, so each gets discovery, the defaults and **its own** per-challenge `memo` — there is no privileged first entry. Any shared field may be overridden per entry (a second instrument settling to a different party, say), and each entry carries its own price, because 0.05 of one token is not 0.05 of another and nothing here checks two entries are worth the same.
+Every entry is a spec, so each gets discovery and the defaults, and there is no privileged first entry. Any shared field may be overridden per entry (a second instrument settling to a different party, say), and each entry carries its own price, because 0.05 of one token is not 0.05 of another and nothing here checks two entries are worth the same.
 
-Per-entry fields are `{ amount, asset, executeBeforeSeconds?, memo? }` plus an override of any shared one. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120). Every field may be a fixed value **or** a `(req) => value` resolver.
+Per-entry fields are `{ amount, asset, executeBeforeSeconds?, memo? }` plus an override of any shared one. Any of them may also be set **once at the top level**, beside `payTo`, and `memo` usually should be — see below. `amount` and `asset` are required on every entry regardless, so naming those at the top level does nothing. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120). Every field may be a fixed value **or** a `(req) => value` resolver.
 
 For full control, a **builder** `(req) => CantonPaymentRequirements[]` returns the whole list and you own `maxTimeoutSeconds` and the whole of `extra`.
 
@@ -219,6 +219,21 @@ If more than one network settles the instrument, or the id the entry names is no
 A **builder** runs on every request, paid ones included, because a payment has to be held against your terms and only the builder knows them. Keep it side-effect-free, and use `memo` for anything that should happen once per challenge.
 
 `memo` is special: it's a **function only** (`(req) => string | Promise<string>`), called once per challenge **issued** — on the 402 that offers terms, and not on a request that pays terms already offered — so a merchant can generate *and record* it (e.g. an order id persisted for reconciliation) without a successful payment booking a second one. Omit it to quote none. Quoting one **binds** it — the payer must sign the identical value into the transfer.
+
+**Write it once, in the shared terms**, if it books anything. A 402 is one sale however many ways it offers to pay for it, and entries carrying the *same function* are issued one reference between them. Two entries given the same body written out twice are two functions, so two references — and a generator that books an order books two, only one of which is ever paid:
+
+```ts
+requirements: {
+  payTo: "merchant::1220…",
+  memo: (req) => orders.open(req),  // once, for the sale
+  accepts: [
+    { amount: "500000000", asset: "Amulet" },
+    { amount: "250000", asset: "USDCx" },
+  ],
+}
+```
+
+An entry naming its own `memo` overrides the shared one and gets its own reference, which is the merchant asking for that.
 
 That proves less than it looks, though: the scheme compares the transfer against the requirements the **payer** echoed, so a payer can echo no memo and sign none, or echo any value and sign that. The middleware keeps no record of what it issued, so it cannot tell. If you reconcile *on* the memo, use `preSettle` — your own say on a payment the facilitator has verified, run **after verify and before any settle**. Return a short reason to refuse (answered as a 402 carrying that code), or nothing to accept:
 

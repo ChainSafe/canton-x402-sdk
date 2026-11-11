@@ -76,6 +76,17 @@ const cantonFields: Accept = {
 // @ts-expect-error — a field no scheme defines is still refused
 const unknownField: Accept = { amount: "1", asset: "Amulet", nonsense: true };
 
+/* ── a scheme's own fields may be named once for the whole sale ──────────── */
+
+// `memo` above all: entries are issued one reference between them when they
+// carry the same generator, and this is the only way to hand them the same one.
+const sharedMemo: RequirementsSpec = {
+  payTo: "merchant::x",
+  memo: () => "order-1",
+  executeBeforeSeconds: 300,
+  accepts: [{ amount: "1", asset: "Amulet" }],
+};
+
 /* ── the terms name a payee and at least the shape of a list ─────────────── */
 
 const terms: RequirementsSpec = {
@@ -146,5 +157,6 @@ it("is a typecheck assertion; `pnpm typecheck` is what enforces it", () => {
     payerIsCertain,
     noFacilitator,
     _incompleteWayToPayIsACompileError,
-  ]).toHaveLength(18);
+    sharedMemo,
+  ]).toHaveLength(19);
 });

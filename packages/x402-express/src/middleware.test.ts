@@ -1347,6 +1347,82 @@ describe("paymentRequired: minting a merchant reference", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  describe("two ways to pay, one sale", () => {
+    const AMULET = { instrumentId: { id: "Amulet", admin: "DSO::x" } };
+    const USDCX = { instrumentId: { id: "USDCx", admin: "ISSUER::x" } };
+
+    /** The memos the 402 advertised, in order. Not cast: the types are part of
+     * what these assert — `memo` beside `payTo` has to compile. */
+    const memosOf = async (requirements: RequirementsSpec) => {
+      const app = express();
+      app.use("/paid", paymentRequired({ ...baseOptions, requirements }));
+      const res = await request(app).get("/paid");
+      return res.body.accepts.map((a: { extra: { memo: string } }) => a.extra.memo);
+    };
+
+    const booking = (booked: string[]) => () => {
+      const m = `order-${booked.length}`;
+      booked.push(m);
+      return m;
+    };
+
+    it("books one order for a memo named once in the shared terms", async () => {
+      // The whole point of allowing it there: a 402 is one sale however many
+      // ways it offers to pay for it, and the generator may book an order. The
+      // shared terms are the only way to hand both entries the same function,
+      // which is what makes them share the reference it mints.
+      stubFacilitator();
+      const booked: string[] = [];
+      const memos = await memosOf({
+        network: "canton:x",
+        payTo: "merchant::x",
+        resource: "https://f.example/paid",
+        memo: booking(booked),
+        accepts: [
+          { asset: AMULET, amount: "500000000" },
+          { asset: USDCX, amount: "250000" },
+        ],
+      });
+      expect(booked).toEqual(["order-0"]);
+      expect(memos).toEqual(["order-0", "order-0"]);
+    });
+
+    it("books one per entry when each names its own generator", async () => {
+      // Two functions are two references, which is the merchant asking for
+      // them. Pinned because the difference is invisible at the call site —
+      // the same body written twice is not the same function.
+      stubFacilitator();
+      const booked: string[] = [];
+      const book = booking(booked);
+      const memos = await memosOf({
+        network: "canton:x",
+        payTo: "merchant::x",
+        resource: "https://f.example/paid",
+        accepts: [
+          { asset: AMULET, amount: "500000000", memo: () => book() },
+          { asset: USDCX, amount: "250000", memo: () => book() },
+        ],
+      });
+      expect(booked).toEqual(["order-0", "order-1"]);
+      expect(memos).toEqual(["order-0", "order-1"]);
+    });
+
+    it("lets one entry override the shared generator", async () => {
+      stubFacilitator();
+      const memos = await memosOf({
+        network: "canton:x",
+        payTo: "merchant::x",
+        resource: "https://f.example/paid",
+        memo: () => "shared",
+        accepts: [
+          { asset: AMULET, amount: "500000000" },
+          { asset: USDCX, amount: "250000", memo: () => "mine" },
+        ],
+      });
+      expect(memos).toEqual(["shared", "mine"]);
+    });
+  });
+
   it("answers 500, not 402, when the reference generator itself throws", async () => {
     // There is no quote to advertise, so it cannot be a 402.
     stubFacilitator();
