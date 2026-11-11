@@ -587,13 +587,19 @@ describe("paymentRequired", () => {
     const fetchMock = stubFacilitator({ verify: { isValid: true } });
     const decode = vi.mocked(decodePayloadTransfer);
     decode.mockClear();
-    const res = await request(makeApp({ settle: true }))
+    const onReject = vi.fn();
+    const res = await request(makeApp({ settle: true, onReject }))
       .get("/paid")
       .set("PAYMENT-SIGNATURE", paymentHeader());
     expect(res.status).toBe(402);
+    // Worded as the verifier words it: the spec's code, the older one beside it.
     expect(res.body).toMatchObject({
       error: "invalid_exact_canton_malformed_payload",
       details: "undecodable",
+    });
+    expect(onReject.mock.calls[0][0]).toMatchObject({
+      reason: "invalid_exact_canton_malformed_payload",
+      extensions: { reason: "transfer_mismatch", detail: "undecodable" },
     });
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/v2/settle"))).toBe(false);
     // The real decoder ran on the payload's transaction and found no transfer in it.
@@ -615,10 +621,18 @@ describe("paymentRequired", () => {
   });
 
   it("responds 402 with the reason when verify is invalid", async () => {
-    stubFacilitator({ verify: { isValid: false, invalidReason: "bad_signature" } });
+    // The scheme spec's code reaches the merchant as the 402's `error`; the
+    // code the facilitator answered with before it stays in extensions.reason.
+    stubFacilitator({
+      verify: {
+        isValid: false,
+        invalidReason: "invalid_exact_canton_amount_mismatch",
+        extensions: { reason: "transfer_mismatch", detail: "amount" },
+      },
+    });
     const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
     expect(res.status).toBe(402);
-    expect(res.body.error).toBe("bad_signature");
+    expect(res.body).toMatchObject({ error: "invalid_exact_canton_amount_mismatch", details: "amount" });
   });
 
   it("forwards the facilitator's extensions.detail on a verify rejection", async () => {

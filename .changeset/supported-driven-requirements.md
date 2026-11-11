@@ -115,8 +115,15 @@ New exports: `SchemeAdapter`, `SchemeQuote`, `SchemeContext`,
 `cantonExact`, `CantonRequirementsSpec`, and the `compareQuote` / `sameValue` /
 `resolve` helpers an adapter needs.
 
-**A new guard.** The decoded `X-PAYMENT` is checked by the scheme before
+**A new guard.** The decoded payment is checked by the scheme before
 anything reads a field off it. The envelope is a loose object — `payload.payload`
 is `{}` as far as it is concerned — so a payload missing the fields the scheme
 needs used to reach `payload.payload.payer` and the facilitator. It is now a
 `402 policy_payload_invalid`, costing no verify.
+
+That is a deliberate difference from the code this replaces, which let such a
+payload reach the verifier and answered the verifier's
+`invalid_exact_canton_malformed_payload`. Refusing it here is earlier and
+cheaper, and the scheme's guard is the only thing that has checked the payload
+at that point; the verifier's code still answers when a transfer decodes but
+does not hold up.

@@ -85,6 +85,12 @@ A browser page on another origin can read `PAYMENT-REQUIRED` and
 `Access-Control-Expose-Headers`, and can send `PAYMENT-SIGNATURE` only if the
 preflight allows it in `Access-Control-Allow-Headers`.
 
+A header in the pre-spec `{ payment, requirements }` shape, a payment with no
+`accepted`, or one whose `accepted` is not a whole `PaymentRequirements` (one of
+`scheme`, `network`, `amount`, `asset` and `payTo` missing or empty, or a
+`maxTimeoutSeconds` that is not a whole number of at least 1), is `bad_payload`
+— the codec refuses it before the middleware reads anything.
+
 The decoded header is **guarded before anything reads a field off it**. The
 payment envelope is a loose object — `payload.payload` is `{}` as far as it
 is concerned, and `extra` is not required at all — so the scheme's
