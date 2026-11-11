@@ -27,6 +27,10 @@ vi.mock("@chainsafe/x402-core", async (importOriginal) => {
   return { ...core, decodePayloadTransfer: vi.fn(core.decodePayloadTransfer) };
 });
 
+// Pinning `network` and a whole `asset` discovers nothing, so the
+// synchronizer has to be named too.
+const SYNC = "global-domain::1220be58c29e";
+
 const baseOptions: PaymentRequiredOptions = {
   facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
   requirements: {
@@ -38,6 +42,7 @@ const baseOptions: PaymentRequiredOptions = {
     accepts: [
       {
         asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC,
         amount: "500000000",
       },
     ],
@@ -77,7 +82,8 @@ function makeApp(opts: Partial<PaymentRequiredOptions> = {}): Express {
 
 const ECHOED_EXTRA = {
   assetTransferMethod: "transfer-factory",
-  executeBeforeSeconds: 120,
+  synchronizerId: SYNC,
+              executeBeforeSeconds: 120,
   instrumentId: { id: "Amulet", admin: "DSO::x" },
 };
 
@@ -104,7 +110,7 @@ function paymentHeader(
     accepted: requirements,
     payload: {
       assetTransferMethod: "transfer-factory",
-      preparedTransaction: "b",
+    preparedTransaction: "b",
       preparedTxHash: "h",
       signature: "s",
       publicKey: "pk",
@@ -132,6 +138,7 @@ describe("paymentRequired", () => {
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC,
               amount: (req) => (req.method === "GET" ? "900000000" : "100000000"),
             },
           ],
@@ -164,6 +171,7 @@ describe("paymentRequired", () => {
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC,
               amount: policy,
             },
           ],
@@ -215,6 +223,7 @@ describe("paymentRequired", () => {
             asset: "CC",
             extra: {
               assetTransferMethod: "transfer-factory",
+              synchronizerId: SYNC,
               executeBeforeSeconds: 120,
               instrumentId: { id: "Amulet", admin: "DSO::x" },
             },
@@ -243,9 +252,11 @@ describe("paymentRequired", () => {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
           accepts: [
-            { asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } }, amount: "500000000" },
+            { asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC, amount: "500000000" },
             // The second way to pay carries the decimal.
-            { asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } }, amount: "0.10" },
+            { asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } },
+        synchronizerId: SYNC, amount: "0.10" },
           ],
         },
       }),
@@ -272,6 +283,7 @@ describe("paymentRequired", () => {
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC,
               amount: "0.05", // CC, where atomic units are expected
             },
           ],
@@ -310,6 +322,7 @@ describe("paymentRequired", () => {
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC,
               amount: "500000000",
             },
           ],
@@ -445,6 +458,7 @@ describe("paymentRequired", () => {
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC,
               amount: "500000000",
               executeBeforeSeconds: 300,
               memo: (req) => {
@@ -486,7 +500,8 @@ describe("paymentRequired", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-          accepts: [{ asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } }, amount: "500000000" }],
+          accepts: [{ asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC, amount: "500000000" }],
         },
       }),
     );
@@ -511,7 +526,8 @@ describe("paymentRequired", () => {
           asset: "CC",
           extra: {
             assetTransferMethod: "transfer-factory",
-            executeBeforeSeconds: 120,
+            synchronizerId: SYNC,
+              executeBeforeSeconds: 120,
             instrumentId: { id: "Amulet", admin: "DSO::x" },
           },
           payTo: "merchant::x",
@@ -760,7 +776,8 @@ describe("paymentRequired", () => {
         paymentHeader({
           extra: {
             assetTransferMethod: "transfer-factory",
-            executeBeforeSeconds: 120,
+            synchronizerId: SYNC,
+              executeBeforeSeconds: 120,
             instrumentId: { id: "Amulet", admin: "DSO::impostor" },
           },
         }),
@@ -779,7 +796,8 @@ describe("paymentRequired", () => {
         paymentHeader({
           extra: {
             assetTransferMethod: "transfer-factory",
-            executeBeforeSeconds: 120,
+            synchronizerId: SYNC,
+              executeBeforeSeconds: 120,
             instrumentId: { id: "USDCx", admin: "DSO::x" },
           },
         }),
@@ -1153,7 +1171,8 @@ describe("paymentRequired: which quote a payment is for", () => {
   /** A second way to pay, priced separately and in its own instrument. */
   const ALT_EXTRA = {
     assetTransferMethod: "transfer-factory",
-    executeBeforeSeconds: 120,
+    synchronizerId: SYNC,
+              executeBeforeSeconds: 120,
     instrumentId: { id: "USDCx", admin: "ISSUER::x" },
   };
 
@@ -1164,8 +1183,10 @@ describe("paymentRequired: which quote a payment is for", () => {
       payTo: "merchant::x",
       resource: "https://f.example/paid",
       accepts: [
-        { asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } }, amount: "500000000" },
-        { asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } }, amount: "250000000" },
+        { asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC, amount: "500000000" },
+        { asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } },
+        synchronizerId: SYNC, amount: "250000000" },
       ],
     },
   };
@@ -1181,9 +1202,11 @@ describe("paymentRequired: which quote a payment is for", () => {
         payTo: "merchant::shared",
         resource: "https://f.example/paid",
         accepts: [
-          { asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } }, amount: "500000000" },
+          { asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC, amount: "500000000" },
           {
             asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } },
+        synchronizerId: SYNC,
             amount: "250000000",
             payTo: "merchant::other",
             maxTimeoutSeconds: 120,
@@ -1259,6 +1282,23 @@ describe("paymentRequired: which quote a payment is for", () => {
     expect(res.body.error).toBe("policy_underpriced");
   });
 
+  it("rejects an echoed synchronizer the merchant did not quote", async () => {
+    // The verifier pins the SIGNED synchronizer to the requirements the
+    // payment carries — which the payer wrote. Without this, a payer echoes
+    // its own domain, prepares against it, and the pin passes against a
+    // synchronizer the merchant never agreed to settle on.
+    const fetchMock = stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set(
+        "PAYMENT-SIGNATURE",
+        paymentHeader({ extra: { ...ECHOED_EXTRA, synchronizerId: "attacker-domain::1220ffff" } }),
+      );
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_synchronizer");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects an echoed executeBeforeSeconds the merchant did not quote", async () => {
     // It reaches the ledger as the transfer's executeBefore, so echoing another
     // value is the payer choosing how long the quote stays settleable.
@@ -1323,6 +1363,7 @@ describe("paymentRequired: minting a merchant reference", () => {
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC,
               amount: "500000000",
               memo: () => {
                 const m = `order-${booked.length}`;
@@ -1420,6 +1461,7 @@ describe("paymentRequired: minting a merchant reference", () => {
         network: "canton:x",
         payTo: "merchant::x",
         resource: "https://f.example/paid",
+        synchronizerId: SYNC,
         memo: booking(booked),
         accepts: [
           { asset: AMULET, amount: "500000000" },
@@ -1441,6 +1483,7 @@ describe("paymentRequired: minting a merchant reference", () => {
         network: "canton:x",
         payTo: "merchant::x",
         resource: "https://f.example/paid",
+        synchronizerId: SYNC,
         accepts: [
           { asset: AMULET, amount: "500000000", memo: () => book() },
           { asset: USDCX, amount: "250000", memo: () => book() },
@@ -1456,6 +1499,7 @@ describe("paymentRequired: minting a merchant reference", () => {
         network: "canton:x",
         payTo: "merchant::x",
         resource: "https://f.example/paid",
+        synchronizerId: SYNC,
         memo: () => "shared",
         accepts: [
           { asset: AMULET, amount: "500000000" },
@@ -1481,6 +1525,7 @@ describe("paymentRequired: minting a merchant reference", () => {
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC,
               amount: "500000000",
               memo: () => {
                 throw new Error("order store is down");
@@ -1511,7 +1556,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         network: "canton:devnet",
         extra: {
           transferMethods: ["transfer-factory"],
-          synchronizerId: "global-domain::1220be58",
+          synchronizerId: SYNC,
           carriages: ["inline"],
           instruments: [{ admin: DSO, instrumentId: { id: "Amulet", admin: DSO }, symbol: "CC" }],
         },
@@ -1851,7 +1896,8 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         asset: "CC",
         extra: {
           assetTransferMethod: "transfer-factory",
-          executeBeforeSeconds: 120,
+          synchronizerId: SYNC,
+              executeBeforeSeconds: 120,
           instrumentId: { id: "Amulet", admin: "DSO::x" },
         },
         payTo: "merchant::x",
@@ -1921,6 +1967,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
               {
                 amount: "700000000",
                 asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } },
+        synchronizerId: SYNC,
               },
             ],
           },
@@ -2140,6 +2187,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
             asset: "CC",
             extra: {
               assetTransferMethod: "transfer-factory",
+              synchronizerId: SYNC,
               executeBeforeSeconds: 120,
               instrumentId: { id: "Amulet", admin: DSO },
             },
@@ -2310,6 +2358,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
             {
               amount: "500000000",
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC,
               payTo: absent,
             },
           ],
@@ -2349,11 +2398,13 @@ describe("paymentRequired: configuring from /v2/supported", () => {
             {
               amount: "500000000",
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC,
               memo: bookOrder,
             },
             {
               amount: "250000",
               asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } },
+        synchronizerId: SYNC,
               memo: bookOrder,
             },
           ],
@@ -2387,11 +2438,13 @@ describe("paymentRequired: configuring from /v2/supported", () => {
             {
               amount: "500000000",
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+        synchronizerId: SYNC,
               memo: () => "cc-order",
             },
             {
               amount: "250000",
               asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } },
+        synchronizerId: SYNC,
               memo: () => "usdc-order",
             },
           ],

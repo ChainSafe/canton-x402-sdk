@@ -4,11 +4,13 @@ import {
   encodeChoiceArgument,
   encodeNode,
   encodePreparedTransaction,
+  stringField,
   wrap,
   type EncodeOptions,
 } from "./prepared-tx.fixtures";
 
 const TRANSFER: DecodedTransfer = {
+  synchronizerId: "global-domain::1220be58c29e",
   sender: "alice::1220beef",
   receiver: "merchant::1220dead",
   amount: "0.01",
@@ -39,6 +41,7 @@ describe("decodePreparedTransaction", () => {
 
   it("preserves an amount with decimals and a distinct instrument", () => {
     const t: DecodedTransfer = {
+      synchronizerId: "global-domain::1220be58c29e",
       sender: "p::1220a",
       receiver: "m::1220b",
       amount: "1234.5678",
@@ -118,11 +121,27 @@ describe("decodePreparedTransaction on a non-canonical encoding", () => {
   });
 
   it("still decodes when the other fields appear once each", () => {
-    // PreparedTransaction.metadata and Exercise.template_id
-    const blob = encodePreparedTransaction(TRANSFER, {
-      extra: { prepared: wrap(2, empty), exercise: wrap(4, empty) },
-    });
+    // Exercise.template_id, which nothing here reads.
+    const blob = encodePreparedTransaction(TRANSFER, { extra: { exercise: wrap(4, empty) } });
     expect(decodePreparedTransaction(blob)).toEqual(TRANSFER);
+  });
+
+  it("returns null for a metadata naming the synchronizer twice", () => {
+    // protobuf keeps the LAST when a singular field repeats, so reading the
+    // first would pin against one domain while the ledger settles on another.
+    // The fixture already writes one; this appends a second.
+    const blob = encodePreparedTransaction(TRANSFER, {
+      extra: { metadata: stringField(3, "attacker-domain::1220ffff") },
+    });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  it("returns null for a transaction whose metadata is written twice", () => {
+    // The synchronizer is read from PreparedTransaction{2: metadata}, so two
+    // of them are two answers to which domain the payer committed to. The
+    // fixture writes one; this adds a second.
+    const blob = encodePreparedTransaction(TRANSFER, { extra: { prepared: wrap(2, empty) } });
+    expect(decodePreparedTransaction(blob)).toBeNull();
   });
 });
 

@@ -112,7 +112,14 @@ export class CantonX402Payer implements X402Payer {
 
     // 2. Prepare (interactive submission) → prepared tx + hash to sign.
     const { response } = await sdk.ledger
-      .prepare({ partyId: key.partyId, commands: command, disclosedContracts: disclosed })
+      // The LOGICAL id, which is the form prepare takes; the bytes it returns
+      // carry the physical one, and the verifier pins against that.
+      .prepare({
+        partyId: key.partyId,
+        commands: command,
+        disclosedContracts: disclosed,
+        synchronizerId: requirements.extra.synchronizerId,
+      })
       .toJSON();
 
     // 3. Sign the hash. wallet-sdk hands the hash as base64; the payload carries it

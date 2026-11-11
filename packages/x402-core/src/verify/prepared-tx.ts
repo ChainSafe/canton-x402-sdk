@@ -48,6 +48,13 @@ export interface DecodedTransfer {
   executeBeforeMicros?: bigint;
   /** `meta.values["x402.memo"]`, when the payer committed one (Rule 12). */
   memo?: string;
+  /**
+   * `Metadata.synchronizer_id` — the domain this transaction is prepared for,
+   * read from the signed block, so the payer committed to it rather than a
+   * relay choosing it. Canton signs the PHYSICAL id: the logical one a
+   * merchant quotes, plus a participant-chosen `::<protocol>-<serial>`.
+   */
+  synchronizerId?: string;
 }
 
 /**
@@ -386,9 +393,18 @@ function readTransfer(chosenValue: Uint8Array): DecodedTransfer | null {
 export function decodePreparedTransaction(preparedTransactionBase64: string): DecodedTransfer | null {
   try {
     const prepared = base64ToBytes(preparedTransactionBase64);
-    assertCanonical(prepared, [1]);
+    assertCanonical(prepared, [1, 2]);
     const txn = firstSub(prepared, 1); // PreparedTransaction.transaction
     if (!txn) return null;
+    // PreparedTransaction{2: metadata} → Metadata{3: synchronizer_id}, inside
+    // the block the signature covers.
+    const metadata = firstSub(prepared, 2);
+    // Singular, so one of them. Taking the first would disagree with the
+    // ledger: protobuf keeps the LAST when a singular field repeats, so a
+    // metadata naming the quoted domain and then another would pin here
+    // against the quoted one and settle on the other.
+    if (metadata) assertCanonical(metadata, [3]);
+    const synchronizerId = metadata ? strings(metadata, 3)[0] : undefined;
 
     // DamlTransaction{2: roots[], 3: nodes[]}. Canton keeps the LAST node of a
     // repeated id and refuses nodes the roots cannot reach, and the signed hash
@@ -444,7 +460,8 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
     }
     if (reached.size !== nodes.size) throw new Error("a node is not reachable from the roots");
 
-    return transferArg ? readTransfer(transferArg) : null;
+    const transfer = transferArg ? readTransfer(transferArg) : null;
+    return transfer && synchronizerId !== undefined ? { ...transfer, synchronizerId } : transfer;
   } catch {
     return null;
   }

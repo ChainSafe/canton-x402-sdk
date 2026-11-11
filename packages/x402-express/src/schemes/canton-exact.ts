@@ -87,6 +87,13 @@ export interface CantonRequirementsSpec extends BaseRequirementsSpec {
    */
   asset: Resolvable<string | AssetSpec>;
   /**
+   * The synchronizer to settle on, as the LOGICAL id
+   * `global-domain::1220…`. Read from `GET /v2/supported` when discovery runs,
+   * so it is only needed where nothing is discovered — `network` pinned
+   * alongside a whole `AssetSpec`.
+   */
+  synchronizerId?: Resolvable<string>;
+  /**
    * Seconds of life the payer gives the transfer it signs. Default 120. Unlike
    * `maxTimeoutSeconds` this one reaches the ledger, as the transfer's
    * `executeBefore`, and the verifier refuses a transfer already inside its
@@ -129,6 +136,10 @@ const EXTRA_RULES: Record<keyof typeof CantonRequirementsExtraSchema.entries, Ru
   // The instrument, not the symbol: `asset` alone cannot say which registry
   // issued it, so comparing symbols would admit a look-alike from another.
   instrumentId: { compare: "equal", reason: "policy_asset" },
+  // The domain the merchant settles on. Compared here so a payer cannot echo
+  // another and have the verifier pin the transfer to that instead; the
+  // verifier holds the signed transaction to whatever reaches it.
+  synchronizerId: { compare: "equal", reason: "policy_synchronizer" },
   // Echo fidelity only. The payer folds this into the transfer's absolute
   // `executeBefore`, and the verifier checks that deadline is still ahead of
   // now — with no upper bound, so a transfer signed far further out than the
@@ -196,6 +207,7 @@ export const cantonExact: SchemeAdapter<
       asset: terms.asset,
       extra: {
         assetTransferMethod: ASSET_TRANSFER_METHOD,
+        synchronizerId: terms.synchronizerId,
         instrumentId: terms.instrumentId,
         executeBeforeSeconds:
           spec.executeBeforeSeconds === undefined
@@ -234,6 +246,7 @@ async function resolveDeploymentTerms(
   scheme: string;
   network: string;
   asset: string;
+  synchronizerId: string;
   instrumentId: AssetSpec["instrumentId"];
 }> {
   const scheme = await resolve(spec.scheme ?? cantonExact.id, req);
@@ -245,12 +258,22 @@ async function resolveDeploymentTerms(
   const instrument = instrumentIdOf(asset);
   const pinned = typeof asset === "string" ? undefined : asset;
 
-  // Both pinned: nothing to discover.
+  // Both pinned: nothing to discover — so the synchronizer has to come from
+  // the merchant, since there is no `/v2/supported` answer to read it from.
   if (network !== undefined && pinned !== undefined) {
+    const synchronizerId =
+      spec.synchronizerId === undefined ? undefined : await resolve(spec.synchronizerId, req);
+    if (synchronizerId === undefined) {
+      throw new Error(
+        "paymentRequired: `network` and a whole `asset` are pinned, so nothing is read from " +
+          "/v2/supported — name the `synchronizerId` to settle on, or leave one of them out.",
+      );
+    }
     return {
       scheme,
       network,
       asset: assetSymbol(pinned.instrumentId),
+      synchronizerId,
       instrumentId: pinned.instrumentId,
     };
   }
@@ -270,6 +293,11 @@ async function resolveDeploymentTerms(
     scheme,
     network: network ?? advertised.network,
     asset: pinned ? assetSymbol(pinned.instrumentId) : advertised.asset,
+    // The deployment's own, unless the merchant named one.
+    synchronizerId:
+      spec.synchronizerId === undefined
+        ? advertised.extra.synchronizerId
+        : await resolve(spec.synchronizerId, req),
     instrumentId: pinned?.instrumentId ?? advertised.extra.instrumentId,
   };
 }

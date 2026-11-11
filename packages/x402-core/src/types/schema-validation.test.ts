@@ -19,7 +19,7 @@ import type { CantonPaymentRequirements } from "./requirements";
 
 const inner: CantonPaymentInner = {
   assetTransferMethod: "transfer-factory",
-  preparedTransaction: "cHJlcGFyZWQ=",
+    preparedTransaction: "cHJlcGFyZWQ=",
   preparedTxHash: "deadbeef",
   signature: "cafe",
   publicKey: "cHVibGljS2V5",
@@ -31,7 +31,7 @@ const requirements: CantonPaymentRequirements = {
   network: "canton:devnet",
   amount: "100000000",
   asset: "CC",
-  extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+  extra: { assetTransferMethod: "transfer-factory",  synchronizerId: "global-domain::1220be58c29e",executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
   maxTimeoutSeconds: 60,
 };
@@ -69,7 +69,7 @@ describe("schema-first guards + parsers", () => {
 
   it("rejects wrong field types", () => {
     expect(isCantonPaymentInner({ ...inner, signature: 42 })).toBe(false);
-    expect(isCantonPaymentRequirements({ ...requirements, extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet" } } })).toBe(false);
+    expect(isCantonPaymentRequirements({ ...requirements, extra: { assetTransferMethod: "transfer-factory",  synchronizerId: "global-domain::1220be58c29e",executeBeforeSeconds: 120, instrumentId: { id: "Amulet" } } })).toBe(false);
   });
 
   it("rejects an empty string in any required field", () => {

@@ -55,7 +55,7 @@ async function buildSignedFixture(overrides: { executeBeforeSeconds?: number; me
     asset: "CC",
     extra: {
       assetTransferMethod: "transfer-factory",
-      executeBeforeSeconds,
+      synchronizerId: "global-domain::1220be58c29e",executeBeforeSeconds,
       instrumentId: { id: "Amulet", admin: "DSO::1220dso" },
       ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
     },
