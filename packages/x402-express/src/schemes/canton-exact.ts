@@ -101,8 +101,10 @@ const EXTRA_RULES: Record<keyof typeof CantonRequirementsExtraSchema.entries, Ru
   // The instrument, not the symbol: `asset` alone cannot say which registry
   // issued it, so comparing symbols would admit a look-alike from another.
   instrumentId: { compare: "equal", reason: "policy_asset" },
-  // Reaches the ledger as the transfer's executeBefore, so a payer echoing its
-  // own value would be choosing how long the merchant's quote stays settleable.
+  // Echo fidelity only. The payer folds this into the transfer's absolute
+  // `executeBefore`, and the verifier checks that deadline is still ahead of
+  // now — with no upper bound, so a transfer signed far further out than the
+  // quote still verifies. Binding the two is core's to do (#115).
   executeBeforeSeconds: { compare: "equal", reason: "policy_execute_before" },
   // Minted per challenge, and the terms compared against were built without
   // one. Whether the payer echoed a memo the merchant actually issued is a

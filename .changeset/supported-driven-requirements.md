@@ -153,11 +153,18 @@ added to either fails the build until someone decides what comparing it means.
 The previous hand-written list silently ignored anything nobody remembered to
 add.
 
-Two consequences of that table: `extra.executeBeforeSeconds` is now compared (it
-reaches the ledger as the transfer's `executeBefore`, so a payer echoing its own
-value was choosing how long the quote stayed settleable — refused as
-`policy_execute_before`), and `description` is deliberately not, since it does
-not reach the ledger.
+Two consequences of that table: `extra.executeBeforeSeconds` is now compared,
+refused as `policy_execute_before`, and `description` is deliberately not, since
+it does not reach the ledger.
+
+That comparison is echo fidelity, not a bound on the deadline. The payer folds
+the value into the transfer's absolute `executeBefore`, and the verifier checks
+only that the deadline is still ahead of now — with no upper bound — so a
+transfer signed much further out than the quote still verifies while echoing
+the quoted number. Closing that means comparing the signed deadline against
+`now + executeBeforeSeconds` with an allowance for clock skew, which is the
+verifier's job and not this change's — tracked in #115. Found in review by
+@dimartiro.
 
 ### The flow is no longer canton-shaped
 
