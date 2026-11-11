@@ -140,10 +140,9 @@ interface SchemeAdapter<TSpec, TRequirements, TPayload> {
   extraRules: RuleTable;
   // Build the scheme's part of a quote, including its per-challenge reference.
   quote(req, spec: TSpec, ctx): Promise<SchemeQuote>;
-  // Optional. What makes one entry a distinct way to pay, the resource stamp
-  // the payer signed, and the code to refuse with when no payer can be read.
+  // Optional. What makes one entry a distinct way to pay, and the code to
+  // refuse with when no payer can be read.
   distinctKey?(spec: TSpec): string | undefined;
-  resourceStampOf?(payload: TPayload): string | undefined;
   unreadablePayerReason?: string;
 }
 ```
@@ -181,7 +180,6 @@ TPayload>` is exported for a route gated on another.
 | `settle` | Capture via `/v2/settle` after verify. Default `false`. |
 | `requirements` | How to produce the `PaymentRequirements`: a **spec** or a **builder** (see below). |
 | `preSettle` | `(payment, req) => string \| undefined`, your own say on a verified payment, run after verify and before anything settles. Return a short reason to refuse it, or nothing to let it through; see below. |
-| `requireResourceStamp` | Refuse a payment carrying no resource stamp. Default `false`. See [Binding a payment to its resource](#binding-a-payment-to-its-resource). |
 | `onQuoteError` | `(error, req) => void`, called when a way to pay could not be quoted and was left out of the 402 — the facilitator no longer settles the instrument it names, say. The request is still answered from the entries that did quote, so without this a way to pay can disappear unnoticed. Fires once per dropped entry per request; a throw is swallowed. |
 | `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error?, payment? }`, where `extensions` is the facilitator's full verify detail, with the code it answered with before the spec's in `extensions.reason`, and `payment` is the payload, requirements and payer this refusal is about, present only once `preSettle` has accepted it — see **Undoing it** under [`requirements`](#requirements). May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
 
@@ -208,7 +206,7 @@ Every entry is a spec, so each gets discovery and the defaults, and there is no 
 
 Per-entry fields are `{ amount, asset, executeBeforeSeconds?, memo? }` plus an override of any shared one but `resource` and `description`. Any of them may also be set **once at the top level**, beside `payTo`, and `memo` usually should be — see below. `amount` and `asset` are required on every entry regardless, so naming those at the top level does nothing. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120). Every field may be a fixed value **or** a `(req) => value` resolver.
 
-For full control, a **builder** returns the whole list and you own `maxTimeoutSeconds` and the whole of `extra`. Return a bare `CantonPaymentRequirements[]` and the resource is the request URL; return `{ resource?, description?, accepts }` to name it, which a requirement can no longer do — `PaymentRequirements` carries no resource of its own.
+For full control, a **builder** `(req) => CantonPaymentRequirements[]` returns the whole list and you own `maxTimeoutSeconds` and the whole of `extra`.
 
 `payTo`, and each entry's `amount` and `asset`, are what you must give. `amount` is atomic units *of something*, so every way to pay says what — there is no deployment default to fall back on, and quoting one would be choosing what you charge.
 
@@ -257,32 +255,6 @@ It is present **exactly when an undo may be owed**: once `preSettle` has accepte
 One case it cannot settle for you: a **502 from a settle that threw** may mean the payment went through and the answer was lost, rather than that it did not happen. Undoing there is a choice about which way to be wrong — reconcile against the ledger if that matters to you.
 
 It is not memo-specific — it is where any check needing your own records belongs. With `settle: false` it is simply the last gate before the request is let through.
-
-## Binding a payment to its resource
-
-Nothing a payer *says* is signed. `PaymentPayload.resource` and the requirements it echoes are both free for it to write, so comparing them tells you a client is self-consistent — not that the payment was minted for this route. Where two routes share a price, payee and instrument, that leaves nothing to tell a payment for one from a payment for the other.
-
-What binds is a stamp **inside** the prepared transaction, under `meta["x402.resourceUrl"]`, which the payer signs with the rest of the transfer. `CantonX402Payer` writes it from the resource the 402 named, and the middleware checks it against the resource it quoted. It is the SHA-256 of the URL rather than the URL: Canton's ledger is readable, and plaintext would publish which API an agent buys from. A stamp in plaintext is accepted too, for clients deployed before the hashed form.
-
-An absent stamp is a payment carrying no binding — tolerated by default, since payers predating the convention do not stamp. `requireResourceStamp: true` refuses them:
-
-```ts
-paymentRequired({
-  facilitator,
-  requireResourceStamp: true,
-  requirements: {
-    payTo: "merchant::1220…",
-    resource: "https://merchant.example/report",   // pin it; see below
-    accepts: [{ amount: "500000000", asset: "Amulet" }],
-  },
-});
-```
-
-**Pin `resource` when you turn this on.** Left out, it is the request's own URL, and that URL's host is the client's `Host` header — so the path binds and the host does not, and two hosts serving one path are not told apart. A fixed `resource` is not a header anyone can set.
-
-A scheme that reads no stamp cannot satisfy the flag, so setting it there throws when the route is mounted rather than refusing every payment.
-
-This is an upstream convention rather than a field of the registered Canton scheme spec, which names only `x402.memo`. The registered facilitator stamps and checks it the same way.
 
 ## `req.x402`
 

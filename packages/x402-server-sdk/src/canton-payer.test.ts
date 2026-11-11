@@ -4,7 +4,6 @@ import { sha512 } from "@noble/hashes/sha2.js";
 import {
   fingerprintForPublicKey,
   gunzipPreparedTransaction,
-  hashResourceUrl,
   signatureFromBase64,
   verifySignature,
   type CantonPaymentRequirements,
@@ -191,27 +190,6 @@ describe("CantonX402Payer.authorize", () => {
 
     const without = await makePayer(mockSdk().sdk).authorize(makeRequirements());
     expect(without).not.toHaveProperty("resource");
-  });
-
-
-  it("stamps the resource into the transfer it signs", async () => {
-    // Inside the signature, so a transfer for one resource cannot unlock
-    // another — and hashed, so the ledger does not publish which API is bought.
-    const { sdk, create } = mockSdk();
-    const resource = { url: "https://api.example/report" };
-    await makePayer(sdk).authorize(makeRequirements({ extra: { ...EXTRA, memo: "order-1" } }), {
-      resource,
-    });
-    const meta = create.mock.calls[0]?.[0]?.meta?.values as Record<string, string>;
-    expect(meta["x402.resourceUrl"]).toBe(hashResourceUrl(resource.url));
-    // The memo still travels under its own key, unchanged.
-    expect(meta["x402.memo"]).toBe("order-1");
-  });
-
-  it("stamps nothing when the caller names no resource", async () => {
-    const { sdk, create } = mockSdk();
-    await makePayer(sdk).authorize(makeRequirements());
-    expect(create.mock.calls[0]?.[0]?.meta).toBeUndefined();
   });
 
 });

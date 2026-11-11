@@ -128,24 +128,6 @@ export interface PaymentRequiredOptions<
   scheme?: SchemeAdapter<TSpec, TRequirements, TPayload>;
   /** Capture the payment (call the facilitator's /v2/settle) after a valid verify. Default `false`. */
   settle?: boolean;
-  /**
-   * Refuse a payment that carries no resource stamp. Default `false`.
-   *
-   * A stamp binds a payment to one resource from inside the signature, so a
-   * transfer for A cannot unlock B. It is an upstream convention rather than a
-   * field of the registered scheme spec, and payers that predate it do not
-   * stamp — refusing them is a choice about whom you will take money from, so
-   * it is yours. A stamp that is PRESENT is always checked.
-   *
-   * Turn it on where two routes share a price, payee and instrument: without a
-   * stamp nothing distinguishes a payment for one from a payment for the other.
-   *
-   * Pin {@link SharedTerms.resource} when you do. Left out, the resource is the
-   * request's own URL, whose host comes from the client's `Host` header — so
-   * the path binds but the host does not, and two hosts serving one path are
-   * not told apart. A fixed `resource` is not a header anyone can set.
-   */
-  requireResourceStamp?: boolean;
   /** The terms to advertise: a declarative spec, or a builder for the whole list. */
   requirements: RequirementsSpec<TSpec> | RequirementsBuilder<TRequirements>;
   /**
@@ -297,7 +279,7 @@ declare global {
 export type { Resolvable };
 
 /**
- * Throws when the options cannot produce a 402 anyone could pay.
+ * Throws when the terms cannot produce a 402.
  *
  * Both checks are on what the merchant wrote, so both run once, when the route
  * is mounted — a request cannot change either answer, and answering 500 to
@@ -317,18 +299,9 @@ export function assertUsableTerms<
   TRequirements extends X402PaymentRequirements<unknown>,
   TPayload extends X402PaymentPayload<unknown>,
 >(
-  options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>,
+  source: PaymentRequiredOptions<TSpec, TRequirements, TPayload>["requirements"],
   scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
 ): void {
-  // A scheme that reads no stamp can never satisfy the flag, so every payment
-  // would be refused. Caught here rather than discovered one 402 at a time.
-  if (options.requireResourceStamp && !scheme.resourceStampOf) {
-    throw new TermsError(
-      `paymentRequired: requireResourceStamp is set, but the "${scheme.id}" scheme reads no ` +
-        `resource stamp, so no payment could satisfy it.`,
-    );
-  }
-  const source = options.requirements;
   if (typeof source === "function") return;
   const { accepts, ...shared } = source;
   if (accepts.length === 0) {

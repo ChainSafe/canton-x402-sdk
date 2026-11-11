@@ -1,6 +1,5 @@
 import {
   ASSET_TRANSFER_METHOD,
-  hashResourceUrl,
   EXACT_SCHEME_ID,
   WIRE_DECIMALS,
   atomicToLedger,
@@ -98,17 +97,6 @@ export class CantonX402Payer implements X402Payer {
     //    The memo travels under the scheme's own key: the SDK's `memo` parameter
     //    writes `splice.lfdecentralizedtrust.org/reason`, a different one, so
     //    both can be present without either standing in for the other.
-    // Stamped INSIDE the transfer, so the signature covers them. The memo is
-    // the scheme's (Rule 12); the resource stamp binds this payment to the one
-    // resource it was quoted for, which nothing the payer echoes can do — the
-    // hash rather than the URL, so the ledger does not publish which API is
-    // being bought.
-    const meta: Record<string, string> = {};
-    if (requirements.extra.memo !== undefined) meta["x402.memo"] = requirements.extra.memo;
-    if (context?.resource?.url !== undefined) {
-      meta["x402.resourceUrl"] = hashResourceUrl(context.resource.url);
-    }
-
     const [command, disclosed] = await sdk.token.transfer.create({
       sender: key.partyId,
       recipient: requirements.payTo,
@@ -116,7 +104,9 @@ export class CantonX402Payer implements X402Payer {
       instrumentId: requirements.extra.instrumentId.id,
       registryUrl,
       expirationDate: new Date(Date.now() + requirements.extra.executeBeforeSeconds * 1000),
-      ...(Object.keys(meta).length === 0 ? {} : { meta: { values: meta } }),
+      ...(requirements.extra.memo === undefined
+        ? {}
+        : { meta: { values: { "x402.memo": requirements.extra.memo } } }),
     });
 
     // 2. Prepare (interactive submission) → prepared tx + hash to sign.

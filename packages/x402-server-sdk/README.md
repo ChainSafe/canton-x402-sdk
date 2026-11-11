@@ -2,7 +2,7 @@
 
 Payer-side SDK for [x402](https://x402.org) on the Canton Network. With a Canton
 party's Ed25519 key and ledger access (via [`@canton-network/wallet-sdk`](https://www.npmjs.com/package/@canton-network/wallet-sdk)),
-`X402Payer.authorize(requirements, context?)` prepares and signs a Canton Coin transfer and
+`X402Payer.authorize(requirements)` prepares and signs a Canton Coin transfer and
 returns the `CantonPaymentPayload` a facilitator settles — the payer authorizes, it
 never executes.
 
@@ -105,24 +105,13 @@ Canton implementation):
 ```ts
 interface X402Payer {
   supports(requirements: CantonPaymentRequirements): boolean;   // scheme + network + transfer method + asset
-  authorize(
-    requirements: CantonPaymentRequirements,
-    context?: PaymentContext,                                   // what the 402 said, beyond this entry
-  ): Promise<CantonPaymentPayload>;
+  authorize(requirements: CantonPaymentRequirements): Promise<CantonPaymentPayload>;
 }
 ```
 
 `authorize` must return a payment whose `accepted` is the `requirements` it was
 given, whole: `createX402Fetch` sends the payment alone, and the merchant takes
 the requirements to verify against from it.
-
-`context` carries the resource the 402 named, which `PaymentRequirements` does
-not: x402 v2 puts it on `PaymentRequired`. `CantonX402Payer` echoes it in
-`PaymentPayload.resource` and stamps its SHA-256 **inside** the signed transfer,
-under `meta["x402.resourceUrl"]`, which is what binds the payment to one
-resource — nothing it merely echoes can. An implementation that ignores the
-argument still satisfies the interface; its payments simply carry no binding,
-which a merchant may refuse with `requireResourceStamp`.
 
 `CantonX402Payer.authorize()`:
 - validates the requirement (amount, scheme, network, `extra.assetTransferMethod`, expiry) via `x402-core`;
@@ -146,15 +135,9 @@ refuses it. The payer doesn't track in-flight requests.
 ## Auto-pay fetch
 
 `createX402Fetch(payer)` wraps `fetch` so payments are transparent: it calls the
-resource, and on a `402` reads the offer, pays via the payer, and retries with
-the `PAYMENT-SIGNATURE` header. Non-402 responses — and 402s the payer can't
+resource, and on a `402` reads the accepted requirements, pays via the payer, and
+retries with the `PAYMENT-SIGNATURE` header. Non-402 responses — and 402s the payer can't
 satisfy — pass through unchanged.
-
-It reads the offer from the **`PAYMENT-REQUIRED` header**, where the x402 v2
-HTTP transport puts it, falling back to the response body. The transport calls
-the body a server implementation concern, and a conforming merchant may answer
-`{}` there — every registered Canton merchant does — so a client reading only
-the body sees no way to pay and declines.
 
 ```ts
 import { createX402Fetch } from "@chainsafe/x402-server-sdk";

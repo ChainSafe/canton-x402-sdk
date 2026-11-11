@@ -4,7 +4,6 @@ import express, { type Express } from "express";
 import request from "supertest";
 import {
   decodePayloadTransfer,
-  hashResourceUrl,
   encodePaymentHeader,
   isCantonPaymentRequirements,
   isCantonPaymentRequiredResponse,
@@ -13,7 +12,6 @@ import {
 } from "@chainsafe/x402-core";
 import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "./middleware";
-import { cantonExact } from "./schemes/canton-exact";
 import { TermsError } from "./options";
 import type {
   PaymentRejectionInfo,
@@ -553,9 +551,7 @@ describe("paymentRequired", () => {
     expect(calls.some((u) => u.includes("/v2/settle"))).toBe(false);
   });
 
-  it("takes the facilitator's verify.payer over the transfer's sender", async () => {
-    // The transfer is decoded regardless, to read the resource stamp — but
-    // once, and `verify.payer` still wins over the sender it names.
+  it("takes the facilitator's verify.payer when there is one, without decoding the payload", async () => {
     stubFacilitator(); // verify answers payer "alice::x"
     const decode = vi.mocked(decodePayloadTransfer);
     const { decodePayloadTransfer: real } =
@@ -571,8 +567,7 @@ describe("paymentRequired", () => {
       const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({ ok: true, payer: "alice::x" });
-      // Gunzipping and walking a protobuf is not free; two readers, one decode.
-      expect(decode).toHaveBeenCalledTimes(1);
+      expect(decode).not.toHaveBeenCalled();
     } finally {
       decode.mockImplementation(real);
     }
@@ -2412,80 +2407,6 @@ describe("paymentRequired: configuring from /v2/supported", () => {
   });
 
 
-
-
-
-  describe("the resource stamp inside the signature", () => {
-    const stamped = (stamp?: string) => {
-      const decode = vi.mocked(decodePayloadTransfer);
-      decode.mockClear();
-      decode.mockImplementation(() => ({
-        sender: "alice::x",
-        receiver: "merchant::x",
-        amount: "0.05",
-        instrumentId: { id: "Amulet", admin: "DSO::x" },
-        ...(stamp === undefined ? {} : { resourceUrlStamp: stamp }),
-      }));
-    };
-    const RESOURCE = "https://f.example/paid";
-
-    afterEach(async () => {
-      const { decodePayloadTransfer: real } =
-        await vi.importActual<typeof import("@chainsafe/x402-core")>("@chainsafe/x402-core");
-      vi.mocked(decodePayloadTransfer).mockImplementation(real);
-    });
-
-    it("takes a payment stamped for this resource", async () => {
-      stubFacilitator();
-      stamped(hashResourceUrl(RESOURCE));
-      await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader()).expect(200);
-    });
-
-    it("takes the plaintext stamp too, for clients that predate the hash", async () => {
-      stubFacilitator();
-      stamped(RESOURCE);
-      await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader()).expect(200);
-    });
-
-    it("refuses one stamped for another resource", async () => {
-      // The loophole this closes: same price, payee and instrument, so nothing
-      // the payer ECHOES tells the two apart — but the stamp is signed.
-      stubFacilitator();
-      stamped(hashResourceUrl("https://f.example/premium"));
-      const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
-      expect(res.status).toBe(402);
-      expect(res.body).toMatchObject({ error: "policy_resource", details: "stamp" });
-    });
-
-    it("tolerates an unstamped payment by default", async () => {
-      stubFacilitator();
-      stamped(undefined);
-      await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader()).expect(200);
-    });
-
-    it("refuses an unstamped payment when the merchant requires one", async () => {
-      stubFacilitator();
-      stamped(undefined);
-      const res = await request(makeApp({ requireResourceStamp: true }))
-        .get("/paid")
-        .set("PAYMENT-SIGNATURE", paymentHeader());
-      expect(res.status).toBe(402);
-      expect(res.body).toMatchObject({ error: "policy_resource", details: "unstamped" });
-    });
-  });
-
-
-  it("refuses to start when the scheme cannot read a stamp the merchant requires", async () => {
-    // The flag would refuse every payment, one 402 at a time. Config, so it
-    // fails at mount.
-    const stampless = { ...cantonExact, resourceStampOf: undefined };
-    expect(() =>
-      makeApp({
-        requireResourceStamp: true,
-        scheme: stampless as unknown as typeof cantonExact,
-      }),
-    ).toThrow(/reads no resource stamp/);
-  });
 
 
   it("resolves a per-request description for the envelope", async () => {

@@ -44,11 +44,7 @@ export interface SharedTerms {
   network?: Resolvable<string>;
   /** Scheme id. Defaults to the scheme adapter's own id. */
   scheme?: Resolvable<string>;
-  /**
-   * Resource URL. Default: the request's absolute URL — whose host is the
-   * client's `Host` header, so pin this where the resource identifies the sale
-   * rather than merely describing it (see `requireResourceStamp`).
-   */
+  /** Resource URL. Default: the request's absolute URL. */
   resource?: Resolvable<string>;
   /** Human description. Default: `Access to <path>`. */
   description?: Resolvable<string>;
@@ -232,16 +228,6 @@ export interface SchemeAdapter<
    * transaction and takes its sender. `undefined` when it cannot be read.
    */
   payerOf(payload: TPayload): string | undefined;
-  /**
-   * The resource stamp the payer signed, when the scheme carries one and this
-   * payment has it.
-   *
-   * What the payer *echoes* is unsigned and so proves nothing; a stamp is
-   * inside what was signed, and is the only thing that binds a payment to the
-   * resource it was quoted for. Compared with `resourceUrlMatchesStamp`.
-   * Absent means the payment carries no binding, not that it is wrong.
-   */
-  resourceStampOf?(payload: TPayload): string | undefined;
   /**
    * What makes this entry a distinct way to pay, for the check that a route
    * offers no two of the same. `undefined` when the spec cannot say without a

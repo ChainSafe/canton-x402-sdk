@@ -86,43 +86,6 @@ never going to pay, leaving it nothing to pay with.
 are exported for that check; `isCantonPaymentRequiredResponse` stays for a
 caller that does want the strict canton-exact read.
 
-### What actually binds a payment to a resource
-
-Comparing what the payer echoes proves a client is consistent, not that the
-payment was minted for this route: nothing the payer sends is signed. The
-binding is a stamp INSIDE the prepared transaction, under
-`meta["x402.resourceUrl"]`, which the payer signs with the rest of the transfer
-— so a transfer for one resource cannot unlock another.
-
-It is the SHA-256 of the URL, not the URL. Canton's ledger is readable, and
-plaintext would publish which API an agent buys from to every stakeholder and
-to Scan. An upstream convention rather than a field of the registered scheme
-spec, which names only `x402.memo`; the registered facilitator stamps and
-checks it, and tolerates its absence.
-
-- `CantonX402Payer` stamps it, from the resource the 402 named.
-- The middleware checks a stamp that is present, accepting the hash and the
-  plaintext (clients deployed before the hashed form stamp the URL itself).
-- An absent stamp is a payment carrying no binding. Tolerated by default, since
-  payers predating the convention do not stamp; `requireResourceStamp: true`
-  refuses them. Turn it on where two routes share a price, payee and
-  instrument, because then nothing else tells a payment for one from a payment
-  for the other. A scheme that reads no stamp cannot satisfy the flag, so
-  setting it there throws when the route is mounted rather than refusing every
-  payment.
-
-**Pin `resource` where the binding matters.** Left out, it is the request's own
-URL, and that URL's host is the client's `Host` header — so the path binds and
-the host does not, and two hosts serving one path are not told apart. A fixed
-`resource` is not a header anyone can set.
-
-New in `@chainsafe/x402-core`: `hashResourceUrl` and `resourceUrlMatchesStamp`,
-and `DecodedTransfer.resourceUrlStamp`. Schemes expose their own through
-`SchemeAdapter.resourceStampOf`.
-
-The payload's transfer is now decoded once per payment and shared between
-reading the payer and reading the stamp, rather than once per question.
-
 **`requirementsHash` changes for every payment**, because the canonical form
 lost two fields. The golden vector is regenerated and checked against the
 facilitator's own RFC 8785 canonicalizer, which produces the same bytes:
