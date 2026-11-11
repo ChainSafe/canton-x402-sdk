@@ -202,9 +202,9 @@ requirements: {
 }
 ```
 
-Every entry is a spec, so each gets discovery and the defaults, and there is no privileged first entry. Any shared field may be overridden per entry (a second instrument settling to a different party, say), and each entry carries its own price, because 0.05 of one token is not 0.05 of another and nothing here checks two entries are worth the same.
+Every entry is a spec, so each gets discovery and the defaults, and there is no privileged first entry. Any shared field except `resource` and `description` — which name the sale, not a way of paying for it — may be overridden per entry (a second instrument settling to a different party, say), and each entry carries its own price, because 0.05 of one token is not 0.05 of another and nothing here checks two entries are worth the same.
 
-Per-entry fields are `{ amount, asset, executeBeforeSeconds?, memo? }` plus an override of any shared one. Any of them may also be set **once at the top level**, beside `payTo`, and `memo` usually should be — see below. `amount` and `asset` are required on every entry regardless, so naming those at the top level does nothing. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120). Every field may be a fixed value **or** a `(req) => value` resolver.
+Per-entry fields are `{ amount, asset, executeBeforeSeconds?, memo? }` plus an override of any shared one but `resource` and `description`. Any of them may also be set **once at the top level**, beside `payTo`, and `memo` usually should be — see below. `amount` and `asset` are required on every entry regardless, so naming those at the top level does nothing. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120). Every field may be a fixed value **or** a `(req) => value` resolver.
 
 For full control, a **builder** `(req) => CantonPaymentRequirements[]` returns the whole list and you own `maxTimeoutSeconds` and the whole of `extra`.
 
@@ -250,7 +250,7 @@ preSettle: async ({ requirements, payer }) => {
 
 **Undoing it.** Settle can still fail after `preSettle` has reserved something. `onReject` then receives `payment` — the payload, the requirements as `preSettle` saw them, and the payer — so the order to release is `payment.requirements.extra.memo`, with no need to decode the header again.
 
-It is present **exactly when an undo may be owed**: once `preSettle` has accepted, and not before. So a refusal that never got that far — an unpaid request, a header that would not decode, a payment refused on price or on verify, or `preSettle`'s own refusal — carries `reason` and `details` but no `payment`. That is deliberate: before verify the requirements are whatever the header claimed, so an underpriced payment echoing one of your references would otherwise name it here, and releasing it would release an order someone else is paying for.
+It is present **exactly when an undo may be owed**: once `preSettle` has accepted, and not before. So a refusal that never got that far — a header that would not decode, a payment refused on price or on verify, or `preSettle`'s own refusal — carries `reason` and `details` but no `payment`. (A request carrying no payment at all is the plain challenge rather than a rejection, and does not reach `onReject`.) That is deliberate: before verify the requirements are whatever the header claimed, so an underpriced payment echoing one of your references would otherwise name it here, and releasing it would release an order someone else is paying for.
 
 One case it cannot settle for you: a **502 from a settle that threw** may mean the payment went through and the answer was lost, rather than that it did not happen. Undoing there is a choice about which way to be wrong — reconcile against the ledger if that matters to you.
 

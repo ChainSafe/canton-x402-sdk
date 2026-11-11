@@ -58,9 +58,10 @@ it took finished requirements, so those entries got no discovery, no defaults
 and no per-challenge reference, and the merchant hand-wrote the registry admin
 that discovery exists to supply.
 
-Now every entry is a spec. Each gets discovery and its own minted `memo`, the
-shared fields are named once and overridable per entry, and no entry is
-privileged. A builder returns the whole list: `(req) => CantonPaymentRequirements[]`.
+Now every entry is a spec. Each gets discovery and a minted `memo` — one
+between the entries that share a generator, a 402 being one sale — the shared
+fields are named once and all but `resource` and `description` are overridable
+per entry, and no entry is privileged. A builder returns the whole list: `(req) => CantonPaymentRequirements[]`.
 
 ### Every way to pay says what it is priced in
 
@@ -274,10 +275,11 @@ a reader that knows that one and not the scheme's, and is the default for an
 adapter that names none.
 
 New exports: `SchemeAdapter`, `SchemeQuote`, `SchemeContext`,
-`BaseRequirementsSpec`, `AcceptSpec`, `SharedTerms`, `Resolvable`, `FieldRule`,
-`RuleTable`, `RequirementsBuilder`, `PaymentRejectionInfo`, `X402RequestState`,
-`DEFAULT_MAX_TIMEOUT_SECONDS`, `cantonExact`, `CantonRequirementsSpec`, and the
-`compareQuote` / `sameValue` / `resolve` helpers an adapter needs.
+`BaseRequirementsSpec`, `AcceptSpec`, `SharedTerms`, `FieldRule`, `RuleTable`,
+`X402RequestState`, `DEFAULT_MAX_TIMEOUT_SECONDS`, `cantonExact`,
+`CantonRequirementsSpec`, and the `compareQuote` / `sameValue` / `resolve`
+helpers an adapter needs. `Resolvable`, `RequirementsBuilder` and
+`PaymentRejectionInfo` were already exported; the last two change shape.
 
 **A new guard.** The decoded payment is checked by the scheme before
 anything reads a field off it. The envelope is a loose object — `payload.payload`

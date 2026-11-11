@@ -40,7 +40,8 @@ import { PaymentRejection, respondToFailure } from "./response.js";
  * - No/invalid payment in `PAYMENT-SIGNATURE` (or the older `X-PAYMENT`) →
  *   `402` with the spec's `PaymentRequired`, `{ x402Version, resource, accepts }`,
  *   in the `PAYMENT-REQUIRED` header and as the body. One `accepts[]` entry per
- *   way to pay, each with its own freshly minted reference.
+ *   way to pay; entries sharing a reference generator are issued one freshly
+ *   minted reference between them, a 402 being one sale.
  * - Valid payment → verify (and optionally settle) via the facilitator, then
  *   attach `req.x402` and call `next()`.
  *

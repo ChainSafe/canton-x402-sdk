@@ -73,8 +73,9 @@ export async function buildQuotes<
   }
 
   // The shared terms describe the sale; each entry describes one way to pay for
-  // it and may override any of them. Merged before the scheme sees it, so an
-  // adapter is handed one complete spec and never has to know the difference.
+  // it and may override any of them but `resource` and `description`, which name
+  // the sale itself. Merged before the scheme sees it, so an adapter is handed
+  // one complete spec and never has to know the difference.
   const { accepts, ...shared } = source;
   const settled = await Promise.all(
     accepts.map(async (entry) => {

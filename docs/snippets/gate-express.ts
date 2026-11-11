@@ -12,9 +12,10 @@ import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "@chainsafe/x402-express";
 
 // The .env the dashboard's integration panel gives you (API keys page).
-// The network and the instrument are NOT in here: the middleware reads them
-// from the facilitator's own GET /v2/supported, so there is no copy of them to
-// keep true when a deployment changes.
+// The network is NOT in here, and neither is the instrument's registry party:
+// the middleware reads them from the facilitator's own GET /v2/supported, so
+// there is no copy of them to keep true when a deployment changes. The
+// instrument itself is named below, since a price means nothing without it.
 const PAY_TO = process.env.MERCHANT_PARTY!; // your payout party (step 1)
 const API_KEY = process.env.FACILITATOR_API_KEY!; // your API key (step 2)
 
