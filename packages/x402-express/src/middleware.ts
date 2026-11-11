@@ -59,11 +59,19 @@ import { PaymentRejection, respondToFailure } from "./response.js";
  * }));
  */
 export function paymentRequired(options: PaymentRequiredOptions): RequestHandler;
+// `scheme` is required here, and that is load-bearing rather than tidiness: a
+// canton call with an incomplete way to pay would otherwise fall through to
+// this overload, infer TSpec from whatever it was given, and typecheck — then
+// fail at mount. Without a scheme there is only one overload to fail against.
 export function paymentRequired<
   TSpec extends BaseRequirementsSpec,
   TRequirements extends X402PaymentRequirements<unknown>,
   TPayload extends X402PaymentPayload<unknown>,
->(options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>): RequestHandler;
+>(
+  options: PaymentRequiredOptions<TSpec, TRequirements, TPayload> & {
+    scheme: SchemeAdapter<TSpec, TRequirements, TPayload>;
+  },
+): RequestHandler;
 export function paymentRequired<
   TSpec extends BaseRequirementsSpec = CantonRequirementsSpec,
   TRequirements extends X402PaymentRequirements<unknown> = CantonPaymentRequirements,

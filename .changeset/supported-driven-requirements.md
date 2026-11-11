@@ -223,6 +223,15 @@ app.use("/paid", paymentRequired<VoucherSpec, VoucherRequirements, VoucherPayloa
 }));
 ```
 
+The generic overload requires `scheme`. Without that, a canton call with an
+incomplete way to pay fell through to it, inferred its own `TSpec` from
+whatever it was handed, and compiled — `accepts: [{ amount: "500000000" }]`
+typechecked and then threw `reading 'instrumentId'` at mount. There is nothing
+to fall through to now, so it is a compile error; and for the callers
+TypeScript cannot reach — JavaScript, and a resolver returning nothing — the
+scheme answers with a `TermsError` naming the problem instead of a TypeError
+from two frames down. Found in review by @dimartiro.
+
 Canton's `exact` is the default (`cantonExact`) and nothing changes for a
 merchant using it: `paymentRequired` keeps a non-generic overload, so an inline
 requirements object is contextually typed against the concrete canton shapes

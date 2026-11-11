@@ -42,8 +42,9 @@ app.use(
       accepts: [
         { amount: "500000000", asset: "Amulet" }, // atomic units: 1 CC = 1e10
       ],
-      // `network` and `asset` are read from the facilitator's /v2/supported.
-      // Set them to pin them yourself.
+      // `asset` names the instrument; its registry party and the `network`
+      // are read from the facilitator's /v2/supported. Pin them yourself by
+      // setting `network`, and `asset: { instrumentId: { id, admin } }`.
     },
   }),
 );
@@ -162,6 +163,11 @@ app.use("/paid", paymentRequired<VoucherSpec, VoucherRequirements, VoucherPayloa
 }));
 ```
 
+The generic overload requires `scheme`, since that is what makes it another
+scheme's route. Without one there is a single overload to satisfy — the default
+canton-exact shapes — so an incomplete inline way to pay is a compile error
+rather than something that infers its own type and fails at mount.
+
 `req.x402` is typed for the default scheme; `X402RequestState<TRequirements,
 TPayload>` is exported for a route gated on another.
 
@@ -198,13 +204,17 @@ requirements: {
 
 Every entry is a spec, so each gets discovery, the defaults and **its own** per-challenge `memo` — there is no privileged first entry. Any shared field may be overridden per entry (a second instrument settling to a different party, say), and each entry carries its own price, because 0.05 of one token is not 0.05 of another and nothing here checks two entries are worth the same.
 
-Per-entry fields are `{ amount, asset?, instrument?, executeBeforeSeconds?, memo? }` plus an override of any shared one. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120). Every field may be a fixed value **or** a `(req) => value` resolver.
+Per-entry fields are `{ amount, asset, executeBeforeSeconds?, memo? }` plus an override of any shared one. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120). Every field may be a fixed value **or** a `(req) => value` resolver.
 
 For full control, a **builder** `(req) => CantonPaymentRequirements[]` returns the whole list and you own `maxTimeoutSeconds` and the whole of `extra`.
 
-Only `payTo` and one entry's `amount` are required. Leave out `network` and `asset` and the middleware reads them from the facilitator's `GET /v2/supported`: the network it settles, and the instrument with the registry party it validates holdings against. That party is then read from the service doing the validating, instead of living as a second copy in your config. The response is cached by `FacilitatorClient` (`supportedTtlMs`, default 5 minutes), so this is one round trip per TTL and none at all if you pin both fields.
+`payTo`, and each entry's `amount` and `asset`, are what you must give. `amount` is atomic units *of something*, so every way to pay says what — there is no deployment default to fall back on, and quoting one would be choosing what you charge.
 
-If your facilitator settles more than one network or instrument, name the one you want (`network`, or `instrument` for an instrument's `id`) — otherwise it is an error rather than a guess, because choosing for you would be choosing what you charge.
+`asset` takes either form. An **instrument id** — `"Amulet"` for Canton Coin, which is the one id that differs from its wire symbol (`"CC"`) — names the instrument and leaves the registry party to the facilitator's `GET /v2/supported`, so that party is read from the service doing the validating instead of living as a second copy in your config. The whole `{ instrumentId: { id, admin } }` pins it, admin included.
+
+`network` is the one field discovery can supply on its own, and it is narrowed to the instrument the entry names, so the network quoted is one that settles it. Pin it to skip that. The `/v2/supported` response is cached by `FacilitatorClient` (`supportedTtlMs`, default 5 minutes), so discovery is one round trip per TTL and none at all when `network` and a whole `asset` are both pinned.
+
+If more than one network settles the instrument, or the id the entry names is not one the deployment carries, that is an error rather than a guess — and the refusal lists what it does carry.
 
 A **builder** runs on every request, paid ones included, because a payment has to be held against your terms and only the builder knows them. Keep it side-effect-free, and use `memo` for anything that should happen once per challenge.
 

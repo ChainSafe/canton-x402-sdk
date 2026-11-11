@@ -24,6 +24,7 @@ import {
   type X402PaymentRequirements,
 } from "@chainsafe/x402-core";
 
+import { TermsError } from "../options.js";
 import {
   resolve,
   type BaseRequirementsSpec,
@@ -35,6 +36,26 @@ import {
 } from "../scheme.js";
 
 const DEFAULT_EXECUTE_BEFORE_SECONDS = 120;
+
+/**
+ * The instrument id a way to pay names.
+ *
+ * `asset` is required by the spec type, so TypeScript catches a missing one —
+ * except from JavaScript, and from a resolver that returns nothing. Said
+ * plainly here rather than as a TypeError about `instrumentId` two frames
+ * down, and as a {@link TermsError} so it is never skipped as a way to pay
+ * that merely failed to quote.
+ */
+function instrumentIdOf(asset: string | AssetSpec | undefined | null): string {
+  if (asset === undefined || asset === null) {
+    throw new TermsError(
+      "paymentRequired: a way to pay names no `asset`. `amount` is atomic units of " +
+        'something, so each entry says what: an instrument id ("Amulet"), or ' +
+        "{ instrumentId: { id, admin } } to pin the registry party too.",
+    );
+  }
+  return typeof asset === "string" ? asset : asset.instrumentId.id;
+}
 
 /** Declarative requirements for canton-exact. */
 export interface CantonRequirementsSpec extends BaseRequirementsSpec {
@@ -144,7 +165,7 @@ export const cantonExact: SchemeAdapter<
     // resolver cannot be read without a request, so such an entry is skipped.
     const asset = spec.asset;
     if (typeof asset === "function") return undefined;
-    return typeof asset === "string" ? asset : asset.instrumentId.id;
+    return instrumentIdOf(asset);
   },
   payerOf(payload: CantonPaymentPayload): string | undefined {
     // Spec Rule 8: the payer is the signed transfer's sender. It sits inside
@@ -212,8 +233,8 @@ async function resolveDeploymentTerms(
   // AssetSpec carries the admin too. Either way the id is known, and is what
   // narrows discovery below.
   const asset = await resolve(spec.asset, req);
+  const instrument = instrumentIdOf(asset);
   const pinned = typeof asset === "string" ? undefined : asset;
-  const instrument = typeof asset === "string" ? asset : asset.instrumentId.id;
 
   // Both pinned: nothing to discover.
   if (network !== undefined && pinned !== undefined) {

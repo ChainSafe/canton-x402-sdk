@@ -12,6 +12,7 @@ import {
 } from "@chainsafe/x402-core";
 import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "./middleware";
+import { TermsError } from "./options";
 import type { PaymentRejectionInfo, PaymentRequiredOptions, RequirementsSpec } from "./options";
 
 // The real decoder, spied on so a test can stand in a decodable transfer without
@@ -1899,6 +1900,59 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     expect(res.body.accepts.map((a: { asset: string }) => a.asset)).toEqual(["CC", "USDCx"]);
   });
 
+
+  describe("a way to pay that names no asset", () => {
+    // TypeScript refuses this at the call site (options.types.test.ts). What is
+    // left is JavaScript, and a resolver that returns nothing — both reached
+    // the instrument id as a property of `undefined`.
+    const mount = (asset: unknown) =>
+      paymentRequired({
+        facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          network: "canton:devnet",
+          accepts: [{ amount: "500000000", ...(asset === undefined ? {} : { asset }) }],
+        },
+      } as unknown as Parameters<typeof paymentRequired>[0]);
+
+    it("is a TermsError at mount, not a TypeError about instrumentId", () => {
+      expect(() => mount(undefined)).toThrow(TermsError);
+      expect(() => mount(undefined)).toThrow(/names no `asset`/);
+    });
+
+    it("is a TermsError when a resolver returns nothing, and is never skipped", async () => {
+      // A resolver cannot be read at mount, so this one arrives per request —
+      // where a way to pay that merely fails to quote is dropped and the rest
+      // are offered. The good entry beside it is what makes that visible:
+      // skipping would answer 402 with it alone. Merchant config is not a
+      // quoting failure, so the request fails instead.
+      stubWithSupported();
+      const onReject = vi.fn();
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          onReject,
+          requirements: {
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            network: "canton:devnet",
+            accepts: [
+              { amount: "500000000", asset: "Amulet" },
+              { amount: "250000", asset: () => undefined as unknown as string },
+            ],
+          },
+        }),
+      );
+      const res = await request(app).get("/paid");
+      expect(res.status).toBe(500);
+      const { error } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(error).toBeInstanceOf(TermsError);
+      expect((error as Error).message).toMatch(/names no `asset`/);
+    });
+  });
 
   describe("a way to pay that cannot be quoted", () => {
     const twoEntries = (onQuoteError?: (e: Error) => void) => {
