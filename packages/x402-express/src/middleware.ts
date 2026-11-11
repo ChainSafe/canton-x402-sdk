@@ -21,7 +21,7 @@ import type { BaseRequirementsSpec, SchemeAdapter } from "./scheme.js";
 import { cantonExact, type CantonRequirementsSpec } from "./schemes/canton-exact.js";
 import { assertUsableTerms, type PaymentRequiredOptions, type X402RequestState } from "./options.js";
 import { buildQuotes, type Quote } from "./quotes.js";
-import { rulesFor, selectQuote } from "./policy.js";
+import { assertAcceptedQuote, rulesFor } from "./policy.js";
 import { PaymentRejection, respondToFailure } from "./response.js";
 
 /**
@@ -114,13 +114,12 @@ export function paymentRequired<
         throw new PaymentRejection("policy_requirements_invalid");
       }
       const payload = decoded;
-      const requirements = decoded.accepted;
+      const accepted = decoded.accepted;
 
       quotes = await buildQuotes(req, options, scheme);
-      const refusal = selectQuote(requirements, quotes, rules);
-      if (refusal !== undefined) throw new PaymentRejection(refusal);
+      assertAcceptedQuote(accepted, quotes, rules);
 
-      const verify = await facilitator.verify(payload, requirements);
+      const verify = await facilitator.verify(payload, accepted);
       if (!verify.isValid) {
         const detail = verify.extensions?.detail;
         throw new PaymentRejection(
@@ -147,17 +146,17 @@ export function paymentRequired<
       }
 
       // The merchant's own say, on a payment the facilitator has vouched for:
-      // after verify, so the requirements are bound to the signed transfer and
+      // after verify, so `accepted` is bound to the signed transfer and
       // `payer` is known, and before settle, so a refusal moves no funds.
       const merchantRefusal = await options.preSettle?.(
-        { payload, requirements, payer, verify },
+        { payload, requirements: accepted, payer, verify },
         req,
       );
       if (merchantRefusal) throw new PaymentRejection(merchantRefusal);
 
       let settleResponse: SettleResponse | undefined;
       if (settle) {
-        settleResponse = await facilitator.settle(payload, requirements);
+        settleResponse = await facilitator.settle(payload, accepted);
         if (!settleResponse.success) {
           throw new PaymentRejection(
             settleResponse.errorReason ?? "settle_failed",
@@ -169,7 +168,7 @@ export function paymentRequired<
 
       req.x402 = {
         payer,
-        requirements,
+        requirements: accepted,
         payload,
         verify,
         settle: settleResponse,

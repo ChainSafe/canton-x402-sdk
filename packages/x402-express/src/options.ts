@@ -20,6 +20,18 @@ import type { FacilitatorClient } from "@chainsafe/x402-client";
 import type { BaseRequirementsSpec, Resolvable, SchemeAdapter, SharedTerms } from "./scheme.js";
 import type { CantonRequirementsSpec } from "./schemes/canton-exact.js";
 
+/**
+ * The merchant's configuration is wrong.
+ *
+ * Separated from a failure to quote against the facilitator, which is the
+ * environment changing and leaves the other ways to pay standing. A merchant
+ * error is never skipped: it would drop a way to pay silently and the fix is
+ * in the merchant's own hands.
+ */
+export class TermsError extends Error {
+  override readonly name = "TermsError";
+}
+
 /** Seconds a client is given to pay, when the merchant names none. */
 export const DEFAULT_MAX_TIMEOUT_SECONDS = 60;
 
@@ -133,6 +145,20 @@ export interface PaymentRequiredOptions<
    * swallowed so it can't break the response or crash the process.
    */
   onReject?: (rejection: PaymentRejectionInfo, req: Request) => void | Promise<void>;
+  /**
+   * Called when a way to pay could not be quoted and was left out of the 402,
+   * e.g. the facilitator no longer settles the instrument it names. The
+   * request is still answered, from the entries that did quote.
+   *
+   * Nothing else reports this: the 402 simply has fewer entries, so without a
+   * hook a way to pay can disappear unnoticed. Fires once per dropped entry
+   * per request, so throttle if you log it. A throw (or a rejected promise) is
+   * swallowed, as with {@link PaymentRequiredOptions.onReject}.
+   *
+   * Not called when NO entry can be quoted — there is nothing to answer with
+   * then, and the request fails as a `500`.
+   */
+  onQuoteError?: (error: Error, req: Request) => void | Promise<void>;
 }
 
 /** What `PaymentRequiredOptions.onReject` receives. */
@@ -211,7 +237,7 @@ export function assertUsableTerms<
   if (typeof source === "function") return;
   const { accepts, ...shared } = source;
   if (accepts.length === 0) {
-    throw new Error("paymentRequired: `accepts` is empty — a 402 must advertise a way to pay");
+    throw new TermsError("paymentRequired: `accepts` is empty — a 402 must advertise a way to pay");
   }
   const seen = new Map<string, number>();
   accepts.forEach((entry, i) => {
@@ -219,7 +245,7 @@ export function assertUsableTerms<
     if (key === undefined) return;
     const first = seen.get(key);
     if (first !== undefined) {
-      throw new Error(
+      throw new TermsError(
         `paymentRequired: ways to pay ${first + 1} and ${i + 1} are both in ${key}. ` +
           `A payer cannot tell them apart, so only the cheaper would ever be paid — ` +
           `give them different assets, or quote one.`,

@@ -1768,4 +1768,123 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     expect(res.body.accepts.map((a: { asset: string }) => a.asset)).toEqual(["CC", "USDCx"]);
   });
 
+
+  describe("a way to pay that cannot be quoted", () => {
+    const twoEntries = (onQuoteError?: (e: Error) => void) => {
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          ...(onQuoteError ? { onQuoteError } : {}),
+          requirements: {
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            network: "canton:devnet",
+            accepts: [
+              { amount: "500000000", asset: "Amulet" },
+              // The deployment does not carry this one.
+              { amount: "250000", asset: "GBPx" },
+            ],
+          },
+        }),
+      );
+      app.get("/paid", (req, res) => res.json({ ok: true, payer: req.x402?.payer }));
+      return app;
+    };
+
+    it("is left out of the 402, and the others are still offered", async () => {
+      stubWithSupported();
+      const res = await request(twoEntries()).get("/paid");
+      expect(res.status).toBe(402);
+      expect(res.body.accepts.map((a: { asset: string }) => a.asset)).toEqual(["CC"]);
+    });
+
+    it("does not stop a payment for one that can", async () => {
+      // The point of not failing the whole route: a payer holding good terms
+      // is paying, and a sibling entry's trouble is not its concern.
+      stubWithSupported();
+      const res = await request(twoEntries())
+        .get("/paid")
+        .set(
+          "PAYMENT-SIGNATURE",
+          paymentHeader({
+            network: "canton:devnet",
+            asset: "CC",
+            extra: {
+              assetTransferMethod: "transfer-factory",
+              executeBeforeSeconds: 120,
+              instrumentId: { id: "Amulet", admin: DSO },
+            },
+          }),
+        );
+      expect(res.status).toBe(200);
+      expect(res.body.payer).toBe("alice::x");
+    });
+
+    it("tells the merchant through onQuoteError, naming the entry", async () => {
+      stubWithSupported();
+      const seen: string[] = [];
+      await request(twoEntries((e) => seen.push(e.message))).get("/paid");
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatch(/way to pay 2/);
+      expect(seen[0]).toMatch(/GBPx/);
+    });
+
+    it("still answers when the hook throws", async () => {
+      stubWithSupported();
+      const res = await request(
+        twoEntries(() => {
+          throw new Error("logger down");
+        }),
+      ).get("/paid");
+      expect(res.status).toBe(402);
+    });
+
+    it("fails the request when NO entry can be quoted", async () => {
+      stubWithSupported();
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          requirements: {
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            accepts: [{ amount: "1", asset: "GBPx" }],
+          },
+        }),
+      );
+      app.get("/paid", (_q, r) => r.json({ ok: true }));
+      const res = await request(app).get("/paid");
+      expect(res.status).toBe(500);
+      expect(res.body.details).toContain("GBPx");
+    });
+
+    it("never skips a merchant's own mistake", async () => {
+      // A decimal price is config, not the facilitator changing under us, so
+      // it takes the request down rather than quietly dropping the entry.
+      stubWithSupported();
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          requirements: {
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            accepts: [
+              { amount: "500000000", asset: "Amulet" },
+              { amount: "0.10", asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } } },
+            ],
+          },
+        }),
+      );
+      app.get("/paid", (_q, r) => r.json({ ok: true }));
+      const res = await request(app).get("/paid");
+      expect(res.status).toBe(500);
+      expect(res.body.details).toMatch(/atomic units/);
+    });
+  });
+
 });

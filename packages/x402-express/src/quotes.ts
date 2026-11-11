@@ -14,7 +14,11 @@ import {
 } from "@chainsafe/x402-core";
 
 import { resolve, type BaseRequirementsSpec, type SchemeAdapter } from "./scheme.js";
-import { DEFAULT_MAX_TIMEOUT_SECONDS, type PaymentRequiredOptions } from "./options.js";
+import {
+  DEFAULT_MAX_TIMEOUT_SECONDS,
+  TermsError,
+  type PaymentRequiredOptions,
+} from "./options.js";
 
 /**
  * One way to pay this request would be offered, before any per-challenge
@@ -49,7 +53,7 @@ export async function buildQuotes<
   if (typeof source === "function") {
     const built = await source(req);
     if (built.length === 0) {
-      throw new Error("paymentRequired: the requirements builder returned no ways to pay");
+      throw new TermsError("paymentRequired: the requirements builder returned no ways to pay");
     }
     return built.map((r) => ({ requirements: assertAtomicAmount(r) }));
   }
@@ -58,7 +62,7 @@ export async function buildQuotes<
   // it and may override any of them. Merged before the scheme sees it, so an
   // adapter is handed one complete spec and never has to know the difference.
   const { accepts, ...shared } = source;
-  const quotes = await Promise.all(
+  const settled = await Promise.all(
     accepts.map(async (entry) => {
       const spec = { ...shared, ...entry } as unknown as TSpec;
       const part = await scheme.quote(req, spec, { facilitator: options.facilitator });
@@ -81,9 +85,59 @@ export async function buildQuotes<
       };
       if (part.mintReference) quote.mintReference = part.mintReference;
       return quote;
-    }),
+    }).map((quote) => quote.then(
+      (value) => ({ value }),
+      (error: unknown) => {
+        if (error instanceof TermsError) throw error;
+        return { error };
+      },
+    )),
   );
+
+  // One way to pay that cannot be quoted does not take the others with it — a
+  // TermsError already threw above, so what is left here is the facilitator's
+  // answer, not the merchant's config. The
+  // facilitator's answer changes under a running merchant — an instrument is
+  // withdrawn, a deployment moves — and refusing every request then, paid ones
+  // included, loses sales that another entry would have taken.
+  const quotes = settled.flatMap((r) => ("value" in r ? [r.value] : []));
+  const failed = settled.flatMap((r, i) => ("error" in r ? [{ at: i, error: r.error }] : []));
+
+  if (quotes.length === 0) {
+    // Nothing left to advertise, so the request cannot be answered. One cause
+    // is reported as it came: an ambiguity the merchant must resolve reads
+    // better unwrapped than wrapped in a count.
+    if (failed.length === 1) throw failed[0].error;
+    throw new Error(
+      `paymentRequired: no way to pay could be quoted — ${failed
+        .map((f) => `${f.at + 1}: ${errMsg(f.error)}`)
+        .join("; ")}`,
+    );
+  }
+  for (const { at, error } of failed) report(options, req, at, error);
   return quotes;
+}
+
+/** Tell the merchant a way to pay was dropped, without letting that throw. */
+function report<
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>,
+  req: Request,
+  at: number,
+  error: unknown,
+): void {
+  if (!options.onQuoteError) return;
+  const hook = options.onQuoteError;
+  void Promise.resolve()
+    .then(() => hook(new Error(`way to pay ${at + 1}: ${errMsg(error)}`, { cause: error }), req))
+    .catch(() => {});
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 
@@ -120,7 +174,7 @@ function assertAtomicAmount<TRequirements extends X402PaymentRequirements<unknow
   r: TRequirements,
 ): TRequirements {
   if (!isValidAmount(r.amount)) {
-    throw new Error(
+    throw new TermsError(
       `paymentRequired: amount "${r.amount}" is not an integer string of atomic units`,
     );
   }

@@ -97,6 +97,35 @@ Schemes say what distinguishes their own entries, through the new optional
 
 Found in review by @dimartiro.
 
+### One way to pay that cannot be quoted no longer takes the others with it
+
+Quotes are built before verify, and building was all-or-nothing: an entry the
+facilitator could not answer for — an instrument it stopped carrying, say —
+turned the whole route into 500s, **paid requests included**. A payer holding
+good terms for another entry was refused while trying to pay.
+
+Each entry is now resolved on its own. One that cannot be quoted is left out of
+the 402 and the rest are offered; a payment for one that quoted is unaffected.
+Only when NO entry can be quoted does the request fail, since there is then
+nothing to answer with.
+
+`onQuoteError` is the new optional hook that says so, naming the entry and the
+reason, because nothing else would: the 402 simply has fewer entries. It fires
+once per dropped entry per request and a throw from it is swallowed, as with
+`onReject`.
+
+**A merchant's own mistake is never skipped.** A malformed `amount`, an empty
+`accepts`, two entries in one asset — those are config, they throw as
+`TermsError`, and dropping the entry would hide the typo instead of reporting
+it. Only a failure to quote against the facilitator is skipped.
+
+A facilitator that starts advertising a second **network** remains a hard
+failure rather than a skip: it makes every entry ambiguous at once, so there is
+nothing left to serve, and picking a chain the merchant did not name would be
+worse than refusing. Pin `network` to settle it.
+
+Found in review by @dimartiro.
+
 ### Three fixes
 
 **A successful payment no longer mints a second merchant reference.** The `memo`
