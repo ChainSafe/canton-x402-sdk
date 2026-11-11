@@ -35,8 +35,10 @@ the quote it already has.
 
 **Rule 12, memo.** When the merchant quotes one, the transfer's metadata must
 carry the identical value under `x402.memo`, or the payment is
-`transfer_mismatch` with detail `memo`. An unquoted memo is the payer's own
-reference and is ignored. Note that the wallet SDK's own `memo` parameter
+`transfer_mismatch` with detail `memo`. A memo the merchant did not quote is refused
+too: `x402.memo` is the scheme's key, not the payer's namespace, so an unquoted
+transfer must carry none — a payer naming its own order there would otherwise
+be credited against it. Note that the wallet SDK's own `memo` parameter
 writes a different key (`splice.lfdecentralizedtrust.org/reason`), so both can
 be present without either standing in for the other.
 

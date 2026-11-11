@@ -14,6 +14,8 @@ import {
   type X402PaymentRequirements,
 } from "@chainsafe/x402-core";
 
+import { FacilitatorError } from "@chainsafe/x402-client";
+
 import { resolve, type BaseRequirementsSpec, type SchemeAdapter } from "./scheme.js";
 import {
   DEFAULT_MAX_TIMEOUT_SECONDS,
@@ -82,8 +84,9 @@ export async function buildQuotes<
   }
 
   // The shared terms describe the sale; each entry describes one way to pay for
-  // it and may override any of them. Merged before the scheme sees it, so an
-  // adapter is handed one complete spec and never has to know the difference.
+  // it and may override any of them but `resource` and `description`, which name
+  // the sale itself. Merged before the scheme sees it, so an adapter is handed
+  // one complete spec and never has to know the difference.
   const { accepts, ...shared } = source;
   // The resource is the sale's, named once — it is no longer a field of any
   // `accepts[]` entry, so there is nothing per-entry to disagree with.
@@ -122,19 +125,33 @@ export async function buildQuotes<
     )),
   );
 
-  // One way to pay that cannot be quoted does not take the others with it. A
+  // One way to pay that cannot be quoted does not take the others with it — a
   // TermsError already threw above, so what is left here is the facilitator's
-  // answer changing under a running merchant — an instrument withdrawn, a
-  // deployment moved — and refusing every request then, paid ones included,
-  // loses sales another entry would have taken.
+  // answer, not the merchant's config. The
+  // facilitator's answer changes under a running merchant — an instrument is
+  // withdrawn, a deployment moves — and refusing every request then, paid ones
+  // included, loses sales that another entry would have taken.
   const quotes = settled.flatMap((r) => ("value" in r ? [r.value] : []));
   const failed = settled.flatMap((r, i) => ("error" in r ? [{ at: i, error: r.error }] : []));
 
   if (quotes.length === 0) {
-    // Nothing left to advertise, so the request cannot be answered. A single
-    // cause is rethrown as it came: an ambiguity the merchant must resolve
-    // reads better unwrapped than wrapped in a count.
+    // Nothing left to advertise, so the request cannot be answered. One cause
+    // is reported as it came: an ambiguity the merchant must resolve reads
+    // better unwrapped than wrapped in a count.
     if (failed.length === 1) throw failed[0].error;
+    // The facilitator being down is ONE cause with several witnesses, not
+    // several causes. Wrapping it loses what it is, and the middleware answers
+    // `500 x402_middleware_error` — our fault, nothing to retry — for an
+    // outage that a route offering one way to pay answers `502` for. The
+    // number of ways a merchant takes money must not decide what a client is
+    // told about someone else's downtime.
+    //
+    // `every`, not `some`: today the entries share one `/v2/supported` call,
+    // so either all of them failed on it or none did and a mixed set cannot
+    // arise. If a per-entry call to the facilitator ever appears, `some` would
+    // answer 502 for a set that also holds a merchant's own broken entry and
+    // bury it.
+    if (failed.every((f) => f.error instanceof FacilitatorError)) throw failed[0].error;
     throw new Error(
       `paymentRequired: no way to pay could be quoted — ${failed
         .map((f) => `${f.at + 1}: ${errMsg(f.error)}`)
@@ -167,6 +184,7 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+
 /**
  * The shared terms with whatever an entry actually names laid over them.
  *
@@ -187,8 +205,9 @@ function mergeTerms<TSpec>(shared: object, entry: object): TSpec {
  * Turn quotes into a challenge's `accepts[]`, minting each reference.
  *
  * The only caller of a scheme's reference generator, which is what makes "once
- * per challenge" true: a request that pays an existing challenge never reaches
- * here.
+ * per challenge" true: a request that pays an existing challenge and is let
+ * through never reaches here. A refused one does — a refused payer is handed a
+ * fresh challenge, and that is a new challenge with a new reference.
  */
 export async function issueChallenge<TRequirements extends X402PaymentRequirements<unknown>>(
   quotes: Array<Quote<TRequirements>>,

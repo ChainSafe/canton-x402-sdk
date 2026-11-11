@@ -42,8 +42,9 @@ app.use(
       accepts: [
         { amount: "500000000", asset: "Amulet" }, // atomic units: 1 CC = 1e10
       ],
-      // `network` and `asset` are read from the facilitator's /v2/supported.
-      // Set them to pin them yourself.
+      // `asset` names the instrument; its registry party and the `network`
+      // are read from the facilitator's /v2/supported. Pin them yourself by
+      // setting `network`, and `asset: { instrumentId: { id, admin } }`.
     },
   }),
 );
@@ -67,7 +68,7 @@ const { paymentRequired } = require("@chainsafe/x402-express");
    in the `PAYMENT-REQUIRED` header and as the body. One `accepts[]` entry per
    way to pay, with the defaults filled in, and `resource` is the URL and
    description they were quoted for. A `memo` generator is called here, and
-   only here — once per entry, per challenge.
+   only here — once per challenge for the entries sharing it.
 2. **Paid request** → the `PAYMENT-SIGNATURE` header is decoded to a payment,
    which carries the requirements it was built against as `accepted`. The
    middleware works out which of the quotes it would advertise that payment is
@@ -163,6 +164,11 @@ app.use("/paid", paymentRequired<VoucherSpec, VoucherRequirements, VoucherPayloa
 }));
 ```
 
+The generic overload requires `scheme`, since that is what makes it another
+scheme's route. Without one there is a single overload to satisfy — the default
+canton-exact shapes — so an incomplete inline way to pay is a compile error
+rather than something that infers its own type and fails at mount.
+
 `req.x402` is typed for the default scheme; `X402RequestState<TRequirements,
 TPayload>` is exported for a route gated on another.
 
@@ -177,7 +183,7 @@ TPayload>` is exported for a route gated on another.
 | `preSettle` | `(payment, req) => string \| undefined`, your own say on a verified payment, run after verify and before anything settles. Return a short reason to refuse it, or nothing to let it through; see below. |
 | `requireResourceStamp` | Refuse a payment carrying no resource stamp. Default `false`. See [Binding a payment to its resource](#binding-a-payment-to-its-resource). |
 | `onQuoteError` | `(error, req) => void`, called when a way to pay could not be quoted and was left out of the 402 — the facilitator no longer settles the instrument it names, say. The request is still answered from the entries that did quote, so without this a way to pay can disappear unnoticed. Fires once per dropped entry per request; a throw is swallowed. |
-| `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error?, payment? }`, where `extensions` is the facilitator's full verify detail, with the code it answered with before the spec's in `extensions.reason`, and `payment` is the payload, requirements and payer this refusal is about when one was decoded. May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
+| `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error?, payment? }`, where `extensions` is the facilitator's full verify detail, with the code it answered with before the spec's in `extensions.reason`, and `payment` is the payload, requirements and payer this refusal is about, present only once `preSettle` has accepted it — see **Undoing it** under [`requirements`](#requirements). May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
 
 ### `requirements`
 
@@ -198,19 +204,38 @@ requirements: {
 }
 ```
 
-Every entry is a spec, so each gets discovery, the defaults and **its own** per-challenge `memo` — there is no privileged first entry. Any shared field may be overridden per entry (a second instrument settling to a different party, say), and each entry carries its own price, because 0.05 of one token is not 0.05 of another and nothing here checks two entries are worth the same.
+Every entry is a spec, so each gets discovery and the defaults, and there is no privileged first entry. Any shared field except `resource` and `description` — which name the sale, not a way of paying for it — may be overridden per entry (a second instrument settling to a different party, say), and each entry carries its own price, because 0.05 of one token is not 0.05 of another and nothing here checks two entries are worth the same.
 
-Per-entry fields are `{ amount, asset?, instrument?, executeBeforeSeconds?, memo? }` plus an override of any shared one. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120). Every field may be a fixed value **or** a `(req) => value` resolver.
+Per-entry fields are `{ amount, asset, executeBeforeSeconds?, memo? }` plus an override of any shared one but `resource` and `description`. Any of them may also be set **once at the top level**, beside `payTo`, and `memo` usually should be — see below. `amount` and `asset` are required on every entry regardless, so naming those at the top level does nothing. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120). Every field may be a fixed value **or** a `(req) => value` resolver.
 
 For full control, a **builder** returns the whole list and you own `maxTimeoutSeconds` and the whole of `extra`. Return a bare `CantonPaymentRequirements[]` and the resource is the request URL; return `{ resource?, description?, accepts }` to name it, which a requirement can no longer do — `PaymentRequirements` carries no resource of its own.
 
-Only `payTo` and one entry's `amount` are required. Leave out `network` and `asset` and the middleware reads them from the facilitator's `GET /v2/supported`: the network it settles, and the instrument with the registry party it validates holdings against. That party is then read from the service doing the validating, instead of living as a second copy in your config. The response is cached by `FacilitatorClient` (`supportedTtlMs`, default 5 minutes), so this is one round trip per TTL and none at all if you pin both fields.
+`payTo`, and each entry's `amount` and `asset`, are what you must give. `amount` is atomic units *of something*, so every way to pay says what — there is no deployment default to fall back on, and quoting one would be choosing what you charge.
 
-If your facilitator settles more than one network or instrument, name the one you want (`network`, or `instrument` for an instrument's `id`) — otherwise it is an error rather than a guess, because choosing for you would be choosing what you charge.
+`asset` takes either form. An **instrument id** — `"Amulet"` for Canton Coin, which is the one id that differs from its wire symbol (`"CC"`) — names the instrument and leaves the registry party to the facilitator's `GET /v2/supported`, so that party is read from the service doing the validating instead of living as a second copy in your config. The whole `{ instrumentId: { id, admin } }` pins it, admin included.
+
+`network` is the one field discovery can supply on its own, and it is narrowed to the instrument the entry names, so the network quoted is one that settles it. Pin it to skip that. The `/v2/supported` response is cached by `FacilitatorClient` (`supportedTtlMs`, default 5 minutes), so discovery is one round trip per TTL and none at all when `network` and a whole `asset` are both pinned.
+
+If more than one network settles the instrument, or the id the entry names is not one the deployment carries, that is an error rather than a guess — and the refusal lists what it does carry.
 
 A **builder** runs on every request, paid ones included, because a payment has to be held against your terms and only the builder knows them. Keep it side-effect-free, and use `memo` for anything that should happen once per challenge.
 
 `memo` is special: it's a **function only** (`(req) => string | Promise<string>`), called once per challenge **issued** — on the 402 that offers terms, and not on a request that pays terms already offered — so a merchant can generate *and record* it (e.g. an order id persisted for reconciliation) without a successful payment booking a second one. Omit it to quote none. Quoting one **binds** it — the payer must sign the identical value into the transfer.
+
+**Write it once, in the shared terms**, if it books anything. A 402 is one sale however many ways it offers to pay for it, and entries carrying the *same function* are issued one reference between them. Two entries given the same body written out twice are two functions, so two references — and a generator that books an order books two, only one of which is ever paid:
+
+```ts
+requirements: {
+  payTo: "merchant::1220…",
+  memo: (req) => orders.open(req),  // once, for the sale
+  accepts: [
+    { amount: "500000000", asset: "Amulet" },
+    { amount: "250000", asset: "USDCx" },
+  ],
+}
+```
+
+An entry naming its own `memo` overrides the shared one and gets its own reference, which is the merchant asking for that.
 
 That proves less than it looks, though: the scheme compares the transfer against the requirements the **payer** echoed, so a payer can echo no memo and sign none, or echo any value and sign that. The middleware keeps no record of what it issued, so it cannot tell. If you reconcile *on* the memo, use `preSettle` — your own say on a payment the facilitator has verified, run **after verify and before any settle**. Return a short reason to refuse (answered as a 402 carrying that code), or nothing to accept:
 
@@ -225,7 +250,11 @@ preSettle: async ({ requirements, payer }) => {
 
 **After verify, not before.** Running there means `requirements` has been held against the signed transfer, so a memo is one the payer committed to rather than one it claims — safe to reserve stock or mark an order claimed on. `payer` is the verified transfer's sender, and does not exist before this point: the payload names none.
 
-**Undoing it.** Settle can still fail after `preSettle` has reserved something. `onReject` then receives `payment` — the payload, the requirements as `preSettle` saw them, and the payer — so the order to release is `payment.requirements.extra.memo`, with no need to decode the header again. It is absent when there was no payment to name: an unpaid request, a header that would not decode, or a failure to build the terms.
+**Undoing it.** Settle can still fail after `preSettle` has reserved something. `onReject` then receives `payment` — the payload, the requirements as `preSettle` saw them, and the payer — so the order to release is `payment.requirements.extra.memo`, with no need to decode the header again.
+
+It is present **exactly when an undo may be owed**: once `preSettle` has accepted, and not before. So a refusal that never got that far — a header that would not decode, a payment refused on price or on verify, or `preSettle`'s own refusal — carries `reason` and `details` but no `payment`. (A request carrying no payment at all is the plain challenge rather than a rejection, and does not reach `onReject`.) That is deliberate: before verify the requirements are whatever the header claimed, so an underpriced payment echoing one of your references would otherwise name it here, and releasing it would release an order someone else is paying for.
+
+One case it cannot settle for you: a **502 from a settle that threw** may mean the payment went through and the answer was lost, rather than that it did not happen. Undoing there is a choice about which way to be wrong — reconcile against the ledger if that matters to you.
 
 It is not memo-specific — it is where any check needing your own records belongs. With `settle: false` it is simply the last gate before the request is let through.
 

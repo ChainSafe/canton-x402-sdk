@@ -50,7 +50,7 @@ export async function respondToFailure<
   scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
   built: Offer<TRequirements> | undefined,
   // What the flow had decoded when it gave up, so a merchant can tell which
-  // payment a refusal is about. Absent before the scheme's guards have passed.
+  // payment a refusal is about. Absent until `preSettle` has accepted it.
   payment: PaymentRejectionInfo<TRequirements, TPayload>["payment"],
 ): Promise<void> {
   let rejection: PaymentRejectionInfo<TRequirements, TPayload> | undefined;

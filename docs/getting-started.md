@@ -57,17 +57,18 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
    `network` id, and in `kinds[].extra` the synchronizer it submits to and the
    instruments it validates, each with the registry party that admins it.
 
-   The middleware reads this for you. Leave `network` and `asset` out of your
-   requirements and it takes both from the facilitator — which means the party
-   your payments are validated against is read from the service doing the
-   validating, with no copy in your `.env` to go stale when a deployment moves.
-   It is fetched once and cached (see `supportedTtlMs` on `FacilitatorClient`),
-   not fetched per request.
+   The middleware reads this for you. Name the instrument by id — `asset:
+   "Amulet"` — and leave `network` out, and the rest comes from the facilitator:
+   the network it settles, and the registry party your payments are validated
+   against, read from the service doing the validating rather than copied into
+   your `.env` to go stale when a deployment moves. It is fetched once and
+   cached (see `supportedTtlMs` on `FacilitatorClient`), not per request.
 
-   Set them yourself when you want to pin them, or when your facilitator settles
-   more than one network or instrument — then naming one is required, because a
-   quote carries one price and a price means nothing without the instrument it
-   is denominated in. The
+   `asset` itself is required on every way to pay: `amount` is atomic units of
+   something, so each entry says what. Pin the rest to skip the lookup
+   entirely — `network`, and `asset: { instrumentId: { id, admin } }` for the
+   registry party. If the facilitator settles that instrument on more than one
+   network, naming one with `network` is required rather than guessed. The
    [API reference](/api-reference#get-v2-supported) describes every field.
 
 5. **Gate a route**

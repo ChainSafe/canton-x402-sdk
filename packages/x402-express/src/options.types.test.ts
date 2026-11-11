@@ -15,6 +15,7 @@
 import { it, expect } from "vitest";
 import type { CantonPaymentRequirements } from "@chainsafe/x402-core";
 
+import { paymentRequired } from "./middleware.js";
 import type {
   AcceptSpec,
   PaymentRequiredOptions,
@@ -75,6 +76,17 @@ const cantonFields: Accept = {
 // @ts-expect-error — a field no scheme defines is still refused
 const unknownField: Accept = { amount: "1", asset: "Amulet", nonsense: true };
 
+/* ── a scheme's own fields may be named once for the whole sale ──────────── */
+
+// `memo` above all: entries are issued one reference between them when they
+// carry the same generator, and this is the only way to hand them the same one.
+const sharedMemo: RequirementsSpec = {
+  payTo: "merchant::x",
+  memo: () => "order-1",
+  executeBeforeSeconds: 300,
+  accepts: [{ amount: "1", asset: "Amulet" }],
+};
+
 /* ── the terms name a payee and at least the shape of a list ─────────────── */
 
 const terms: RequirementsSpec = {
@@ -107,6 +119,22 @@ const payerIsCertain: PayerIsAlwaysPresent = true;
 // @ts-expect-error — nothing to verify against
 const noFacilitator: PaymentRequiredOptions = { requirements: terms };
 
+/* ── and the generic overload does not rescue an incomplete one ──────────── */
+
+// The constraints above are on `AcceptSpec`, which is only half the story: a
+// call that fails them used to fall through to the generic overload, infer its
+// own TSpec from what it was given, and compile — leaving a missing `asset` to
+// surface at mount as a TypeError. The generic overload requires `scheme` now,
+// so there is nothing to fall through to. Never called; `pnpm typecheck` is the
+// assertion, and the error lands on the call rather than on the bad entry.
+function _incompleteWayToPayIsACompileError(facilitator: PaymentRequiredOptions["facilitator"]) {
+  // @ts-expect-error — `asset` is required on every way to pay
+  paymentRequired({
+    facilitator,
+    requirements: { payTo: "merchant::x", accepts: [{ amount: "500000000" }] },
+  });
+}
+
 it("is a typecheck assertion; `pnpm typecheck` is what enforces it", () => {
   // Referenced so the bindings are not unused. The test asserting `true` is the
   // point: if this file compiles, every constraint above still holds.
@@ -128,5 +156,7 @@ it("is a typecheck assertion; `pnpm typecheck` is what enforces it", () => {
     singleBuilder,
     payerIsCertain,
     noFacilitator,
-  ]).toHaveLength(17);
+    _incompleteWayToPayIsACompileError,
+    sharedMemo,
+  ]).toHaveLength(19);
 });

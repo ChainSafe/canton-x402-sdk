@@ -16,14 +16,16 @@ canton-shaped.
   }
 ```
 
-`network` is now optional and `asset` takes an instrument id. Left out or named
-by id, the rest is read from the facilitator's `/v2/supported`: the network it
-settles, and the registry party it validates holdings against. That party is the
-one the facilitator checks a payment against, so reading it from there removes
-the second copy that had to be kept true by hand when a deployment moved. Pin
-`network` and pass the whole `AssetSpec` to skip the lookup entirely — a test
-asserts `/v2/supported` is never called then. An `AssetSpec` on its own still
-reads it, for the network, narrowed to the instrument it pins.
+`network` is now optional and `asset` takes an instrument id. `asset` itself
+stays required — `amount` is atomic units of something — but naming it by id is
+enough, and the rest is read from the facilitator's `/v2/supported`: the
+network it settles, and the registry party it validates holdings against. That
+party is the one the facilitator checks a payment against, so reading it from
+there removes the second copy that had to be kept true by hand when a
+deployment moved. Pin `network` and pass the whole `AssetSpec` to skip the
+lookup entirely — a test asserts `/v2/supported` is never called then. An
+`AssetSpec` on its own still reads it, for the network, narrowed to the
+instrument it pins.
 
 Note the id, not the symbol: Canton Coin is `"Amulet"`, and `"CC"` is what goes
 on the wire. It is the one instrument where the two differ, and an id the
@@ -56,9 +58,10 @@ it took finished requirements, so those entries got no discovery, no defaults
 and no per-challenge reference, and the merchant hand-wrote the registry admin
 that discovery exists to supply.
 
-Now every entry is a spec. Each gets discovery and its own minted `memo`, the
-shared fields are named once and overridable per entry, and no entry is
-privileged. A builder returns the whole list: `(req) => CantonPaymentRequirements[]`.
+Now every entry is a spec. Each gets discovery and a minted `memo` — one
+between the entries that share a generator, a 402 being one sale — the shared
+fields are named once and all but `resource` and `description` are overridable
+per entry, and no entry is privileged. A builder returns the whole list: `(req) => CantonPaymentRequirements[]`.
 
 ### Every way to pay says what it is priced in
 
@@ -115,6 +118,15 @@ the 402 and the rest are offered; a payment for one that quoted is unaffected.
 Only when NO entry can be quoted does the request fail, since there is then
 nothing to answer with.
 
+That failure keeps the status the cause deserves. Resolving entries separately
+gave each its own error, and several of them were wrapped in one plain `Error`
+— so a `/v2/supported` outage answered `502` on a route offering one way to
+pay and `500 x402_middleware_error` on a route offering two, telling a client
+the merchant was broken when the facilitator was down. When every failure is a
+`FacilitatorError` it is one cause with several witnesses, and the first is
+rethrown as it came. Unrelated failures still report together, each named with
+its entry. Found in review by @dimartiro.
+
 `onQuoteError` is the new optional hook that says so, naming the entry and the
 reason, because nothing else would: the 402 simply has fewer entries. It fires
 once per dropped entry per request and a throw from it is swallowed, as with
@@ -137,20 +149,45 @@ optional `payment` — the payload, the requirements as `preSettle` received
 them, and the payer. `preSettle`'s docs invite reserving stock or marking an
 order claimed, and settle can fail afterwards; before this there was no way to
 tell which order to release short of decoding the header out of `req` again.
-Absent when nothing was decoded: an unpaid request, a header that would not
-decode, a failure to build the terms. `PaymentRejectionInfo` is generic over
-the scheme's types now, defaulting to canton-exact's. Found in review by
-@dimartiro.
+`PaymentRejectionInfo` is generic over the scheme's types now, defaulting to
+canton-exact's.
+
+It is attached at ONE point, once `preSettle` has accepted, which is where an
+undo starts being owed. The first cut attached it as soon as the shape checks
+passed, and that was a hole: until verify has held the requirements against the
+signed transfer they are whatever the header claimed, so an underpriced payment
+echoing a reference the merchant issued to someone else handed `onReject` that
+reference, and a merchant following the README released an order a different
+payer was paying for — at no cost to the sender, the payment never settling. A
+refusal before that point now carries `reason` and `details` and no `payment`.
+Documented too: a 502 from a settle that threw may mean the answer was lost
+rather than the payment, so an undo there is a choice about which way to be
+wrong. Found in review by @dimartiro.
 
 **One reference per challenge, not one per way to pay.** A reference generator
 may book an order, and a 402 is one sale however many ways it offers to pay for
-it. Entries given the merchant's one `memo` generator — the same function, since
-`memo` is a per-entry field — now share the reference it mints, so a two-entry
-402 books one order and whichever way the payer picks reconciles against it. Minting per entry booked N
-and was paid for one, with nothing in the generator's arguments — it is given
-only `req` — to tell the entries apart. Entries naming their own generator still
-get their own reference, since that is the merchant asking for one. Schemes say
-which quotes share through the new `SchemeQuote.referenceKey`.
+it. Minting per entry booked N and was paid for one, with nothing in the
+generator's arguments — it is given only `req` — to tell the entries apart.
+Entries carrying the same generator now share the reference it mints, so a
+two-entry 402 books one order and whichever way the payer picks reconciles
+against it. Schemes say which quotes share through the new
+`SchemeQuote.referenceKey`.
+
+**And the shared terms take a scheme's optional fields, so that is writable.**
+Sharing is by function identity, and `memo` was a per-entry field: the natural
+way of writing it — the same body in each entry — is two functions, so it still
+booked two orders. A merchant could get one only by hoisting the function into
+a variable, which nothing said and the type could not express.
+
+A scheme's own fields may now be named once beside `payTo` — `memo` is the one
+that needs it — and an entry naming its own overrides it and gets its own
+reference, which is the merchant asking for one. `RequirementsSpec` is the
+mirror of `AcceptSpec` now: an entry must carry the scheme's fields and may
+override the shared ones, so the terms carry the shared ones and may default
+the scheme's. It is an intersection rather than an interface for it, since that
+half is computed from the scheme's own spec. `amount` and `asset` stay required
+on every entry, so naming them at the top level does nothing. Found in review
+by @dimartiro.
 
 **An entry no longer erases a shared term with an explicit `undefined`.**
 `{ payTo: someVar }` where `someVar` is undefined used to wipe the shared
@@ -213,6 +250,15 @@ app.use("/paid", paymentRequired<VoucherSpec, VoucherRequirements, VoucherPayloa
 }));
 ```
 
+The generic overload requires `scheme`. Without that, a canton call with an
+incomplete way to pay fell through to it, inferred its own `TSpec` from
+whatever it was handed, and compiled — `accepts: [{ amount: "500000000" }]`
+typechecked and then threw `reading 'instrumentId'` at mount. There is nothing
+to fall through to now, so it is a compile error; and for the callers
+TypeScript cannot reach — JavaScript, and a resolver returning nothing — the
+scheme answers with a `TermsError` naming the problem instead of a TypeError
+from two frames down. Found in review by @dimartiro.
+
 Canton's `exact` is the default (`cantonExact`) and nothing changes for a
 merchant using it: `paymentRequired` keeps a non-generic overload, so an inline
 requirements object is contextually typed against the concrete canton shapes
@@ -229,10 +275,11 @@ a reader that knows that one and not the scheme's, and is the default for an
 adapter that names none.
 
 New exports: `SchemeAdapter`, `SchemeQuote`, `SchemeContext`,
-`BaseRequirementsSpec`, `AcceptSpec`, `SharedTerms`, `Resolvable`, `FieldRule`,
-`RuleTable`, `RequirementsBuilder`, `PaymentRejectionInfo`, `X402RequestState`,
-`DEFAULT_MAX_TIMEOUT_SECONDS`, `cantonExact`, `CantonRequirementsSpec`, and the
-`compareQuote` / `sameValue` / `resolve` helpers an adapter needs.
+`BaseRequirementsSpec`, `AcceptSpec`, `SharedTerms`, `FieldRule`, `RuleTable`,
+`X402RequestState`, `DEFAULT_MAX_TIMEOUT_SECONDS`, `cantonExact`,
+`CantonRequirementsSpec`, and the `compareQuote` / `sameValue` / `resolve`
+helpers an adapter needs. `Resolvable`, `RequirementsBuilder` and
+`PaymentRejectionInfo` were already exported; the last two change shape.
 
 **A new guard.** The decoded payment is checked by the scheme before
 anything reads a field off it. The envelope is a loose object — `payload.payload`

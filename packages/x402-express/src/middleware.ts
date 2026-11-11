@@ -41,7 +41,8 @@ import { PaymentRejection, respondToFailure } from "./response.js";
  * - No/invalid payment in `PAYMENT-SIGNATURE` (or the older `X-PAYMENT`) →
  *   `402` with the spec's `PaymentRequired`, `{ x402Version, resource, accepts }`,
  *   in the `PAYMENT-REQUIRED` header and as the body. One `accepts[]` entry per
- *   way to pay, each with its own freshly minted reference.
+ *   way to pay; entries sharing a reference generator are issued one freshly
+ *   minted reference between them, a 402 being one sale.
  * - Valid payment → verify (and optionally settle) via the facilitator, then
  *   attach `req.x402` and call `next()`.
  *
@@ -60,11 +61,19 @@ import { PaymentRejection, respondToFailure } from "./response.js";
  * }));
  */
 export function paymentRequired(options: PaymentRequiredOptions): RequestHandler;
+// `scheme` is required here, and that is load-bearing rather than tidiness: a
+// canton call with an incomplete way to pay would otherwise fall through to
+// this overload, infer TSpec from whatever it was given, and typecheck — then
+// fail at mount. Without a scheme there is only one overload to fail against.
 export function paymentRequired<
   TSpec extends BaseRequirementsSpec,
   TRequirements extends X402PaymentRequirements<unknown>,
   TPayload extends X402PaymentPayload<unknown>,
->(options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>): RequestHandler;
+>(
+  options: PaymentRequiredOptions<TSpec, TRequirements, TPayload> & {
+    scheme: SchemeAdapter<TSpec, TRequirements, TPayload>;
+  },
+): RequestHandler;
 export function paymentRequired<
   TSpec extends BaseRequirementsSpec = CantonRequirementsSpec,
   TRequirements extends X402PaymentRequirements<unknown> = CantonPaymentRequirements,
@@ -86,8 +95,12 @@ export function paymentRequired<
     // paid request needs terms to hold the payment against, a challenge needs
     // terms to advertise. The failure path reuses whatever was built here.
     let offer: Offer<TRequirements> | undefined;
-    // Kept for the failure path: a refusal after this point names the payment
-    // it refused, so a merchant can undo whatever `preSettle` did.
+    // Kept for the failure path, and set at ONE point: once `preSettle` has
+    // accepted. From there on a refusal may be undoing work the merchant
+    // already did, and this is what names it. Set any earlier and it would
+    // name a payment nothing has checked — an underpriced header echoing
+    // another order's reference would hand `onReject` that reference, and a
+    // merchant releasing it would release someone else's.
     let payment: PaymentRejectionInfo<TRequirements, TPayload>["payment"];
     try {
       // The spec's name first. X-PAYMENT is the name this SDK used before, and
@@ -124,7 +137,6 @@ export function paymentRequired<
       }
       const payload = decoded as TPayload;
       const accepted = decoded.accepted as TRequirements;
-      payment = { payload, requirements: accepted };
 
       offer = await buildQuotes(req, options, scheme);
       assertAcceptedQuote(accepted, offer.quotes, rules);
@@ -168,7 +180,6 @@ export function paymentRequired<
       // response, so ask the scheme to read its own when it is left out. Before
       // settling, so a payment is never captured for a request we then fail.
       const payer = verify.payer ?? scheme.payerOf(payload);
-      payment = { ...payment, payer };
       if (!payer) {
         // Worded as the scheme's verifier words an undecodable transfer, with
         // the protocol-level reason kept in `extensions` for a reader that
@@ -188,6 +199,9 @@ export function paymentRequired<
         req,
       );
       if (merchantRefusal) throw new PaymentRejection(merchantRefusal);
+      // Accepted. Whatever the merchant reserved in there is reserved, so from
+      // here a refusal owes it an undo and carries what to undo it against.
+      payment = { payload, requirements: accepted, payer };
 
       let settleResponse: SettleResponse | undefined;
       if (settle) {

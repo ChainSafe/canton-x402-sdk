@@ -24,6 +24,7 @@ import {
   type X402PaymentRequirements,
 } from "@chainsafe/x402-core";
 
+import { TermsError } from "../options.js";
 import {
   resolve,
   type BaseRequirementsSpec,
@@ -35,6 +36,26 @@ import {
 } from "../scheme.js";
 
 const DEFAULT_EXECUTE_BEFORE_SECONDS = 120;
+
+/**
+ * The instrument id a way to pay names.
+ *
+ * `asset` is required by the spec type, so TypeScript catches a missing one —
+ * except from JavaScript, and from a resolver that returns nothing. Said
+ * plainly here rather than as a TypeError about `instrumentId` two frames
+ * down, and as a {@link TermsError} so it is never skipped as a way to pay
+ * that merely failed to quote.
+ */
+function instrumentIdOf(asset: string | AssetSpec | undefined | null): string {
+  if (asset === undefined || asset === null) {
+    throw new TermsError(
+      "paymentRequired: a way to pay names no `asset`. `amount` is atomic units of " +
+        'something, so each entry says what: an instrument id ("Amulet"), or ' +
+        "{ instrumentId: { id, admin } } to pin the registry party too.",
+    );
+  }
+  return typeof asset === "string" ? asset : asset.instrumentId.id;
+}
 
 /** Declarative requirements for canton-exact. */
 export interface CantonRequirementsSpec extends BaseRequirementsSpec {
@@ -82,6 +103,13 @@ export interface CantonRequirementsSpec extends BaseRequirementsSpec {
    * makes it usable as a reconciliation key and as a replay key. UTF-8, at most
    * 256 bytes. Omit it to quote none.
    *
+   * Name it ONCE in the shared terms if it books anything. A 402 is one sale
+   * however many ways it offers to pay for it, and entries carrying the same
+   * function are issued one memo between them — so the same body written out
+   * in two entries is two functions, two memos, and two orders booked for a
+   * sale that is paid once. An entry naming its own overrides the shared one
+   * and gets its own, which is the merchant asking for that.
+   *
    * (Function-only by design: a static value would tag every payment alike,
    * which is the one thing reference data must not do.)
    */
@@ -113,12 +141,6 @@ const EXTRA_RULES: Record<keyof typeof CantonRequirementsExtraSchema.entries, Ru
 };
 
 /**
- * The default scheme: Canton's registered `exact`.
- *
- * Pass your own {@link SchemeAdapter} to `paymentRequired` to gate a route on
- * something else; nothing in the middleware is canton-shaped.
- */
-/**
  * The payload's decoded transfer, decoded at most once.
  *
  * Both `payerOf` and `resourceStampOf` want it, and decoding means gunzipping
@@ -135,6 +157,12 @@ function transferOf(payload: CantonPaymentPayload) {
   return decoded;
 }
 
+/**
+ * The default scheme: Canton's registered `exact`.
+ *
+ * Pass your own {@link SchemeAdapter} to `paymentRequired` to gate a route on
+ * something else; nothing in the middleware is canton-shaped.
+ */
 export const cantonExact: SchemeAdapter<
   CantonRequirementsSpec,
   CantonPaymentRequirements,
@@ -161,7 +189,7 @@ export const cantonExact: SchemeAdapter<
     // resolver cannot be read without a request, so such an entry is skipped.
     const asset = spec.asset;
     if (typeof asset === "function") return undefined;
-    return typeof asset === "string" ? asset : asset.instrumentId.id;
+    return instrumentIdOf(asset);
   },
   resourceStampOf(payload: CantonPaymentPayload): string | undefined {
     return transferOf(payload)?.resourceUrlStamp;
@@ -198,8 +226,10 @@ export const cantonExact: SchemeAdapter<
     const mint = spec.memo;
     if (mint) {
       quote.mintReference = async () => ({ memo: await mint(req) });
-      // The generator itself: entries that inherited the merchant's one memo
-      // from the shared terms carry the same function, so they share a memo.
+      // The generator itself. Entries that inherited the merchant's one memo
+      // from the shared terms carry the SAME function, so they are issued one
+      // memo between them; an entry naming its own carries another function
+      // and gets its own, which is the merchant asking for that.
       quote.referenceKey = mint;
     }
     return quote;
@@ -232,8 +262,8 @@ async function resolveDeploymentTerms(
   // AssetSpec carries the admin too. Either way the id is known, and is what
   // narrows discovery below.
   const asset = await resolve(spec.asset, req);
+  const instrument = instrumentIdOf(asset);
   const pinned = typeof asset === "string" ? undefined : asset;
-  const instrument = typeof asset === "string" ? asset : asset.instrumentId.id;
 
   // Both pinned: nothing to discover.
   if (network !== undefined && pinned !== undefined) {

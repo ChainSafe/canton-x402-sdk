@@ -43,8 +43,9 @@ const COMMON_RULES: Record<
   },
   // Replaced per scheme in rulesFor().
   extra: { compare: "skip", why: "filled in from the scheme adapter" },
-  // The facilitator holds a payment for at most this long; the payer does not
-  // get to stretch it.
+  // The seconds the client is given to complete payment. It never reaches the
+  // ledger — `extra.executeBeforeSeconds` is the deadline that does — so it is
+  // compared for echo fidelity: the payer does not get to name its own.
   maxTimeoutSeconds: { compare: "equal", reason: "policy_timeout" },
 };
 

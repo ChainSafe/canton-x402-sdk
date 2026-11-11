@@ -27,9 +27,11 @@ export async function resolve<T>(value: Resolvable<T>, req: Request): Promise<T>
 /**
  * The fields that describe the sale rather than one way of paying for it.
  *
- * Named once for all the ways to pay, and overridable per entry. x402 v2
- * §5.1.2 puts `resource` on the 402 itself and not on each `accepts[]` entry,
- * which is the same division.
+ * Named once for all the ways to pay, and all but `resource` and `description`
+ * may be overridden per entry. Those two cannot: x402 v2 §5.1.2 puts `resource`
+ * on the 402 itself rather than on each `accepts[]` entry, so entries
+ * disagreeing about it would make the envelope describe one sale and its
+ * entries another.
  */
 export interface SharedTerms {
   /** Merchant party receiving payment. */

@@ -50,21 +50,37 @@ export type AcceptSpec<TSpec extends BaseRequirementsSpec> = Omit<TSpec, keyof S
 /**
  * The merchant's terms: what is being sold, and the ways to pay for it.
  *
+ * The mirror of {@link AcceptSpec}: an entry must carry the scheme's own
+ * fields and may override the shared ones, so the terms carry the shared ones
+ * and may name any of the scheme's once for the whole sale.
+ *
+ * That last part is what `memo` needs. Entries are issued ONE reference
+ * between them when they carry the same generator, and naming it here hands
+ * every entry that one function without repeating it — written out in two
+ * entries it is two functions, so two references, and a generator that books
+ * an order books two. (Hoisting it into a variable and naming that in each
+ * entry works too; this spares the repetition.)
+ * A field named here that every entry restates anyway, `amount`, is simply
+ * overridden.
+ *
  * Fields may be a fixed value or a `(req) => value` resolver.
  */
-export interface RequirementsSpec<
-  TSpec extends BaseRequirementsSpec = CantonRequirementsSpec,
-> extends SharedTerms {
-  /**
-   * The ways to pay, each advertised as one `accepts[]` entry. A payer picks
-   * one; the middleware works out which and holds the payment against it.
-   *
-   * Each carries its own price, because they are prices in different units —
-   * 0.05 of one token is not 0.05 of another, and nothing here checks that two
-   * entries are worth the same.
-   */
-  accepts: Array<AcceptSpec<TSpec>>;
-}
+export type RequirementsSpec<TSpec extends BaseRequirementsSpec = CantonRequirementsSpec> =
+  SharedTerms &
+    Partial<Omit<TSpec, keyof SharedTerms>> & {
+      /**
+       * The ways to pay, each advertised as one `accepts[]` entry. A payer
+       * picks one and echoes it back as the payment's `accepted`; the
+       * middleware holds that against every entry this request would
+       * advertise, and lets it through if any of them takes it. Nothing on the
+       * wire says which one it was for.
+       *
+       * Each carries its own price, because they are prices in different units
+       * — 0.05 of one token is not 0.05 of another, and nothing here checks
+       * that two entries are worth the same.
+       */
+      accepts: Array<AcceptSpec<TSpec>>;
+    };
 
 /**
  * Full control: build the whole `accepts[]` per request.
@@ -193,7 +209,9 @@ export interface PaymentRequiredOptions<
    * swallowed, as with {@link PaymentRequiredOptions.onReject}.
    *
    * Not called when NO entry can be quoted — there is nothing to answer with
-   * then, and the request fails as a `500`.
+   * then, and the request fails instead: `502` when the facilitator is what
+   * failed, whatever the number of entries, and `500` when the cause is the
+   * merchant's own config.
    */
   onQuoteError?: (error: Error, req: Request) => void | Promise<void>;
 }
@@ -219,21 +237,32 @@ export interface PaymentRejectionInfo<
   /** The underlying error, for a 502 or 500. */
   error?: unknown;
   /**
-   * The payment this refusal is about, once one has been decoded and the
-   * scheme has vouched for its shape. Absent for a request that carried none,
-   * one whose header would not decode, and a failure to build the terms.
+   * The payment this refusal is about — present exactly when an undo may be
+   * owed, which is once {@link PaymentRequiredOptions.preSettle} has ACCEPTED
+   * it. So: a settle that failed or threw, and anything that goes wrong after.
+   * Absent for every refusal before that point, `preSettle`'s own included.
    *
-   * It is what lets a merchant undo work {@link PaymentRequiredOptions.preSettle}
-   * did — releasing stock it reserved, reopening an order it marked claimed —
-   * when settle fails afterwards. `requirements.extra` carries whatever
-   * reference the merchant quoted.
+   * It is what lets a merchant undo work `preSettle` did — releasing stock it
+   * reserved, reopening an order it marked claimed. `requirements.extra`
+   * carries whatever reference the merchant quoted, and it is one the payer
+   * signed: verify has held these requirements against the transfer.
+   *
+   * Not attached earlier on purpose. Before verify the requirements are
+   * whatever the header claimed, so an underpriced payment echoing another
+   * order's reference would name that order here and a merchant releasing it
+   * would release someone else's.
+   *
+   * One thing it cannot tell you: a `502` from a settle that threw may still
+   * have gone through on the ledger, the answer having been lost rather than
+   * the payment. Undoing on that one is a decision about which way to be
+   * wrong, not a certainty.
    */
   payment?: {
     payload: TPayload;
     /** The `accepts[]` entry the payer chose, as `preSettle` received it. */
     requirements: TRequirements;
-    /** The verified transfer's sender, once verify has named it. */
-    payer?: string;
+    /** The verified transfer's sender, as `preSettle` received it. */
+    payer: string;
   };
 }
 

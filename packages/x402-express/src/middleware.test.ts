@@ -14,6 +14,7 @@ import {
 import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "./middleware";
 import { cantonExact } from "./schemes/canton-exact";
+import { TermsError } from "./options";
 import type {
   PaymentRejectionInfo,
   PaymentRequiredOptions,
@@ -972,15 +973,12 @@ describe("paymentRequired", () => {
       const onReject = vi.fn();
       await request(makeApp({ onReject })).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
       expect(onReject).toHaveBeenCalledOnce();
-      const { payment, ...rest } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
-      expect(rest).toEqual({
+      expect(onReject.mock.calls[0][0]).toEqual({
         status: 402,
         reason: "internal_error",
         details: "authorization_amount_too_low",
         extensions,
       });
-      // The payment it refused travels with it; asserted on its own below.
-      expect(payment?.requirements.payTo).toBe("merchant::x");
     });
 
     it("names the payment a refusal is about, so preSettle's work can be undone", async () => {
@@ -1006,6 +1004,73 @@ describe("paymentRequired", () => {
       const onReject = vi.fn();
       await request(makeApp({ onReject })).get("/paid").set("PAYMENT-SIGNATURE", "!!!");
       expect(onReject.mock.calls[0][0]).not.toHaveProperty("payment");
+    });
+
+    it("carries no payment for a refusal before preSettle accepted", async () => {
+      // The requirements are the payer's until verify has held them against
+      // the signed transfer. An underpriced payment echoing another order's
+      // reference must not hand that reference to a merchant whose undo would
+      // then release someone else's order — and it costs the payer nothing,
+      // since a refused payment never settles.
+      stubFacilitator();
+      const onReject = vi.fn();
+      await request(makeApp({ settle: true, onReject }))
+        .get("/paid")
+        .set(
+          "PAYMENT-SIGNATURE",
+          paymentHeader({ amount: "1", extra: { ...ECHOED_EXTRA, memo: "someone-elses-order" } }),
+        );
+      const info = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(info.reason).toBe("policy_underpriced");
+      expect(info).not.toHaveProperty("payment");
+    });
+
+    it("carries no payment when verify refuses it", async () => {
+      // Nothing has been held against the transfer, so there is nothing a
+      // merchant could owe an undo for.
+      stubFacilitator({ verify: { isValid: false, invalidReason: "bad_signature" } });
+      const onReject = vi.fn();
+      await request(makeApp({ settle: true, onReject }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-42" } }));
+      expect(onReject.mock.calls[0][0]).not.toHaveProperty("payment");
+    });
+
+    it("carries no payment when preSettle itself refuses", async () => {
+      // preSettle refused, so it knows what it did and did not do; the
+      // middleware naming the payment back at it would only invite an undo of
+      // work that was never done.
+      stubFacilitator();
+      const onReject = vi.fn();
+      await request(makeApp({ settle: true, onReject, preSettle: () => "policy_order_closed" }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-42" } }));
+      const info = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(info.reason).toBe("policy_order_closed");
+      expect(info).not.toHaveProperty("payment");
+    });
+
+    it("names the payment when a settle throws, 502 or not", async () => {
+      // The other half of the undo case: settle did not answer at all. The
+      // refusal still names what preSettle accepted.
+      stubFacilitator();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request) => {
+          if (String(input).includes("/settle")) throw new Error("connection reset");
+          return new Response(JSON.stringify({ isValid: true, payer: "alice::x" }), {
+            headers: { "content-type": "application/json" },
+          });
+        }),
+      );
+      const onReject = vi.fn();
+      const res = await request(makeApp({ settle: true, onReject }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-42" } }));
+      expect(res.status).toBe(502);
+      const { payment } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(payment?.requirements.extra.memo).toBe("order-42");
+      expect(payment?.payer).toBe("alice::x");
     });
 
     it("reports a settle rejection", async () => {
@@ -1312,7 +1377,7 @@ describe("paymentRequired: minting a merchant reference", () => {
     expect(booked).toEqual(["order-0"]);
   });
 
-  it("does not mint when the payment is refused before the facilitator is asked", async () => {
+  it("mints exactly one when the payment is refused before the facilitator is asked", async () => {
     // A policy refusal still has to hand back a payable quote, so it mints one
     // — but exactly one, and no verify was spent to find out.
     const fetchMock = stubFacilitator();
@@ -1325,6 +1390,85 @@ describe("paymentRequired: minting a merchant reference", () => {
     expect(res.body.error).toBe("policy_underpriced");
     expect(booked).toEqual(["order-0"]);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  describe("two ways to pay, one sale", () => {
+    const AMULET = { instrumentId: { id: "Amulet", admin: "DSO::x" } };
+    const USDCX = { instrumentId: { id: "USDCx", admin: "ISSUER::x" } };
+
+    /** The memos the 402 advertised, in order. Not cast: the types are part of
+     * what these assert — `memo` beside `payTo` has to compile. */
+    const memosOf = async (requirements: RequirementsSpec) => {
+      const app = express();
+      app.use("/paid", paymentRequired({ ...baseOptions, requirements }));
+      const res = await request(app).get("/paid");
+      return res.body.accepts.map((a: { extra: { memo: string } }) => a.extra.memo);
+    };
+
+    const booking = (booked: string[]) => () => {
+      const m = `order-${booked.length}`;
+      booked.push(m);
+      return m;
+    };
+
+    it("books one order for a memo named once in the shared terms", async () => {
+      // The whole point of allowing it there: a 402 is one sale however many
+      // ways it offers to pay for it, and the generator may book an order.
+      // Naming it once hands every entry that one function without repeating
+      // it, and carrying the same function is what makes them share the
+      // reference it mints — a merchant may also hoist it into a variable and
+      // name that in each entry, which "books ONE order for a challenge,
+      // however many ways it offers to pay" covers.
+      stubFacilitator();
+      const booked: string[] = [];
+      const memos = await memosOf({
+        network: "canton:x",
+        payTo: "merchant::x",
+        resource: "https://f.example/paid",
+        memo: booking(booked),
+        accepts: [
+          { asset: AMULET, amount: "500000000" },
+          { asset: USDCX, amount: "250000" },
+        ],
+      });
+      expect(booked).toEqual(["order-0"]);
+      expect(memos).toEqual(["order-0", "order-0"]);
+    });
+
+    it("books one per entry when each names its own generator", async () => {
+      // Two functions are two references, which is the merchant asking for
+      // them. Pinned because the difference is invisible at the call site —
+      // the same body written twice is not the same function.
+      stubFacilitator();
+      const booked: string[] = [];
+      const book = booking(booked);
+      const memos = await memosOf({
+        network: "canton:x",
+        payTo: "merchant::x",
+        resource: "https://f.example/paid",
+        accepts: [
+          { asset: AMULET, amount: "500000000", memo: () => book() },
+          { asset: USDCX, amount: "250000", memo: () => book() },
+        ],
+      });
+      expect(booked).toEqual(["order-0", "order-1"]);
+      expect(memos).toEqual(["order-0", "order-1"]);
+    });
+
+    it("lets one entry override the shared generator", async () => {
+      stubFacilitator();
+      const memos = await memosOf({
+        network: "canton:x",
+        payTo: "merchant::x",
+        resource: "https://f.example/paid",
+        memo: () => "shared",
+        accepts: [
+          { asset: AMULET, amount: "500000000" },
+          { asset: USDCX, amount: "250000", memo: () => "mine" },
+        ],
+      });
+      expect(memos).toEqual(["shared", "mine"]);
+    });
   });
 
   it("answers 500, not 402, when the reference generator itself throws", async () => {
@@ -1904,6 +2048,59 @@ describe("paymentRequired: configuring from /v2/supported", () => {
   });
 
 
+  describe("a way to pay that names no asset", () => {
+    // TypeScript refuses this at the call site (options.types.test.ts). What is
+    // left is JavaScript, and a resolver that returns nothing — both reached
+    // the instrument id as a property of `undefined`.
+    const mount = (asset: unknown) =>
+      paymentRequired({
+        facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          network: "canton:devnet",
+          accepts: [{ amount: "500000000", ...(asset === undefined ? {} : { asset }) }],
+        },
+      } as unknown as Parameters<typeof paymentRequired>[0]);
+
+    it("is a TermsError at mount, not a TypeError about instrumentId", () => {
+      expect(() => mount(undefined)).toThrow(TermsError);
+      expect(() => mount(undefined)).toThrow(/names no `asset`/);
+    });
+
+    it("is a TermsError when a resolver returns nothing, and is never skipped", async () => {
+      // A resolver cannot be read at mount, so this one arrives per request —
+      // where a way to pay that merely fails to quote is dropped and the rest
+      // are offered. The good entry beside it is what makes that visible:
+      // skipping would answer 402 with it alone. Merchant config is not a
+      // quoting failure, so the request fails instead.
+      stubWithSupported();
+      const onReject = vi.fn();
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          onReject,
+          requirements: {
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            network: "canton:devnet",
+            accepts: [
+              { amount: "500000000", asset: "Amulet" },
+              { amount: "250000", asset: () => undefined as unknown as string },
+            ],
+          },
+        }),
+      );
+      const res = await request(app).get("/paid");
+      expect(res.status).toBe(500);
+      const { error } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(error).toBeInstanceOf(TermsError);
+      expect((error as Error).message).toMatch(/names no `asset`/);
+    });
+  });
+
   describe("a way to pay that cannot be quoted", () => {
     const twoEntries = (onQuoteError?: (e: Error) => void) => {
       const app = express();
@@ -1994,6 +2191,64 @@ describe("paymentRequired: configuring from /v2/supported", () => {
       const res = await request(app).get("/paid");
       expect(res.status).toBe(500);
       expect(res.body.details).toContain("GBPx");
+    });
+
+    it("answers 502 for an outage, however many ways to pay there are", async () => {
+      // The facilitator being down is one cause with several witnesses. Before
+      // this, two entries wrapped their two FacilitatorErrors in a plain Error
+      // and answered 500 — our fault, nothing to retry — for exactly the
+      // outage a one-entry route answered 502 for.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("down", { status: 503 })),
+      );
+      const outage = async (assets: string[]) => {
+        const app = express();
+        app.use(
+          "/paid",
+          paymentRequired({
+            facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+            requirements: {
+              payTo: "merchant::x",
+              resource: "https://f.example/paid",
+              accepts: assets.map((asset, i) => ({ amount: `${i + 1}0`, asset })),
+            },
+          }),
+        );
+        return request(app).get("/paid");
+      };
+      const one = await outage(["Amulet"]);
+      const two = await outage(["Amulet", "USDCx"]);
+      expect(two.status).toBe(one.status);
+      expect(two.status).toBe(502);
+      expect(two.body.error).toBe("facilitator_error");
+    });
+
+    it("still reports several unrelated failures together", async () => {
+      // The rethrow above is for a cause that is the facilitator's. These two
+      // are the merchant's, so they stay an aggregate: two things to fix, each
+      // named with the entry it came from.
+      stubWithSupported();
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          requirements: {
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            network: "canton:devnet",
+            accepts: [
+              { amount: "1", asset: "GBPx" },
+              { amount: "2", asset: "JPYx" },
+            ],
+          },
+        }),
+      );
+      const res = await request(app).get("/paid");
+      expect(res.status).toBe(500);
+      expect(res.body.details).toMatch(/1: .*GBPx/);
+      expect(res.body.details).toMatch(/2: .*JPYx/);
     });
 
     it("never skips a merchant's own mistake", async () => {
