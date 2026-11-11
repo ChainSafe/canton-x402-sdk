@@ -162,7 +162,9 @@ export interface PaymentRequiredOptions<
    * swallowed, as with {@link PaymentRequiredOptions.onReject}.
    *
    * Not called when NO entry can be quoted — there is nothing to answer with
-   * then, and the request fails as a `500`.
+   * then, and the request fails instead: `502` when the facilitator is what
+   * failed, whatever the number of entries, and `500` when the cause is the
+   * merchant's own config.
    */
   onQuoteError?: (error: Error, req: Request) => void | Promise<void>;
 }

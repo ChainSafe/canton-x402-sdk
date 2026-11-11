@@ -2046,6 +2046,64 @@ describe("paymentRequired: configuring from /v2/supported", () => {
       expect(res.body.details).toContain("GBPx");
     });
 
+    it("answers 502 for an outage, however many ways to pay there are", async () => {
+      // The facilitator being down is one cause with several witnesses. Before
+      // this, two entries wrapped their two FacilitatorErrors in a plain Error
+      // and answered 500 — our fault, nothing to retry — for exactly the
+      // outage a one-entry route answered 502 for.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("down", { status: 503 })),
+      );
+      const outage = async (assets: string[]) => {
+        const app = express();
+        app.use(
+          "/paid",
+          paymentRequired({
+            facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+            requirements: {
+              payTo: "merchant::x",
+              resource: "https://f.example/paid",
+              accepts: assets.map((asset, i) => ({ amount: `${i + 1}0`, asset })),
+            },
+          }),
+        );
+        return request(app).get("/paid");
+      };
+      const one = await outage(["Amulet"]);
+      const two = await outage(["Amulet", "USDCx"]);
+      expect(two.status).toBe(one.status);
+      expect(two.status).toBe(502);
+      expect(two.body.error).toBe("facilitator_error");
+    });
+
+    it("still reports several unrelated failures together", async () => {
+      // The rethrow above is for a cause that is the facilitator's. These two
+      // are the merchant's, so they stay an aggregate: two things to fix, each
+      // named with the entry it came from.
+      stubWithSupported();
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          requirements: {
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            network: "canton:devnet",
+            accepts: [
+              { amount: "1", asset: "GBPx" },
+              { amount: "2", asset: "JPYx" },
+            ],
+          },
+        }),
+      );
+      const res = await request(app).get("/paid");
+      expect(res.status).toBe(500);
+      expect(res.body.details).toMatch(/1: .*GBPx/);
+      expect(res.body.details).toMatch(/2: .*JPYx/);
+    });
+
     it("never skips a merchant's own mistake", async () => {
       // A decimal price is config, not the facilitator changing under us, so
       // it takes the request down rather than quietly dropping the entry. Both

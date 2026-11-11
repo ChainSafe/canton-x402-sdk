@@ -115,6 +115,15 @@ the 402 and the rest are offered; a payment for one that quoted is unaffected.
 Only when NO entry can be quoted does the request fail, since there is then
 nothing to answer with.
 
+That failure keeps the status the cause deserves. Resolving entries separately
+gave each its own error, and several of them were wrapped in one plain `Error`
+— so a `/v2/supported` outage answered `502` on a route offering one way to
+pay and `500 x402_middleware_error` on a route offering two, telling a client
+the merchant was broken when the facilitator was down. When every failure is a
+`FacilitatorError` it is one cause with several witnesses, and the first is
+rethrown as it came. Unrelated failures still report together, each named with
+its entry. Found in review by @dimartiro.
+
 `onQuoteError` is the new optional hook that says so, naming the entry and the
 reason, because nothing else would: the 402 simply has fewer entries. It fires
 once per dropped entry per request and a throw from it is swallowed, as with

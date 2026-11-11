@@ -13,6 +13,8 @@ import {
   type X402PaymentRequirements,
 } from "@chainsafe/x402-core";
 
+import { FacilitatorError } from "@chainsafe/x402-client";
+
 import { resolve, type BaseRequirementsSpec, type SchemeAdapter } from "./scheme.js";
 import {
   DEFAULT_MAX_TIMEOUT_SECONDS,
@@ -121,6 +123,19 @@ export async function buildQuotes<
     // is reported as it came: an ambiguity the merchant must resolve reads
     // better unwrapped than wrapped in a count.
     if (failed.length === 1) throw failed[0].error;
+    // The facilitator being down is ONE cause with several witnesses, not
+    // several causes. Wrapping it loses what it is, and the middleware answers
+    // `500 x402_middleware_error` — our fault, nothing to retry — for an
+    // outage that a route offering one way to pay answers `502` for. The
+    // number of ways a merchant takes money must not decide what a client is
+    // told about someone else's downtime.
+    //
+    // `every`, not `some`: today the entries share one `/v2/supported` call,
+    // so either all of them failed on it or none did and a mixed set cannot
+    // arise. If a per-entry call to the facilitator ever appears, `some` would
+    // answer 502 for a set that also holds a merchant's own broken entry and
+    // bury it.
+    if (failed.every((f) => f.error instanceof FacilitatorError)) throw failed[0].error;
     throw new Error(
       `paymentRequired: no way to pay could be quoted — ${failed
         .map((f) => `${f.at + 1}: ${errMsg(f.error)}`)
