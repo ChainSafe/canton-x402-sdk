@@ -175,7 +175,7 @@ TPayload>` is exported for a route gated on another.
 | `requirements` | How to produce the `PaymentRequirements`: a **spec** or a **builder** (see below). |
 | `preSettle` | `(payment, req) => string \| undefined`, your own say on a verified payment, run after verify and before anything settles. Return a short reason to refuse it, or nothing to let it through; see below. |
 | `onQuoteError` | `(error, req) => void`, called when a way to pay could not be quoted and was left out of the 402 — the facilitator no longer settles the instrument it names, say. The request is still answered from the entries that did quote, so without this a way to pay can disappear unnoticed. Fires once per dropped entry per request; a throw is swallowed. |
-| `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error?, payment? }`, where `extensions` is the facilitator's full verify detail, with the code it answered with before the spec's in `extensions.reason`, and `payment` is the payload, requirements and payer this refusal is about when one was decoded. May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
+| `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error?, payment? }`, where `extensions` is the facilitator's full verify detail, with the code it answered with before the spec's in `extensions.reason`, and `payment` is the payload, requirements and payer this refusal is about, present only once `preSettle` has accepted it — see **Undoing it** under [`requirements`](#requirements). May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
 
 ### `requirements`
 
@@ -223,7 +223,11 @@ preSettle: async ({ requirements, payer }) => {
 
 **After verify, not before.** Running there means `requirements` has been held against the signed transfer, so a memo is one the payer committed to rather than one it claims — safe to reserve stock or mark an order claimed on. `payer` is the verified transfer's sender, and does not exist before this point: the payload names none.
 
-**Undoing it.** Settle can still fail after `preSettle` has reserved something. `onReject` then receives `payment` — the payload, the requirements as `preSettle` saw them, and the payer — so the order to release is `payment.requirements.extra.memo`, with no need to decode the header again. It is absent when there was no payment to name: an unpaid request, a header that would not decode, or a failure to build the terms.
+**Undoing it.** Settle can still fail after `preSettle` has reserved something. `onReject` then receives `payment` — the payload, the requirements as `preSettle` saw them, and the payer — so the order to release is `payment.requirements.extra.memo`, with no need to decode the header again.
+
+It is present **exactly when an undo may be owed**: once `preSettle` has accepted, and not before. So a refusal that never got that far — an unpaid request, a header that would not decode, a payment refused on price or on verify, or `preSettle`'s own refusal — carries `reason` and `details` but no `payment`. That is deliberate: before verify the requirements are whatever the header claimed, so an underpriced payment echoing one of your references would otherwise name it here, and releasing it would release an order someone else is paying for.
+
+One case it cannot settle for you: a **502 from a settle that threw** may mean the payment went through and the answer was lost, rather than that it did not happen. Undoing there is a choice about which way to be wrong — reconcile against the ledger if that matters to you.
 
 It is not memo-specific — it is where any check needing your own records belongs. With `settle: false` it is simply the last gate before the request is let through.
 

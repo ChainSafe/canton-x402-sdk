@@ -85,8 +85,12 @@ export function paymentRequired<
     // paid request needs terms to hold the payment against, a challenge needs
     // terms to advertise. The failure path reuses whatever was built here.
     let quotes: Array<Quote<TRequirements>> | undefined;
-    // Kept for the failure path: a refusal after this point names the payment
-    // it refused, so a merchant can undo whatever `preSettle` did.
+    // Kept for the failure path, and set at ONE point: once `preSettle` has
+    // accepted. From there on a refusal may be undoing work the merchant
+    // already did, and this is what names it. Set any earlier and it would
+    // name a payment nothing has checked — an underpriced header echoing
+    // another order's reference would hand `onReject` that reference, and a
+    // merchant releasing it would release someone else's.
     let payment: PaymentRejectionInfo<TRequirements, TPayload>["payment"];
     try {
       // The spec's name first. X-PAYMENT is the name this SDK used before, and
@@ -123,7 +127,6 @@ export function paymentRequired<
       }
       const payload = decoded as TPayload;
       const accepted = decoded.accepted as TRequirements;
-      payment = { payload, requirements: accepted };
 
       quotes = await buildQuotes(req, options, scheme);
       assertAcceptedQuote(accepted, quotes, rules);
@@ -143,7 +146,6 @@ export function paymentRequired<
       // response, so ask the scheme to read its own when it is left out. Before
       // settling, so a payment is never captured for a request we then fail.
       const payer = verify.payer ?? scheme.payerOf(payload);
-      payment = { ...payment, payer };
       if (!payer) {
         // Worded as the scheme's verifier words an undecodable transfer, with
         // the protocol-level reason kept in `extensions` for a reader that
@@ -163,6 +165,9 @@ export function paymentRequired<
         req,
       );
       if (merchantRefusal) throw new PaymentRejection(merchantRefusal);
+      // Accepted. Whatever the merchant reserved in there is reserved, so from
+      // here a refusal owes it an undo and carries what to undo it against.
+      payment = { payload, requirements: accepted, payer };
 
       let settleResponse: SettleResponse | undefined;
       if (settle) {

@@ -137,10 +137,20 @@ optional `payment` — the payload, the requirements as `preSettle` received
 them, and the payer. `preSettle`'s docs invite reserving stock or marking an
 order claimed, and settle can fail afterwards; before this there was no way to
 tell which order to release short of decoding the header out of `req` again.
-Absent when nothing was decoded: an unpaid request, a header that would not
-decode, a failure to build the terms. `PaymentRejectionInfo` is generic over
-the scheme's types now, defaulting to canton-exact's. Found in review by
-@dimartiro.
+`PaymentRejectionInfo` is generic over the scheme's types now, defaulting to
+canton-exact's.
+
+It is attached at ONE point, once `preSettle` has accepted, which is where an
+undo starts being owed. The first cut attached it as soon as the shape checks
+passed, and that was a hole: until verify has held the requirements against the
+signed transfer they are whatever the header claimed, so an underpriced payment
+echoing a reference the merchant issued to someone else handed `onReject` that
+reference, and a merchant following the README released an order a different
+payer was paying for — at no cost to the sender, the payment never settling. A
+refusal before that point now carries `reason` and `details` and no `payment`.
+Documented too: a 502 from a settle that threw may mean the answer was lost
+rather than the payment, so an undo there is a choice about which way to be
+wrong. Found in review by @dimartiro.
 
 **One reference per challenge, not one per way to pay.** A reference generator
 may book an order, and a 402 is one sale however many ways it offers to pay for

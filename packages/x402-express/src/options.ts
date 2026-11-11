@@ -188,21 +188,32 @@ export interface PaymentRejectionInfo<
   /** The underlying error, for a 502 or 500. */
   error?: unknown;
   /**
-   * The payment this refusal is about, once one has been decoded and the
-   * scheme has vouched for its shape. Absent for a request that carried none,
-   * one whose header would not decode, and a failure to build the terms.
+   * The payment this refusal is about — present exactly when an undo may be
+   * owed, which is once {@link PaymentRequiredOptions.preSettle} has ACCEPTED
+   * it. So: a settle that failed or threw, and anything that goes wrong after.
+   * Absent for every refusal before that point, `preSettle`'s own included.
    *
-   * It is what lets a merchant undo work {@link PaymentRequiredOptions.preSettle}
-   * did — releasing stock it reserved, reopening an order it marked claimed —
-   * when settle fails afterwards. `requirements.extra` carries whatever
-   * reference the merchant quoted.
+   * It is what lets a merchant undo work `preSettle` did — releasing stock it
+   * reserved, reopening an order it marked claimed. `requirements.extra`
+   * carries whatever reference the merchant quoted, and it is one the payer
+   * signed: verify has held these requirements against the transfer.
+   *
+   * Not attached earlier on purpose. Before verify the requirements are
+   * whatever the header claimed, so an underpriced payment echoing another
+   * order's reference would name that order here and a merchant releasing it
+   * would release someone else's.
+   *
+   * One thing it cannot tell you: a `502` from a settle that threw may still
+   * have gone through on the ledger, the answer having been lost rather than
+   * the payment. Undoing on that one is a decision about which way to be
+   * wrong, not a certainty.
    */
   payment?: {
     payload: TPayload;
     /** The `accepts[]` entry the payer chose, as `preSettle` received it. */
     requirements: TRequirements;
-    /** The verified transfer's sender, once verify has named it. */
-    payer?: string;
+    /** The verified transfer's sender, as `preSettle` received it. */
+    payer: string;
   };
 }
 

@@ -927,15 +927,12 @@ describe("paymentRequired", () => {
       const onReject = vi.fn();
       await request(makeApp({ onReject })).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
       expect(onReject).toHaveBeenCalledOnce();
-      const { payment, ...rest } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
-      expect(rest).toEqual({
+      expect(onReject.mock.calls[0][0]).toEqual({
         status: 402,
         reason: "internal_error",
         details: "authorization_amount_too_low",
         extensions,
       });
-      // The payment it refused travels with it; asserted on its own below.
-      expect(payment?.requirements.payTo).toBe("merchant::x");
     });
 
     it("names the payment a refusal is about, so preSettle's work can be undone", async () => {
@@ -961,6 +958,73 @@ describe("paymentRequired", () => {
       const onReject = vi.fn();
       await request(makeApp({ onReject })).get("/paid").set("PAYMENT-SIGNATURE", "!!!");
       expect(onReject.mock.calls[0][0]).not.toHaveProperty("payment");
+    });
+
+    it("carries no payment for a refusal before preSettle accepted", async () => {
+      // The requirements are the payer's until verify has held them against
+      // the signed transfer. An underpriced payment echoing another order's
+      // reference must not hand that reference to a merchant whose undo would
+      // then release someone else's order — and it costs the payer nothing,
+      // since a refused payment never settles.
+      stubFacilitator();
+      const onReject = vi.fn();
+      await request(makeApp({ settle: true, onReject }))
+        .get("/paid")
+        .set(
+          "PAYMENT-SIGNATURE",
+          paymentHeader({ amount: "1", extra: { ...ECHOED_EXTRA, memo: "someone-elses-order" } }),
+        );
+      const info = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(info.reason).toBe("policy_underpriced");
+      expect(info).not.toHaveProperty("payment");
+    });
+
+    it("carries no payment when verify refuses it", async () => {
+      // Nothing has been held against the transfer, so there is nothing a
+      // merchant could owe an undo for.
+      stubFacilitator({ verify: { isValid: false, invalidReason: "bad_signature" } });
+      const onReject = vi.fn();
+      await request(makeApp({ settle: true, onReject }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-42" } }));
+      expect(onReject.mock.calls[0][0]).not.toHaveProperty("payment");
+    });
+
+    it("carries no payment when preSettle itself refuses", async () => {
+      // preSettle refused, so it knows what it did and did not do; the
+      // middleware naming the payment back at it would only invite an undo of
+      // work that was never done.
+      stubFacilitator();
+      const onReject = vi.fn();
+      await request(makeApp({ settle: true, onReject, preSettle: () => "policy_order_closed" }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-42" } }));
+      const info = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(info.reason).toBe("policy_order_closed");
+      expect(info).not.toHaveProperty("payment");
+    });
+
+    it("names the payment when a settle throws, 502 or not", async () => {
+      // The other half of the undo case: settle did not answer at all. The
+      // refusal still names what preSettle accepted.
+      stubFacilitator();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request) => {
+          if (String(input).includes("/settle")) throw new Error("connection reset");
+          return new Response(JSON.stringify({ isValid: true, payer: "alice::x" }), {
+            headers: { "content-type": "application/json" },
+          });
+        }),
+      );
+      const onReject = vi.fn();
+      const res = await request(makeApp({ settle: true, onReject }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-42" } }));
+      expect(res.status).toBe(502);
+      const { payment } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(payment?.requirements.extra.memo).toBe("order-42");
+      expect(payment?.payer).toBe("alice::x");
     });
 
     it("reports a settle rejection", async () => {
