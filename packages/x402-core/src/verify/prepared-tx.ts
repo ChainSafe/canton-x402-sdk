@@ -50,8 +50,16 @@ export interface DecodedTransfer {
   memo?: string;
 }
 
-/** The metadata key the scheme reserves for the merchant's memo. */
-const MEMO_KEY = "x402.memo";
+/**
+ * The metadata key the scheme reserves for the merchant's memo (Rule 12).
+ *
+ * Exported because the payer that WRITES it and the verifier that READS it
+ * have to name the same key, and two spellings of a string agree only by
+ * luck. The fixtures keep the literal on purpose: something has to pin the
+ * wire value, and a test written in terms of this constant would follow it
+ * wherever it went.
+ */
+export const MEMO_KEY = "x402.memo";
 
 const TRANSFER_CHOICE = "TransferFactory_Transfer";
 

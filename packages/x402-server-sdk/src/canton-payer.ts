@@ -1,6 +1,7 @@
 import {
   ASSET_TRANSFER_METHOD,
   EXACT_SCHEME_ID,
+  MEMO_KEY,
   WIRE_DECIMALS,
   atomicToLedger,
   signHash,
@@ -12,7 +13,7 @@ import {
   type NetworkId,
 } from "@chainsafe/x402-core";
 import type { SDKInterface } from "@canton-network/wallet-sdk";
-import type { X402Payer } from "./payer.js";
+import type { PaymentContext, X402Payer } from "./payer.js";
 
 
 /** The external party's Ed25519 key material (client-side only). */
@@ -69,7 +70,10 @@ export class CantonX402Payer implements X402Payer {
     return match ? new URL(match.registryUrl.toString()) : undefined;
   }
 
-  async authorize(requirements: CantonPaymentRequirements): Promise<CantonPaymentPayload> {
+  async authorize(
+    requirements: CantonPaymentRequirements,
+    context?: PaymentContext,
+  ): Promise<CantonPaymentPayload> {
     // Capability gate — supports() covers scheme + network + transfer method + a configured registry.
     const registryUrl = this.registryFor(requirements.extra.instrumentId);
     if (!this.supports(requirements) || !registryUrl) {
@@ -103,7 +107,7 @@ export class CantonX402Payer implements X402Payer {
       expirationDate: new Date(Date.now() + requirements.extra.executeBeforeSeconds * 1000),
       ...(requirements.extra.memo === undefined
         ? {}
-        : { meta: { values: { "x402.memo": requirements.extra.memo } } }),
+        : { meta: { values: { [MEMO_KEY]: requirements.extra.memo } } }),
     });
 
     // 2. Prepare (interactive submission) → prepared tx + hash to sign.
@@ -123,6 +127,10 @@ export class CantonX402Payer implements X402Payer {
       // scheme and network travel in it, and the merchant forwards it to the
       // facilitator as the requirements to verify against.
       accepted: requirements,
+      // §5.2.2's optional `resource`: what the 402 said this pays for, echoed
+      // back. Omitted when the caller did not say, rather than guessed — a
+      // wrong one is refused by a merchant that checks it.
+      ...(context?.resource ? { resource: context.resource } : {}),
       payload: {
         // transfer.create built a TransferFactory_Transfer, the one method Canton's
         // exact defines.

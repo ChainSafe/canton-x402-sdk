@@ -30,7 +30,6 @@ describe("x402-core wire types", () => {
       asset: "CC",
       extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
       payTo: "merchant::1220dead",
-      resource: "/api/resource",
       maxTimeoutSeconds: 60,
     };
 
@@ -101,7 +100,6 @@ describe("x402-core wire types", () => {
       amount: "1000000",
       asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       payTo: "merchant::1220dead",
-      resource: "/api/resource",
       maxTimeoutSeconds: 60,
       extra: { cantonRecipient: "merchant::1220dead" },
     };
@@ -153,7 +151,6 @@ describe("x402-core wire types", () => {
       asset: "CC",
       extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
       payTo: "merchant::1220dead",
-      resource: "/api/resource",
       maxTimeoutSeconds: 60,
     };
     const bridge: BridgeRequirements = {
@@ -162,7 +159,6 @@ describe("x402-core wire types", () => {
       amount: "1000000",
       asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       payTo: "0xC0ffee",
-      resource: "/api/resource",
       maxTimeoutSeconds: 60,
       extra: { cantonRecipient: "merchant::1220dead" },
     };

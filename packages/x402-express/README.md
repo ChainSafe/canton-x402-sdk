@@ -103,7 +103,7 @@ Verification uses the requirements the payment carries as **`accepted`**, not
 freshly-rebuilt ones: the payer signed a transfer against *those*, and the
 scheme's job is to check the signed transfer against them. They are not
 themselves signed, which is why they are first held against your own terms —
-`scheme`, `network`, `payTo`, `resource`, the instrument (not just its symbol),
+`scheme`, `network`, `payTo`, the instrument (not just its symbol),
 the quoted `executeBeforeSeconds`, `maxTimeoutSeconds`, and an amount that is
 not under the price.
 
@@ -125,8 +125,8 @@ can actually pay.
 
 Canton's `exact` is the default and needs no wiring, but nothing in the
 middleware is canton-shaped. It owns the HTTP flow and the fields x402 v2 gives
-every scheme — `scheme`, `network`, `payTo`, `resource`, `asset`, `amount`,
-`description` and `maxTimeoutSeconds`. A **scheme adapter** owns `extra`:
+every scheme — `scheme`, `network`, `payTo`, `asset`, `amount` and
+`maxTimeoutSeconds`. A **scheme adapter** owns `extra`:
 
 ```ts
 interface SchemeAdapter<TSpec, TRequirements, TPayload> {
@@ -185,7 +185,7 @@ TPayload>` is exported for a route gated on another.
 
 ### `requirements`
 
-A 402 advertises **one resource and a list of ways to pay for it**, which is how x402 v2 §5.1.2 defines it — `PaymentRequirements` carries no resource of its own. The config has the same shape:
+A 402 advertises **one resource and a list of ways to pay for it**, which is how x402 v2 §5.1.2 defines it — `PaymentRequirements` carries no resource of its own, and since #76 neither does ours. `resource` and `description` are named once, on the terms, and appear once, on the 402's top-level `resource`. No `accepts[]` entry repeats them. The config has the same shape:
 
 ```ts
 requirements: {

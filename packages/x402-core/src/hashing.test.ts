@@ -10,7 +10,7 @@ import type { CantonPaymentRequirements } from "./index";
 // requirements — so this test pins byte-for-byte parity. Regenerate ONLY if the facilitator's
 // algorithm intentionally changes (and update the facilitator in lockstep).
 //
-// Last regenerated when `nonce` and `validBefore` were dropped. The hash covers every value in the object, so a new field
+// Last regenerated when `resource` and `description` were dropped (#76). The hash covers every value in the object, so a new field
 // moves it even though the algorithm is untouched. `maxTimeoutSeconds` is the
 // first NUMBER in this vector, so it is also what pins number formatting
 // across the two canonicalizers.
@@ -21,7 +21,6 @@ const REQUIREMENTS: CantonPaymentRequirements = {
   asset: "CC",
   extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
-  resource: "/api/resource",
   maxTimeoutSeconds: 60,
 };
 
@@ -30,9 +29,9 @@ const GOLDEN_CANONICAL =
   '"extra":{"assetTransferMethod":"transfer-factory","executeBeforeSeconds":120,' +
   '"instrumentId":{"admin":"DSO::1220be58c29e","id":"Amulet"}},' +
   '"maxTimeoutSeconds":60,"network":"canton:devnet",' +
-  '"payTo":"merchant::1220dead","resource":"/api/resource","scheme":"exact"}';
+  '"payTo":"merchant::1220dead","scheme":"exact"}';
 
-const GOLDEN_HASH = "e4ac6c7f84ce323b9083e81ab3685422c21b40da659d8f41ee104b021991834e";
+const GOLDEN_HASH = "7ce2010798b65d3c3082b29a8e1071a96191457a844cac4330aa662f4ca9fb54";
 
 describe("requirements hashing — facilitator parity", () => {
   it("canonicalizes to the golden string (keys sorted, nested sorted)", () => {
@@ -47,7 +46,6 @@ describe("requirements hashing — facilitator parity", () => {
     const reordered: CantonPaymentRequirements = {
       extra: REQUIREMENTS.extra,
       scheme: REQUIREMENTS.scheme,
-      resource: REQUIREMENTS.resource,
       payTo: REQUIREMENTS.payTo,
       asset: REQUIREMENTS.asset,
       network: REQUIREMENTS.network,

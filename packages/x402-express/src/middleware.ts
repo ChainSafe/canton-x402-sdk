@@ -25,7 +25,7 @@ import {
   type PaymentRequiredOptions,
   type X402RequestState,
 } from "./options.js";
-import { buildQuotes, type Quote } from "./quotes.js";
+import { buildQuotes, type Offer } from "./quotes.js";
 import { assertAcceptedQuote, rulesFor } from "./policy.js";
 import { PaymentRejection, respondToFailure } from "./response.js";
 
@@ -93,7 +93,7 @@ export function paymentRequired<
     // Built at most once per request, and only when something needs them: a
     // paid request needs terms to hold the payment against, a challenge needs
     // terms to advertise. The failure path reuses whatever was built here.
-    let quotes: Array<Quote<TRequirements>> | undefined;
+    let offer: Offer<TRequirements> | undefined;
     // Kept for the failure path, and set at ONE point: once `preSettle` has
     // accepted. From there on a refusal may be undoing work the merchant
     // already did, and this is what names it. Set any earlier and it would
@@ -137,8 +137,19 @@ export function paymentRequired<
       const payload = decoded as TPayload;
       const accepted = decoded.accepted as TRequirements;
 
-      quotes = await buildQuotes(req, options, scheme);
-      assertAcceptedQuote(accepted, quotes, rules);
+      offer = await buildQuotes(req, options, scheme);
+      assertAcceptedQuote(accepted, offer.quotes, rules);
+
+      // §5.2.2 lets a payment name the resource it is for, and it is the only
+      // place one reaches us from the payer — `accepted` is a
+      // PaymentRequirements, which carries none. Optional, so naming none is
+      // fine; naming another resource is refused. Echo fidelity, not a
+      // binding: nothing the payer sends is signed, and `extra.memo` is what
+      // ties a payment to one challenge.
+      const named = payload.resource?.url;
+      if (named !== undefined && named !== offer.resource.url) {
+        throw new PaymentRejection("policy_resource");
+      }
 
       const verify = await facilitator.verify(payload, accepted);
       if (!verify.isValid) {
@@ -199,7 +210,7 @@ export function paymentRequired<
       } as X402RequestState;
       next();
     } catch (err) {
-      await respondToFailure(err, req, res, options, scheme, quotes, payment);
+      await respondToFailure(err, req, res, options, scheme, offer, payment);
     }
   };
 }

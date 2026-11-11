@@ -183,7 +183,6 @@ describe("shape guards + scheme/network match", () => {
     network: "canton:devnet",
     amount: "100000000",
     payTo: "merchant::1220x",
-    resource: "/r",
     maxTimeoutSeconds: 60,
     asset: "CC",
     extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220x" } },

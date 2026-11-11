@@ -23,9 +23,12 @@
 // Isomorphic on purpose (browser + node): base64 via btoa/atob, UTF-8 via
 // TextEncoder/TextDecoder — no Node Buffer.
 
-import { isX402PaymentPayload } from "./types";
+import { isX402PaymentPayload, isX402PaymentRequiredResponse } from "./types";
 import type { CantonPaymentPayload } from "./types/payment";
-import type { X402PaymentRequiredResponse } from "./types/requirements";
+import type {
+  CantonPaymentRequiredResponse,
+  X402PaymentRequiredResponse,
+} from "./types/requirements";
 
 /**
  * The deepest a decoded payment may nest. A real one is a handful of levels
@@ -55,6 +58,52 @@ export function encodePaymentRequiredHeader<TRequirements>(
   paymentRequired: X402PaymentRequiredResponse<TRequirements>,
 ): string {
   return bytesToBase64(new TextEncoder().encode(JSON.stringify(paymentRequired)));
+}
+
+/**
+ * Parse a `PAYMENT-REQUIRED` header value into the `PaymentRequired` it carries.
+ *
+ * The counterpart of {@link encodePaymentRequiredHeader}, and the way a client
+ * should read a 402: the HTTP transport makes the header the canonical
+ * location and calls the response body a server implementation concern, so a
+ * merchant may well answer `{}` — every registered Canton merchant does.
+ *
+ * Throws on bad base64 / JSON, on nesting past {@link MAX_PAYMENT_DEPTH}, or
+ * when the value is not an x402 v2 `PaymentRequired` (version 2, a `resource`
+ * with a `url`, and an `accepts[]` whose entries carry the fields every
+ * scheme's requirements share).
+ *
+ * Validation is envelope-level and scheme-agnostic, as {@link
+ * decodePaymentHeader}'s is: a 402 may offer canton-exact beside another
+ * scheme, and reading each entry as canton-exact would throw out an offer over
+ * an entry this reader was never going to pay. Typed as canton-exact for
+ * caller convenience, which is optimistic — a caller picking an entry must
+ * still check its own scheme can pay it.
+ */
+export function decodePaymentRequiredHeader(headerValue: string): CantonPaymentRequiredResponse {
+  let raw: string;
+  try {
+    raw = new TextDecoder().decode(base64ToBytes(headerValue));
+  } catch (err) {
+    throw new Error(`PAYMENT-REQUIRED header is not valid base64: ${errMsg(err)}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`PAYMENT-REQUIRED header is not valid JSON: ${errMsg(err)}`);
+  }
+  if (nestsDeeperThan(parsed, MAX_PAYMENT_DEPTH)) {
+    throw new Error(`PAYMENT-REQUIRED header nests deeper than ${MAX_PAYMENT_DEPTH} levels`);
+  }
+  if (!isX402PaymentRequiredResponse(parsed)) {
+    throw new Error(
+      "PAYMENT-REQUIRED header is not an x402 v2 PaymentRequired (x402Version 2, resource, accepts)",
+    );
+  }
+  // Optimistically typed as canton-exact, as the payment decoder is: whether
+  // an entry is one this reader can pay is checked per entry, by the payer.
+  return parsed as CantonPaymentRequiredResponse;
 }
 
 /**

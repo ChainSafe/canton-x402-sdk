@@ -25,7 +25,7 @@ server (step 4).
    carries `scheme`,
    `network`, `amount`, `asset`, `extra.assetTransferMethod`,
    `extra.instrumentId`, `extra.executeBeforeSeconds` (120 by default, and
-   optionally an `extra.memo`), `payTo` (your Canton party), `resource` and a
+   optionally an `extra.memo`), `payTo` (your Canton party) and a
    `maxTimeoutSeconds` (60 by default).
 
 2. **Payer builds the transfer**
@@ -54,7 +54,7 @@ server (step 4).
 5. **Merchant verifies, then settles**
 
    Your middleware re-checks the payment against your own terms — scheme,
-   network, `payTo`, resource, asset, `maxTimeoutSeconds`, and that it is
+   network, `payTo`, asset, `maxTimeoutSeconds`, and that it is
    neither underpriced nor expired — using the exact requirements the payment was built against, its
    `accepted`, which the facilitator then holds the signed transfer to, so a
    payment built for other terms can't pass. It then POSTs

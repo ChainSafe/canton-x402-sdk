@@ -3,6 +3,7 @@ import {
   encodePaymentHeader,
   decodePaymentHeader,
   encodePaymentRequiredHeader,
+  decodePaymentRequiredHeader,
   MAX_PAYMENT_DEPTH,
 } from "./payment-header";
 import { isCantonPaymentRequiredResponse } from "./index";
@@ -15,7 +16,6 @@ const requirements: CantonPaymentRequirements = {
   asset: "CC",
   extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220x" } },
   payTo: "merchant::1220x",
-  resource: "/r",
   maxTimeoutSeconds: 60,
 };
 
@@ -163,5 +163,72 @@ describe("PAYMENT-REQUIRED codec", () => {
   it("encodes non-ASCII as UTF-8", () => {
     const p = { ...paymentRequired, resource: { url: "https://merchant.example/r", description: "Café crème ☕" } };
     expect(read(encodePaymentRequiredHeader(p))).toEqual(p);
+  });
+});
+
+describe("decodePaymentRequiredHeader", () => {
+  const offer = {
+    x402Version: 2 as const,
+    resource: { url: "https://merchant.example/r", description: "A report" },
+    accepts: [requirements],
+    error: "payment_required",
+  };
+
+  it("round-trips what encodePaymentRequiredHeader wrote", () => {
+    expect(decodePaymentRequiredHeader(encodePaymentRequiredHeader(offer))).toEqual(offer);
+  });
+
+  it("takes a 402 offering a scheme it does not know, beside one it does", async () => {
+    // A merchant may advertise canton-exact beside another scheme. Reading
+    // every entry as canton-exact would throw the whole offer out over one
+    // this reader was never going to pay, leaving nothing to pay with.
+    const evm = {
+      scheme: "exact",
+      network: "eip155:8453",
+      amount: "250000",
+      asset: "0xA0b8…",
+      payTo: "0xmerchant",
+      maxTimeoutSeconds: 120,
+      extra: { name: "USD Coin", version: "2" },
+    };
+    const mixed = { ...offer, accepts: [requirements, evm] };
+    const decoded = decodePaymentRequiredHeader(
+      encodePaymentRequiredHeader(mixed as never),
+    );
+    expect(decoded.accepts).toHaveLength(2);
+    expect(decoded.accepts.map((a) => a.network)).toEqual([requirements.network, "eip155:8453"]);
+    // An offer of ONLY the other scheme decodes too: which entries are payable
+    // is the payer's question, not the codec's.
+    expect(
+      decodePaymentRequiredHeader(
+        encodePaymentRequiredHeader({ ...offer, accepts: [evm] } as never),
+      ).accepts,
+    ).toHaveLength(1);
+  });
+
+  it("refuses base64 that is not an x402 v2 PaymentRequired", () => {
+    const b64 = (v: unknown) => btoa(JSON.stringify(v));
+    for (const bad of [
+      { x402Version: 1, resource: offer.resource, accepts: [requirements] },
+      { x402Version: 2, accepts: [requirements] },
+      { x402Version: 2, resource: { description: "no url" }, accepts: [requirements] },
+      { x402Version: 2, resource: offer.resource },
+      // The payment envelope, not the offer — a reader must not confuse them.
+      { x402Version: 2, accepted: requirements, payload: {} },
+    ]) {
+      expect(() => decodePaymentRequiredHeader(b64(bad))).toThrow(/not an x402 v2 PaymentRequired/);
+    }
+  });
+
+  it("refuses bad base64 and bad JSON, naming which", () => {
+    expect(() => decodePaymentRequiredHeader("!!!")).toThrow(/not valid base64|not valid JSON/);
+    expect(() => decodePaymentRequiredHeader(btoa("{nope"))).toThrow(/not valid JSON/);
+  });
+
+  it("refuses one nested deeper than MAX_PAYMENT_DEPTH", () => {
+    let deep: unknown = "x";
+    for (let i = 0; i < MAX_PAYMENT_DEPTH + 2; i++) deep = { deep };
+    const bad = btoa(JSON.stringify({ ...offer, extensions: deep }));
+    expect(() => decodePaymentRequiredHeader(bad)).toThrow(/nests deeper than/);
   });
 });

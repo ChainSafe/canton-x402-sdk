@@ -74,7 +74,6 @@ describe("findTransferMismatch", () => {
     asset: "CC",
     extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
     payTo: "merchant::1220dead",
-    resource: "/api/resource",
     maxTimeoutSeconds: 60,
   };
   const ok: DecodedTransfer = {

@@ -94,7 +94,20 @@ export type RequirementsSpec<TSpec extends BaseRequirementsSpec = CantonRequirem
  */
 export type RequirementsBuilder<
   TRequirements extends X402PaymentRequirements<unknown> = CantonPaymentRequirements,
-> = (req: Request) => TRequirements[] | Promise<TRequirements[]>;
+> = (req: Request) => BuiltRequirements<TRequirements> | Promise<BuiltRequirements<TRequirements>>;
+
+/**
+ * What a builder returns: the ways to pay, and optionally the resource they are
+ * for.
+ *
+ * A bare array is the common case and keeps the resource implicit — the request
+ * URL. Name it with the object form, which is the only way a builder can, since
+ * `resource` is not a field of `PaymentRequirements` (x402 v2 §5.1.2 leaves it
+ * to `PaymentRequired`).
+ */
+export type BuiltRequirements<TRequirements> =
+  | TRequirements[]
+  | { resource?: string; description?: string; accepts: TRequirements[] };
 
 /** Configuration for `paymentRequired`. */
 export interface PaymentRequiredOptions<

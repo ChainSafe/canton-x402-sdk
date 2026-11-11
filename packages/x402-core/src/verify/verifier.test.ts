@@ -60,7 +60,6 @@ async function buildSignedFixture(overrides: { executeBeforeSeconds?: number; me
       ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
     },
     payTo: "merchant::1220merch",
-    resource: "/api/resource",
     maxTimeoutSeconds: 60,
   };
 

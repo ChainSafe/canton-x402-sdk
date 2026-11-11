@@ -31,12 +31,6 @@ const COMMON_RULES: Record<
   scheme: { compare: "equal", reason: "policy_scheme" },
   network: { compare: "equal", reason: "policy_network" },
   payTo: { compare: "equal", reason: "policy_payTo" },
-  // The resource the quote names must be the one the payment echoed. Echo
-  // fidelity only: `resource` never reaches the ledger, so unlike `payTo` and
-  // `amount` — which the verifier reads off the signed transfer — nothing
-  // binds it. This catches a client re-sending another route's terms, not a
-  // payer intent on replaying one.
-  resource: { compare: "equal", reason: "policy_resource" },
   asset: { compare: "equal", reason: "policy_asset" },
   // Overpaying is the payer's business; underpaying is not. Compared as BigInt,
   // because atomic units are 1e10 larger than the token amount — anything over
@@ -49,9 +43,6 @@ const COMMON_RULES: Record<
   },
   // Replaced per scheme in rulesFor().
   extra: { compare: "skip", why: "filled in from the scheme adapter" },
-  // Does not reach the ledger, so it does not change what settles. Left
-  // uncompared so a payer library that normalises or drops it still pays.
-  description: { compare: "skip", why: "informational" },
   // The seconds the client is given to complete payment. It never reaches the
   // ledger — `extra.executeBeforeSeconds` is the deadline that does — so it is
   // compared for echo fidelity: the payer does not get to name its own.

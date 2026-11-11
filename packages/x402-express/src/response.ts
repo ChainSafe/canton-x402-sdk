@@ -11,6 +11,7 @@ import type { Request, Response } from "express";
 import {
   encodePaymentRequiredHeader,
   type X402PaymentPayload,
+  type ResourceInfo,
   type X402PaymentRequiredResponse,
   type X402PaymentRequirements,
 } from "@chainsafe/x402-core";
@@ -18,7 +19,7 @@ import { FacilitatorError } from "@chainsafe/x402-client";
 
 import type { BaseRequirementsSpec, SchemeAdapter } from "./scheme.js";
 import type { PaymentRejectionInfo, PaymentRequiredOptions } from "./options.js";
-import { absoluteUrl, buildQuotes, issueChallenge, type Quote } from "./quotes.js";
+import { buildQuotes, issueChallenge, type Offer } from "./quotes.js";
 
 /**
  * Internal control-flow signal: answer this request with a 402.
@@ -47,7 +48,7 @@ export async function respondToFailure<
   res: Response,
   options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>,
   scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
-  built: Array<Quote<TRequirements>> | undefined,
+  built: Offer<TRequirements> | undefined,
   // What the flow had decoded when it gave up, so a merchant can tell which
   // payment a refusal is about. Absent until `preSettle` has accepted it.
   payment: PaymentRejectionInfo<TRequirements, TPayload>["payment"],
@@ -56,8 +57,8 @@ export async function respondToFailure<
 
   if (err instanceof PaymentRejection) {
     try {
-      const accepts = await issueChallenge(built ?? (await buildQuotes(req, options, scheme)));
-      respond402(res, accepts, err.reason, err.details, absoluteUrl(req));
+      const offer = built ?? (await buildQuotes(req, options, scheme));
+      respond402(res, offer.resource, await issueChallenge(offer.quotes), err.reason, err.details);
       // A bare challenge (no payment yet) is the normal flow, not a rejection.
       if (err.reason !== "payment_required") {
         rejection = {
@@ -112,22 +113,14 @@ function sendNonPaymentError(res: Response, err: unknown): Omit<PaymentRejection
  */
 function respond402<TRequirements extends X402PaymentRequirements<unknown>>(
   res: Response,
+  resource: ResourceInfo,
   accepts: TRequirements[],
   error: string,
   details: string | undefined,
-  requestUrl: string,
 ): void {
-  // The envelope names one resource: the first entry's, since shared terms put
-  // the same value on every entry. buildQuotes never returns an empty list, so
-  // there is always a first; `resource` is optional only on the envelope type,
-  // and quotes.ts defaults it to this same URL.
-  const [first] = accepts;
   const paymentRequired: X402PaymentRequiredResponse<TRequirements> = {
     x402Version: 2,
-    resource: {
-      url: first?.resource ?? requestUrl,
-      ...(first?.description ? { description: first.description } : {}),
-    },
+    resource,
     accepts,
     error,
   };
