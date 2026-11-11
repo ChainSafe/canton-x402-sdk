@@ -1,441 +1,205 @@
+// The request lifecycle: challenge, verify, settle, or refuse.
+//
+// What is here is the protocol's, whatever the scheme — when a challenge is
+// issued, which advertised quote a payment is for, what reaches the
+// facilitator, and what each failure answers. A scheme owns `extra` and is
+// reached only through the adapter; see scheme.ts.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import {
-  ASSET_TRANSFER_METHOD,
-  assetSymbol,
-  decodePayloadTransfer,
-  isCantonPaymentRequirements,
-  isValidAmount,
   decodePaymentHeader,
-  encodePaymentRequiredHeader,
-  type AssetSpec,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
   type SettleResponse,
-  type VerifyResponse,
-  type X402PaymentRequiredResponse,
+  type X402PaymentPayload,
+  type X402PaymentRequirements,
 } from "@chainsafe/x402-core";
-import { FacilitatorError, type FacilitatorClient } from "@chainsafe/x402-client";
 
-/** A fixed value, or one computed per request. */
-export type Resolvable<T> = T | ((req: Request) => T | Promise<T>);
-
-/**
- * Declarative requirements: the middleware applies the defaults. Fields may be a
- * fixed value or a per-request resolver.
- */
-export interface RequirementsSpec {
-  /** Merchant party receiving payment. */
-  payTo: Resolvable<string>;
-  /** Asset to charge in. */
-  asset: Resolvable<AssetSpec>;
-  /** Network id — on Canton a `canton:<name>` from x402-core's networks. */
-  network: Resolvable<string>;
-  /**
-   * Price in **atomic units**, as an integer string: 1 CC = 1e10, so
-   * `"500000000"` is 0.05 CC. The same unit the wire carries — the middleware
-   * does not convert, so a quote means the same thing here as in a
-   * {@link RequirementsBuilder} or in an echoed requirement.
-   */
-  amount: Resolvable<string>;
-  /** Scheme id. Default `exact`. */
-  scheme?: Resolvable<string>;
-  /** Resource URL. Default: the request's absolute URL. */
-  resource?: Resolvable<string>;
-  /** Human description. Default: `Access to <path>`. */
-  description?: Resolvable<string>;
-  /**
-   * Seconds the client has to complete payment. Default 60. Advisory: nothing
-   * refuses a payment for exceeding it.
-   */
-  maxTimeoutSeconds?: Resolvable<number>;
-  /**
-   * Seconds of life the payer gives the transfer it signs. Default 120. Unlike
-   * `maxTimeoutSeconds` this one reaches the ledger, as the transfer's
-   * `executeBefore`, and the verifier refuses a transfer already inside its
-   * last few seconds. It is the only deadline left in the protocol.
-   */
-  executeBeforeSeconds?: Resolvable<number>;
-  /**
-   * Generate (and, if you want, persist) the merchant reference for this
-   * challenge — an order or payment id to reconcile against. Called once per
-   * challenge, so it SHOULD return a value that identifies this one. Quoting a
-   * memo BINDS it: the payer must sign the identical value or verification
-   * refuses the payment, which is what makes it usable as a reconciliation key
-   * and as a replay key. UTF-8, at most 256 bytes. Omit it to quote none.
-   *
-   * (Function-only by design: a static value would tag every payment alike,
-   * which is the one thing reference data must not do.)
-   */
-  memo?: (req: Request) => string | Promise<string>;
-}
-
-/**
- * Full control: build the entire `PaymentRequirements` per request, `extra`
- * included.
- */
-export type RequirementsBuilder = (
-  req: Request,
-) => CantonPaymentRequirements | Promise<CantonPaymentRequirements>;
-
-/** Configuration for {@link paymentRequired}. */
-export interface PaymentRequiredOptions {
-  /** Client used to verify (and optionally settle) payments against the facilitator. */
-  facilitator: FacilitatorClient;
-  /** Capture the payment (call the facilitator's /v2/settle) after a valid verify. Default `false`. */
-  settle?: boolean;
-  /** How to produce the PaymentRequirements: a declarative spec, or a full builder. */
-  requirements: RequirementsSpec | RequirementsBuilder;
-  /**
-   * Your own say on a paid request, run after the echoed requirements pass
-   * merchant policy and before verify — so before any settle. Return a short
-   * reason to refuse it (answered as a `402` carrying that code), or nothing
-   * to let it through.
-   *
-   * This is where merchant state goes, because the middleware has none. It
-   * rebuilds the quote on every request, so it can tell you the payer echoed
-   * *a* memo, but not whether it is one you issued; it knows the price it
-   * quotes now, but not whether that order is still open. Those are questions
-   * only your records answer:
-   *
-   * ```ts
-   * checkPayment: async ({ requirements }) => {
-   *   const order = await orders.findByRef(requirements.extra.memo);
-   *   if (!order) return "policy_memo_unknown";
-   *   if (order.status !== "awaiting-payment") return "policy_order_closed";
-   * },
-   * ```
-   */
-  checkPayment?: (
-    payment: { payload: CantonPaymentPayload; requirements: CantonPaymentRequirements },
-    req: Request,
-  ) => string | undefined | Promise<string | undefined>;
-  /** Extra `accepts[]` entries for the 402 body (e.g. an alternate scheme). */
-  additionalAccepts?: (req: Request) => CantonPaymentRequirements[] | Promise<CantonPaymentRequirements[]>;
-  /**
-   * Called after the middleware rejects a payment it was handed (402), or fails
-   * on the facilitator (502) or its own config (500) — e.g. to log it. Not called
-   * for the plain 402 challenge to a request without a payment. The middleware
-   * logs nothing itself. A throw (or a rejected promise from an async hook) is
-   * swallowed so it can't break the response or crash the process.
-   */
-  onReject?: (rejection: PaymentRejectionInfo, req: Request) => void | Promise<void>;
-}
-
-/** What {@link PaymentRequiredOptions.onReject} receives. */
-export interface PaymentRejectionInfo {
-  /** HTTP status sent: 402 (payment rejected), 502 (facilitator error), 500 (middleware error). */
-  status: 402 | 502 | 500;
-  /** The `error` code in the response body (e.g. `invalid_exact_canton_signature_invalid`, `facilitator_error`). */
-  reason: string;
-  /** The `details` string in the response body, when there is one. */
-  details?: string;
-  /**
-   * For a verify rejection, the facilitator's full `extensions` (may hold more
-   * than `details`, and `reason` holds the code it answered with before the
-   * spec's). The middleware's own refusal of a transfer it cannot decode sets
-   * one in the same shape.
-   */
-  extensions?: Record<string, unknown>;
-  /** The underlying error, for a 502 or 500. */
-  error?: unknown;
-}
-
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Express {
-    interface Request {
-      x402?: {
-        /** The signed transfer's sender: `verify.payer`, or read from the payload when the facilitator leaves it out. */
-        payer: string;
-        requirements: CantonPaymentRequirements;
-        payload: CantonPaymentPayload;
-        verify: VerifyResponse;
-        settle?: SettleResponse;
-      };
-    }
-  }
-}
-
-const DEFAULT_SCHEME = "exact";
-const DEFAULT_MAX_TIMEOUT_SECONDS = 60;
-const DEFAULT_EXECUTE_BEFORE_SECONDS = 120;
-
-/** Internal control-flow signal: reject the request with a 402, echoing `requirements`. */
-class PaymentRejection extends Error {
-  constructor(
-    readonly reason: string,
-    readonly requirements: CantonPaymentRequirements,
-    readonly details?: string,
-    readonly extensions?: Record<string, unknown>,
-  ) {
-    super(reason);
-  }
-}
+import type { BaseRequirementsSpec, SchemeAdapter } from "./scheme.js";
+import { cantonExact, type CantonRequirementsSpec } from "./schemes/canton-exact.js";
+import {
+  assertUsableTerms,
+  type PaymentRejectionInfo,
+  type PaymentRequiredOptions,
+  type X402RequestState,
+} from "./options.js";
+import { buildQuotes, type Quote } from "./quotes.js";
+import { assertAcceptedQuote, rulesFor } from "./policy.js";
+import { PaymentRejection, respondToFailure } from "./response.js";
 
 /**
  * Express middleware that gates a route behind an x402 payment.
  *
- * - No/invalid payment in `PAYMENT-SIGNATURE` (or the older `X-PAYMENT`) → `402`
- *   with the spec's `PaymentRequired`,
- *   `{ x402Version, resource, accepts: [requirements] }`, in the
- *   `PAYMENT-REQUIRED` header and as the body.
+ * Two signatures: the first is the default canton-exact scheme, which keeps the
+ * concrete types so an inline spec is contextually typed against them. The
+ * second is the generic one, for a route gated on another scheme via
+ * `PaymentRequiredOptions.scheme`.
+ *
+ * - No/invalid payment in `PAYMENT-SIGNATURE` (or the older `X-PAYMENT`) →
+ *   `402` with the spec's `PaymentRequired`, `{ x402Version, resource, accepts }`,
+ *   in the `PAYMENT-REQUIRED` header and as the body. One `accepts[]` entry per
+ *   way to pay; entries sharing a reference generator are issued one freshly
+ *   minted reference between them, a 402 being one sale.
  * - Valid payment → verify (and optionally settle) via the facilitator, then
  *   attach `req.x402` and call `next()`.
  *
  * @example
- * const facilitator = new FacilitatorClient("https://x402.example.com", {
- *   apiKey: process.env.FACILITATOR_API_KEY!,
- * });
  * app.use("/paid", paymentRequired({
  *   facilitator,
  *   settle: true,
  *   requirements: {
- *     network: "canton:devnet",
  *     payTo: "merchant::1220…",
- *     asset: { instrumentId: { id: "Amulet", admin: "DSO::1220…" } },
- *     amount: "500000000", // atomic units — 1 CC = 1e10, so this is 0.05 CC
+ *     resource: "https://merchant.example/report",
+ *     accepts: [
+ *       { amount: "500000000", asset: "Amulet" }, // 0.05 CC
+ *       { amount: "250000", asset: "USDCx" },     // priced separately
+ *     ],
  *   },
  * }));
  */
-export function paymentRequired(options: PaymentRequiredOptions): RequestHandler {
+export function paymentRequired(options: PaymentRequiredOptions): RequestHandler;
+// `scheme` is required here, and that is load-bearing rather than tidiness: a
+// canton call with an incomplete way to pay would otherwise fall through to
+// this overload, infer TSpec from whatever it was given, and typecheck — then
+// fail at mount. Without a scheme there is only one overload to fail against.
+export function paymentRequired<
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  options: PaymentRequiredOptions<TSpec, TRequirements, TPayload> & {
+    scheme: SchemeAdapter<TSpec, TRequirements, TPayload>;
+  },
+): RequestHandler;
+export function paymentRequired<
+  TSpec extends BaseRequirementsSpec = CantonRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown> = CantonPaymentRequirements,
+  TPayload extends X402PaymentPayload<unknown> = CantonPaymentPayload,
+>(options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>): RequestHandler {
   const { facilitator } = options;
   const settle = options.settle ?? false;
+  const scheme = (options.scheme ?? cantonExact) as unknown as SchemeAdapter<
+    TSpec,
+    TRequirements,
+    TPayload
+  >;
+  const rules = rulesFor(scheme);
+  // Merchant config, so it is checked here, once, and not per request.
+  assertUsableTerms(options.requirements, scheme);
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    let extraAccepts: CantonPaymentRequirements[] = [];
+    // Built at most once per request, and only when something needs them: a
+    // paid request needs terms to hold the payment against, a challenge needs
+    // terms to advertise. The failure path reuses whatever was built here.
+    let quotes: Array<Quote<TRequirements>> | undefined;
+    // Kept for the failure path, and set at ONE point: once `preSettle` has
+    // accepted. From there on a refusal may be undoing work the merchant
+    // already did, and this is what names it. Set any earlier and it would
+    // name a payment nothing has checked — an underpriced header echoing
+    // another order's reference would hand `onReject` that reference, and a
+    // merchant releasing it would release someone else's.
+    let payment: PaymentRejectionInfo<TRequirements, TPayload>["payment"];
     try {
-      const fresh = await buildRequirements(req, options);
-      // Advertised in the same 402, so held to the same rule.
-      extraAccepts = options.additionalAccepts
-        ? (await options.additionalAccepts(req)).map(assertAtomicAmount)
-        : [];
-
       // The spec's name first. X-PAYMENT is the name this SDK used before, and
       // is still read for a payment of this shape sent under it. A 0.1.x payer
       // sends the older { payment, requirements } shape, which is refused
       // either way.
       const header = req.header("PAYMENT-SIGNATURE") || req.header("X-PAYMENT");
-      if (!header) throw new PaymentRejection("payment_required", fresh);
+      // No payment yet. Nothing is built for the terms' own sake — the
+      // challenge below is what gets built, references and all.
+      if (!header) throw new PaymentRejection("payment_required");
 
-      // The payment carries the requirements it was built against as `accepted`,
-      // the accepts[] entry the payer chose. Verify against those, after checking
-      // them against merchant policy. Nothing in the payment binds them on its
-      // own — what binds is the signed transfer the verifier decodes and compares
-      // to them.
-      let payload: CantonPaymentPayload;
+      // The payment carries the requirements it was built against as
+      // `accepted`, the accepts[] entry the payer chose. Verify against those,
+      // after checking them against merchant policy. Nothing in the payment
+      // binds them on its own — what binds is the signed transfer the verifier
+      // decodes and compares to them.
+      let decoded: X402PaymentPayload<unknown>;
       try {
-        payload = decodePaymentHeader(header);
+        decoded = decodePaymentHeader(header);
       } catch {
-        throw new PaymentRejection("bad_payload", fresh);
-      }
-      // The codec checks `accepted` only for the fields every scheme's
-      // requirements share, and types it optimistically; `extra` and `resource`
-      // have not been checked. Narrow before reading them, or one without
-      // `extra` throws a TypeError and answers 500 instead of 402 —
-      // attacker-controlled input choosing our status code.
-      const requirements: unknown = payload.accepted;
-      if (!isCantonPaymentRequirements(requirements)) {
-        throw new PaymentRejection("policy_requirements_invalid", fresh);
+        throw new PaymentRejection("bad_payload");
       }
 
-      const policyError = validateEchoedRequirements(requirements, fresh);
-      if (policyError) throw new PaymentRejection(policyError, fresh);
+      // The codec checks the envelope only: `payload.payload` is `{}` as far as
+      // it is concerned, `accepted` is checked for the fields every scheme's
+      // requirements share, and neither `extra` nor `resource` is checked at
+      // all. It types the result optimistically; these guards are the only
+      // things that have looked. Narrow before reading a field, or
+      // attacker-controlled input picks our status code by throwing a
+      // TypeError into the 500 path.
+      if (!scheme.acceptsPayload(decoded)) throw new PaymentRejection("policy_payload_invalid");
+      if (!scheme.acceptsRequirements(decoded.accepted)) {
+        throw new PaymentRejection("policy_requirements_invalid");
+      }
+      const payload = decoded as TPayload;
+      const accepted = decoded.accepted as TRequirements;
 
-      // The merchant's own checks, on everything the payer sent. Placed here so
-      // a refusal costs no verify and, above all, no settle.
-      const refusal = await options.checkPayment?.({ payload, requirements }, req);
-      if (refusal) throw new PaymentRejection(refusal, fresh);
+      quotes = await buildQuotes(req, options, scheme);
+      assertAcceptedQuote(accepted, quotes, rules);
 
-      // On any rejection, advertise `fresh` (this request's current terms) —
-      // never the client's echoed requirements. Those are what the client just
-      // failed on, and a merchant that issues a memo per challenge would be
-      // handing a retrying agent back a reference it has already used.
-      const verify = await facilitator.verify(payload, requirements);
+      const verify = await facilitator.verify(payload, accepted);
       if (!verify.isValid) {
         const detail = verify.extensions?.detail;
         throw new PaymentRejection(
           verify.invalidReason ?? "verify_failed",
-          fresh,
           typeof detail === "string" ? detail : undefined,
           verify.extensions,
         );
       }
-      // The payload names no payer: it is the signed transfer's sender (spec
+
+      // The payload names no payer — it is the signed transfer's sender (spec
       // Rule 8), which the facilitator reports. `payer` is optional in a verify
-      // response, so read the same sender here when it is left out — before
+      // response, so ask the scheme to read its own when it is left out. Before
       // settling, so a payment is never captured for a request we then fail.
-      const payer = verify.payer ?? decodePayloadTransfer(payload.payload.preparedTransaction)?.sender;
+      const payer = verify.payer ?? scheme.payerOf(payload);
       if (!payer) {
-        // Worded as the verifier words an undecodable transfer.
-        throw new PaymentRejection("invalid_exact_canton_malformed_payload", fresh, "undecodable", {
-          reason: "transfer_mismatch",
-          detail: "undecodable",
-        });
+        // Worded as the scheme's verifier words an undecodable transfer, with
+        // the protocol-level reason kept in `extensions` for a reader that
+        // knows that one and not the scheme's.
+        throw new PaymentRejection(
+          scheme.unreadablePayerReason ?? "transfer_mismatch",
+          "undecodable",
+          { reason: "transfer_mismatch", detail: "undecodable" },
+        );
       }
+
+      // The merchant's own say, on a payment the facilitator has vouched for:
+      // after verify, so `accepted` is bound to the signed transfer and
+      // `payer` is known, and before settle, so a refusal moves no funds.
+      const merchantRefusal = await options.preSettle?.(
+        { payload, requirements: accepted, payer, verify },
+        req,
+      );
+      if (merchantRefusal) throw new PaymentRejection(merchantRefusal);
+      // Accepted. Whatever the merchant reserved in there is reserved, so from
+      // here a refusal owes it an undo and carries what to undo it against.
+      payment = { payload, requirements: accepted, payer };
 
       let settleResponse: SettleResponse | undefined;
       if (settle) {
-        settleResponse = await facilitator.settle(payload, requirements);
+        settleResponse = await facilitator.settle(payload, accepted);
         if (!settleResponse.success) {
-          throw new PaymentRejection(settleResponse.errorReason ?? "settle_failed", fresh, settleResponse.errorDetails);
+          throw new PaymentRejection(
+            settleResponse.errorReason ?? "settle_failed",
+            settleResponse.errorDetails,
+          );
         }
         res.setHeader("X-PAYMENT-RESPONSE", settleResponse.transaction);
       }
 
-      req.x402 = { payer, requirements, payload, verify, settle: settleResponse };
+      req.x402 = {
+        payer,
+        requirements: accepted,
+        payload,
+        verify,
+        settle: settleResponse,
+      } as X402RequestState;
       next();
     } catch (err) {
-      let rejection: PaymentRejectionInfo | undefined;
-      if (err instanceof PaymentRejection) {
-        respond402(res, err.requirements, err.reason, err.details, extraAccepts);
-        // A bare challenge (no payment yet) is the normal flow, not a rejection.
-        if (err.reason !== "payment_required") {
-          rejection = { status: 402, reason: err.reason, details: err.details, extensions: err.extensions };
-        }
-      } else if (err instanceof FacilitatorError) {
-        res.status(502).json({ error: "facilitator_error", status: err.status, details: err.message });
-        rejection = { status: 502, reason: "facilitator_error", details: err.message, error: err };
-      } else {
-        // Misconfiguration (e.g. invalid amount) or an unexpected throw.
-        res.status(500).json({ error: "x402_middleware_error", details: errMsg(err) });
-        rejection = { status: 500, reason: "x402_middleware_error", details: errMsg(err), error: err };
-      }
-      if (rejection && options.onReject) {
-        // A failing hook must not affect the response, which is already sent.
-        const onReject = options.onReject;
-        void Promise.resolve()
-          .then(() => onReject(rejection, req))
-          .catch(() => {});
-      }
+      await respondToFailure(err, req, res, options, scheme, quotes, payment);
     }
   };
-}
-
-async function buildRequirements(
-  req: Request,
-  options: PaymentRequiredOptions,
-): Promise<CantonPaymentRequirements> {
-  const source = options.requirements;
-  if (typeof source === "function") return assertAtomicAmount(await source(req));
-
-  const amount = await resolve(source.amount, req);
-  const instrument = await resolve(source.asset, req);
-  return assertAtomicAmount({
-    scheme: await resolve(source.scheme ?? DEFAULT_SCHEME, req),
-    network: await resolve(source.network, req),
-    amount,
-    // The merchant declares the instrument; the spec's `asset` is only a
-    // symbol, so the full `{admin, id}` travels where a payer can read it.
-    asset: assetSymbol(instrument.instrumentId),
-    extra: {
-      assetTransferMethod: ASSET_TRANSFER_METHOD,
-      instrumentId: instrument.instrumentId,
-      executeBeforeSeconds: source.executeBeforeSeconds
-        ? await resolve(source.executeBeforeSeconds, req)
-        : DEFAULT_EXECUTE_BEFORE_SECONDS,
-      ...(source.memo ? { memo: await source.memo(req) } : {}),
-    },
-    payTo: await resolve(source.payTo, req),
-    resource: source.resource ? await resolve(source.resource, req) : absoluteUrl(req),
-    description: source.description ? await resolve(source.description, req) : `Access to ${req.path}`,
-    maxTimeoutSeconds: source.maxTimeoutSeconds
-      ? await resolve(source.maxTimeoutSeconds, req)
-      : DEFAULT_MAX_TIMEOUT_SECONDS,
-  });
-}
-
-/**
- * Every requirement this middleware advertises must carry an atomic amount.
- *
- * Checked here rather than in the declarative branch alone: a builder and
- * `additionalAccepts` produce requirements too, and a decimal from either used
- * to reach the 402 unchecked — then `BigInt(policy.amount)` threw on the paid
- * retry and answered 500. Failing where the requirement is built names the
- * merchant's own config instead.
- */
-function assertAtomicAmount(r: CantonPaymentRequirements): CantonPaymentRequirements {
-  if (!isValidAmount(r.amount)) {
-    throw new Error(
-      `paymentRequired: amount "${r.amount}" is not an integer string of atomic units`,
-    );
-  }
-  return r;
-}
-
-/** Resolve a {@link Resolvable}: call it with the request if it's a function, else return it. */
-async function resolve<T>(value: Resolvable<T>, req: Request): Promise<T> {
-  return typeof value === "function" ? (value as (req: Request) => T | Promise<T>)(req) : value;
-}
-
-/**
- * Ensure the requirements the payer chose (`accepted`) are acceptable per
- * merchant policy: the scheme, network, `payTo`, resource, instrument, asset
- * and `maxTimeoutSeconds` must be this request's terms, and the amount must not
- * be under the price. Other fields (`description`, and the `extra` keys beyond
- * the instrument, `memo` and `executeBeforeSeconds` among them) are not
- * compared, and are forwarded as the payer sent them.
- */
-function validateEchoedRequirements(
-  echoed: CantonPaymentRequirements,
-  policy: CantonPaymentRequirements,
-): string | null {
-  if (echoed.scheme !== policy.scheme) return "policy_scheme";
-  if (echoed.network !== policy.network) return "policy_network";
-  if (echoed.payTo !== policy.payTo) return "policy_payTo";
-  // Bind the payment to THIS resource: without it, a payment minted for path A
-  // (matching price/payTo/asset) could be replayed against path B.
-  if (echoed.resource !== policy.resource) return "policy_resource";
-  // The instrument, not the symbol: `asset` alone cannot say which registry
-  // issued it, so comparing symbols would admit a look-alike from another.
-  if (echoed.extra.instrumentId.id !== policy.extra.instrumentId.id) return "policy_asset";
-  if (echoed.extra.instrumentId.admin !== policy.extra.instrumentId.admin) return "policy_asset";
-  if (echoed.asset !== policy.asset) return "policy_asset";
-  // Validate the FORMAT before comparing. BigInt throws on "abc" — a 500 where
-  // a 402 belongs — and happily reads "0x10" as 16 and "" as 0, so a value the
-  // merchant never quoted would compare as a number.
-  if (!isValidAmount(echoed.amount)) return "policy_amount_invalid";
-  // BigInt, not Number: atomic units are 1e10 larger than the token amount, so
-  // anything over ~900k CC exceeds Number.MAX_SAFE_INTEGER and two different
-  // prices start comparing equal.
-  if (BigInt(echoed.amount) < BigInt(policy.amount)) return "policy_underpriced";
-  // The facilitator holds a payment for at most this long; the payer does not
-  // get to stretch it.
-  if (echoed.maxTimeoutSeconds !== policy.maxTimeoutSeconds) return "policy_timeout";
-  return null;
-}
-
-/**
- * Answer 402 with the spec's `PaymentRequired`: base64-encoded in the
- * `PAYMENT-REQUIRED` header, where the HTTP transport puts it, and as the body,
- * where clients of this middleware already read it. `details` is the body's
- * alone; the spec object has no such field.
- */
-function respond402(
-  res: Response,
-  requirements: CantonPaymentRequirements,
-  error: string,
-  details: string | undefined,
-  additional: CantonPaymentRequirements[],
-): void {
-  const paymentRequired: X402PaymentRequiredResponse = {
-    x402Version: 2,
-    // The resource this request's terms were quoted for, so the top level says
-    // what each entry's `resource` and `description` say.
-    resource: {
-      url: requirements.resource,
-      ...(requirements.description ? { description: requirements.description } : {}),
-    },
-    accepts: additional.length > 0 ? [requirements, ...additional] : [requirements],
-    error,
-  };
-  res.setHeader("PAYMENT-REQUIRED", encodePaymentRequiredHeader(paymentRequired));
-  res.status(402).json({ ...paymentRequired, ...(details ? { details } : {}) });
-}
-
-function absoluteUrl(req: Request): string {
-  return `${req.protocol}://${req.get("host") ?? ""}${req.originalUrl}`;
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

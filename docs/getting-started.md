@@ -51,13 +51,24 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
    npm install @chainsafe/x402-express @chainsafe/x402-client @chainsafe/x402-core
    ```
 
-4. **Find your network and asset**
+4. **Know what your facilitator settles (you do not have to configure it)**
 
-   Call `GET $FACILITATOR_URL/v2/supported` once — the `exact` entry
-   in its `kinds` array carries the `network` id this facilitator settles on
-   and `extra.asset.instrumentId.admin`, the DSO party that admins Amulet. You
-   pass both to the middleware below. The integration panel already has them,
-   as `NETWORK_ID` and `AMULET_ADMIN`. The
+   `GET $FACILITATOR_URL/v2/supported` says what a deployment settles: the
+   `network` id, and in `kinds[].extra` the synchronizer it submits to and the
+   instruments it validates, each with the registry party that admins it.
+
+   The middleware reads this for you. Name the instrument by id — `asset:
+   "Amulet"` — and leave `network` out, and the rest comes from the facilitator:
+   the network it settles, and the registry party your payments are validated
+   against, read from the service doing the validating rather than copied into
+   your `.env` to go stale when a deployment moves. It is fetched once and
+   cached (see `supportedTtlMs` on `FacilitatorClient`), not per request.
+
+   `asset` itself is required on every way to pay: `amount` is atomic units of
+   something, so each entry says what. Pin the rest to skip the lookup
+   entirely — `network`, and `asset: { instrumentId: { id, admin } }` for the
+   registry party. If the facilitator settles that instrument on more than one
+   network, naming one with `network` is required rather than guessed. The
    [API reference](/api-reference#get-v2-supported) describes every field.
 
 5. **Gate a route**
@@ -82,7 +93,8 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
 <<< @/snippets/gate-express.ts#snippet
 
 Its settings are the integration panel's `.env`: `FACILITATOR_URL`,
-`FACILITATOR_API_KEY`, `NETWORK_ID`, `MERCHANT_PARTY` and `AMULET_ADMIN`.
+`FACILITATOR_API_KEY` and `MERCHANT_PARTY`. `NETWORK_ID` and `AMULET_ADMIN` are
+not among them — those come from `/v2/supported`, as step 4 describes.
 
 ### Take your first payment
 
