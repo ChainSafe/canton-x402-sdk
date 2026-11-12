@@ -94,7 +94,6 @@ const SPEC_REASONS = [
   "invalid_exact_canton_execute_before_too_far",
   "invalid_exact_canton_insufficient_inputs",
   "invalid_exact_canton_memo_mismatch",
-  "invalid_exact_canton_synchronizer_mismatch",
   "invalid_exact_canton_merchant_not_registered",
   "invalid_exact_canton_self_payment",
   "invalid_exact_canton_execute_failed",
@@ -112,6 +111,21 @@ const SPEC_REASONS = [
   "unexpected_settle_error",
 ] as const;
 
+/**
+ * Codes this implementation answers with that the scheme spec does not define.
+ * Only one so far: the spec names `extra.synchronizerId` but binds no rule to
+ * it, so there is no code to borrow.
+ *
+ * Kept out of SPEC_REASONS so that list stays the spec's table and nothing
+ * else — a client written against the spec will not match on this. Both lists
+ * are spread into the picklists below, so the wire union is unchanged. When
+ * the upstream rule lands this moves across.
+ */
+const CANTON_EXACT_EXTENSION_REASONS = ["invalid_exact_canton_synchronizer_mismatch"] as const;
+
+/** A code this implementation adds beyond the spec's table. */
+export type CantonExactExtensionReason = (typeof CANTON_EXACT_EXTENSION_REASONS)[number];
+
 /** The scheme's codes alone, for a slot where only one of those belongs. */
 export type SpecVerifyInvalidReason = (typeof SPEC_REASONS)[number];
 
@@ -124,6 +138,7 @@ export type SpecVerifyInvalidReason = (typeof SPEC_REASONS)[number];
  */
 export const VerifyInvalidReasonSchema = v.picklist([
   ...SPEC_REASONS,
+  ...CANTON_EXACT_EXTENSION_REASONS,
   "scheme_mismatch",
   "network_mismatch",
   /**
@@ -178,6 +193,7 @@ export type VerifyResponse = v.InferOutput<typeof VerifyResponseSchema>;
 /** Why a settle failed: the spec's codes, then this facilitator's own. */
 export const SettleErrorReasonSchema = v.picklist([
   ...SPEC_REASONS,
+  ...CANTON_EXACT_EXTENSION_REASONS,
   "bad_request",
   "unauthorized",
   "scheme_mismatch",

@@ -18,6 +18,7 @@ import { CantonPaymentRequirements, isCantonPaymentRequirements } from "../types
 import type {
   SchemeVerifier,
   VerifyInvalidReason,
+  CantonExactExtensionReason,
   SpecVerifyInvalidReason,
   VerifyResponse,
   VerifyResponseInvalid,
@@ -231,11 +232,14 @@ function synchronizerMatches(signed: string | undefined, quoted: string): boolea
 }
 
 /**
- * The scheme's code for each field {@link findTransferMismatch} can name.
+ * The code for each field {@link findTransferMismatch} can name.
  *
- * Typed to those alone: `VerifyInvalidReason` also admits our protocol-level
- * codes, and one of them sat here answering the synchronizer — a slot no
- * spec-written client would have matched.
+ * Typed to the spec's table plus this scheme's own extensions, and nothing
+ * else: `VerifyInvalidReason` also admits our protocol-level codes, and one of
+ * them sat here answering the synchronizer — a slot no spec-written client
+ * would have matched. The synchronizer still answers an extension, because the
+ * spec defines no code for it; the type now says so rather than filing it
+ * under the spec's.
  */
 const MISMATCH_REASON = {
   memo: "invalid_exact_canton_memo_mismatch",
@@ -245,7 +249,7 @@ const MISMATCH_REASON = {
   amount: "invalid_exact_canton_amount_mismatch",
 } as const satisfies Record<
   NonNullable<ReturnType<typeof findTransferMismatch>>,
-  SpecVerifyInvalidReason
+  SpecVerifyInvalidReason | CantonExactExtensionReason
 >;
 
 /** The fields Rule 2 calls the proof. */

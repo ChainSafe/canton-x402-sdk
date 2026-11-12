@@ -37,16 +37,20 @@ written against the scheme matches on, and the first cut put `transfer_mismatch`
 there — a protocol-level code of ours, which no such client matches and which
 `extensions.reason` was already carrying. And the obvious substitute,
 `invalid_network`, already answers Rule 1's quoted-network check: one code for
-two different failures tells a client less, not more. Two codes we ship are
-likewise absent from the spec's text (`execute_before_too_far`,
-`merchant_not_registered`, both present in the registered facilitator's own
-implementation), so the namespace is already wider than the document. The rule
-and the code belong upstream, and that is a separate proposal.
+two different failures tells a client less, not more.
 
-`MISMATCH_REASON` is typed to the scheme's codes alone now
-(`SpecVerifyInvalidReason`, new in core) rather than to every code a response
-may carry, so reaching for one of our protocol-level codes in that slot is a
-build error rather than something to catch in review.
+`invalid_exact_canton_synchronizer_mismatch` is **our own code, not the
+spec's**, and stays ours until an upstream rule for `extra.synchronizerId`
+lands. Core keeps it in its own `CANTON_EXACT_EXTENSION_REASONS` list so
+`SPEC_REASONS` stays the spec's table and nothing else; both are spread into
+the picklists, so the wire union is unchanged. Proposing the rule upstream is
+separate work.
+
+`MISMATCH_REASON` is typed to the spec's codes plus that one extension
+(`SpecVerifyInvalidReason | CantonExactExtensionReason`, both new in core)
+rather than to every code a response may carry, so reaching for one of our
+protocol-level codes in that slot is a build error rather than something to
+catch in review.
 
 **One thing the pin cannot do on its own.** It runs in the facilitator's
 `/verify`, and the scheme spec mandates no synchronizer rule — so against a
