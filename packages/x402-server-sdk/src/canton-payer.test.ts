@@ -31,6 +31,12 @@ interface TransferCall {
   [key: string]: unknown;
 }
 
+/** The fields of the wallet SDK's prepare params these tests read back. */
+interface PrepareCall {
+  synchronizerId?: string;
+  [key: string]: unknown;
+}
+
 function mockSdk() {
   const create = vi.fn(async (_params: TransferCall) => [
     { ExerciseCommand: { templateId: "#pkg:Mod:Factory", contractId: "00factory" } },
@@ -43,14 +49,15 @@ function mockSdk() {
       hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2" as const,
     },
   }));
-  const prepare = vi.fn(() => ({ toJSON }));
+  const prepare = vi.fn((_params: PrepareCall) => ({ toJSON }));
   const sdk = { token: { transfer: { create } }, ledger: { prepare } } as unknown as CantonX402PayerOptions["sdk"];
   return { sdk, create, prepare };
 }
 
 const EXTRA = {
   assetTransferMethod: "transfer-factory",
-  synchronizerId: "global-domain::1220be58c29e",executeBeforeSeconds: 120,
+  synchronizerId: "global-domain::1220be58c29e",
+  executeBeforeSeconds: 120,
   instrumentId: { id: "Amulet", admin: "DSO::x" },
 } as const;
 
@@ -125,6 +132,18 @@ describe("CantonX402Payer.authorize", () => {
     expect(expirationDate.getTime()).toBeLessThanOrEqual(Date.now() + 300_000);
   });
 
+  it("prepares on the synchronizer the quote named, not whatever the SDK would pick", async () => {
+    // Left unset the wallet SDK chooses a synchronizer itself, and the payment
+    // would be prepared for a domain the merchant never quoted. A value that
+    // differs from EXTRA's is what makes the quote demonstrably the source.
+    const { sdk, prepare } = mockSdk();
+    const quoted = "other-domain::1220beef";
+    expect(quoted).not.toBe(EXTRA.synchronizerId);
+    await makePayer(sdk).authorize(makeRequirements({ extra: { ...EXTRA, synchronizerId: quoted } }));
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(prepare.mock.calls[0][0].synchronizerId).toBe(quoted);
+  });
+
   it("writes a quoted memo under the scheme's own metadata key", async () => {
     // The SDK's own `memo` parameter writes a different key
     // (splice.lfdecentralizedtrust.org/reason), which Rule 12 does not read.
@@ -157,7 +176,7 @@ describe("CantonX402Payer.authorize", () => {
     expect(payer.supports(makeRequirements({ network: "canton:other" }))).toBe(false);
     // Unsupported asset (no registry configured for it).
     expect(
-      payer.supports(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory",  synchronizerId: "global-domain::1220be58c29e",executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
+      payer.supports(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).toBe(false);
   });
 
@@ -176,7 +195,7 @@ describe("CantonX402Payer.authorize", () => {
   it("rejects an asset with no configured registry", async () => {
     const { sdk, prepare } = mockSdk();
     await expect(
-      makePayer(sdk).authorize(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory",  synchronizerId: "global-domain::1220be58c29e",executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
+      makePayer(sdk).authorize(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).rejects.toThrow(/unsupported requirement/);
     expect(prepare).not.toHaveBeenCalled();
   });
