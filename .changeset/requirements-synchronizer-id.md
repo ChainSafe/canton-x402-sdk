@@ -65,8 +65,11 @@ implements this check and advisory against one that does not.
 The part worth reading, because the obvious implementation is wrong.
 
 `prepare` takes the **logical** id, `global-domain::1220<fingerprint>`, and
-refuses the physical one — yet the bytes it returns carry the physical form:
-the logical id plus a participant-chosen `::<protocol-version>-<topology-serial>`.
+refuses the physical one — yet the bytes it returns carry **either** form,
+depending on the Canton release. Newer ones sign the **physical** id: the
+logical one plus `::<protocol-version>-<serial>`, both the synchronizer's own
+rather than anything a participant picks. LocalNet signs the logical form, so
+the pin has to take both.
 
 ```
 quoted:  global-domain::1220be58c29e

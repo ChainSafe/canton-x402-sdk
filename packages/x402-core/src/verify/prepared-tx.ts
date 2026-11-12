@@ -51,8 +51,14 @@ export interface DecodedTransfer {
   /**
    * `Metadata.synchronizer_id` — the domain this transaction is prepared for,
    * read from the signed block, so the payer committed to it rather than a
-   * relay choosing it. Canton signs the PHYSICAL id: the logical one a
-   * merchant quotes, plus a participant-chosen `::<protocol>-<serial>`.
+   * relay choosing it.
+   *
+   * EITHER form may appear. Canton signs the LOGICAL id a merchant quotes on
+   * the releases LocalNet runs; newer ones sign the PHYSICAL id, which is that
+   * plus `::<protocol-version>-<serial>`. Both parts are the synchronizer's
+   * own — the protocol version is fixed when it is initialised, the serial
+   * steps on a logical upgrade — not anything a participant picks.
+   * {@link synchronizerMatches} takes either.
    */
   synchronizerId?: string;
 }

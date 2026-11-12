@@ -151,10 +151,11 @@ describe("the synchronizer the payer signed", () => {
     expect(findTransferMismatch(transfer(quoted), req())).toBeNull();
   });
 
-  it("takes the PHYSICAL id Canton actually signs", () => {
-    // `prepare` takes the logical id and refuses the physical one, yet the
-    // bytes it returns carry the physical form. Exact equality would refuse
-    // every honest payment.
+  it("takes the PHYSICAL id too, which newer Canton signs", () => {
+    // `prepare` takes the logical id and refuses the physical one, yet newer
+    // releases sign the physical form into the bytes it returns. Exact
+    // equality would refuse every honest payment from one of those. The case
+    // above covers the logical form, which is what LocalNet signs.
     for (const suffix of ["35-2", "0-0", "100-27"]) {
       expect(findTransferMismatch(transfer(`${quoted}::${suffix}`), req())).toBeNull();
     }

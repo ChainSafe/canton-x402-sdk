@@ -206,23 +206,27 @@ function fail(
 }
 
 /**
- * The suffix a participant appends to the LOGICAL synchronizer id to form the
- * PHYSICAL one it signs into `Metadata.synchronizer_id`:
- * `<protocol-version>-<topology-serial>`. Two decimal runs, one hyphen,
- * nothing else.
+ * What distinguishes the PHYSICAL synchronizer id from the LOGICAL one in
+ * `Metadata.synchronizer_id`: `<protocol-version>-<serial>`. Both are the
+ * synchronizer's own, not the participant's — the protocol version is fixed
+ * when it is initialised, the serial steps on a logical upgrade. Two decimal
+ * runs, one hyphen, nothing else.
  */
 const PHYSICAL_SYNCHRONIZER_SUFFIX = /^[0-9]+-[0-9]+$/;
 
 /**
  * Is the signed synchronizer id the one the merchant quoted?
  *
- * `prepare` takes the logical id and refuses the physical one, yet the bytes
- * it returns carry the physical form — so exact equality would refuse every
- * honest payment. A suffixed match is not a weakening: the `1220…` is the
- * domain's namespace fingerprint, so `<quoted>::<n>-<m>` is provably the same
- * domain at a participant-chosen version and serial. Another name, another
- * fingerprint, a non-numeric or three-part suffix, or any trailing text is
- * refused, and an absent id counts as a mismatch.
+ * `prepare` takes the logical id and refuses the physical one, and the bytes
+ * it returns carry EITHER form depending on the Canton release — the logical
+ * id on what LocalNet runs, the physical one on newer releases. So both are
+ * taken: exact equality would refuse every honest payment from the latter.
+ *
+ * A suffixed match is not a weakening: the `1220…` is the domain's namespace
+ * fingerprint, so `<quoted>::<n>-<m>` is provably the same domain at some
+ * protocol version and serial. Another name, another fingerprint, a
+ * non-numeric or three-part suffix, or any trailing text is refused, and an
+ * absent id counts as a mismatch.
  */
 function synchronizerMatches(signed: string | undefined, quoted: string): boolean {
   if (signed === undefined) return false;

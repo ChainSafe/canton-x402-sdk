@@ -113,7 +113,7 @@ export class CantonX402Payer implements X402Payer {
     // 2. Prepare (interactive submission) → prepared tx + hash to sign.
     const { response } = await sdk.ledger
       // The LOGICAL id, which is the form prepare takes; the bytes it returns
-      // carry the physical one, and the verifier pins against that.
+      // carry either that or the physical one, and the verifier takes both.
       .prepare({
         partyId: key.partyId,
         commands: command,
