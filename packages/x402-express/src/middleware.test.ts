@@ -1615,6 +1615,33 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     expect(quote.extra.instrumentId).toEqual({ id: "Amulet", admin: DSO });
   });
 
+  it("keeps the merchant's synchronizerId even though discovery advertises one", async () => {
+    // Discovery still supplies the network, symbol and instrument here. The
+    // synchronizer is the one field the merchant can overrule, so SUPPORTED
+    // has to advertise a DIFFERENT one for the override to be visible at all:
+    // against a fixture that agreed, taking the advertised value always would
+    // pass just as well.
+    stubWithSupported();
+    const OWN_SYNC = "merchant-domain::1220dead";
+    expect(OWN_SYNC).not.toBe(SYNC);
+    const res = await request(
+      discoveringApp({
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          synchronizerId: OWN_SYNC,
+          accepts: [{ amount: "500000000", asset: "Amulet" }],
+        },
+      }),
+    ).get("/paid");
+    expect(res.status).toBe(402);
+    const [quote] = res.body.accepts;
+    expect(quote.extra.synchronizerId).toBe(OWN_SYNC);
+    // Everything else still comes from the facilitator.
+    expect(quote.network).toBe("canton:devnet");
+    expect(quote.extra.instrumentId).toEqual({ id: "Amulet", admin: DSO });
+  });
+
   it("produces a quote a payer would accept as well-formed", async () => {
     stubWithSupported();
     const res = await request(discoveringApp()).get("/paid");
@@ -2140,6 +2167,40 @@ describe("paymentRequired: configuring from /v2/supported", () => {
       const { error } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
       expect(error).toBeInstanceOf(TermsError);
       expect((error as Error).message).toMatch(/names no `asset`/);
+    });
+  });
+
+  describe("both `network` and a whole `asset` pinned, with no synchronizer", () => {
+    // Nothing is read from /v2/supported on this path, so the synchronizer has
+    // nowhere to come from but the merchant. A missing one is their config, not
+    // the facilitator's answer changing under them — so the request fails
+    // rather than quietly dropping this way to pay. The good entry beside it is
+    // what makes that visible: skipping would answer 402 with it alone.
+    it("is a TermsError, and is never skipped", async () => {
+      stubWithSupported();
+      const onReject = vi.fn();
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          onReject,
+          requirements: {
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            network: "canton:devnet",
+            accepts: [
+              { amount: "500000000", asset: "Amulet" },
+              { amount: "250000", asset: () => ({ instrumentId: { id: "Amulet", admin: DSO } }) },
+            ],
+          },
+        }),
+      );
+      const res = await request(app).get("/paid");
+      expect(res.status).toBe(500);
+      const { error } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(error).toBeInstanceOf(TermsError);
+      expect((error as Error).message).toMatch(/name the `synchronizerId` to settle on/);
     });
   });
 

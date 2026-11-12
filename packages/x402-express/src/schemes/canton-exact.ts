@@ -264,7 +264,7 @@ async function resolveDeploymentTerms(
     const synchronizerId =
       spec.synchronizerId === undefined ? undefined : await resolve(spec.synchronizerId, req);
     if (synchronizerId === undefined) {
-      throw new Error(
+      throw new TermsError(
         "paymentRequired: `network` and a whole `asset` are pinned, so nothing is read from " +
           "/v2/supported — name the `synchronizerId` to settle on, or leave one of them out.",
       );
