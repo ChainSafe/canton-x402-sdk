@@ -94,6 +94,7 @@ const SPEC_REASONS = [
   "invalid_exact_canton_execute_before_too_far",
   "invalid_exact_canton_insufficient_inputs",
   "invalid_exact_canton_memo_mismatch",
+  "invalid_exact_canton_synchronizer_mismatch",
   "invalid_exact_canton_merchant_not_registered",
   "invalid_exact_canton_self_payment",
   "invalid_exact_canton_execute_failed",
@@ -110,6 +111,9 @@ const SPEC_REASONS = [
   "unexpected_verify_error",
   "unexpected_settle_error",
 ] as const;
+
+/** The scheme's codes alone, for a slot where only one of those belongs. */
+export type SpecVerifyInvalidReason = (typeof SPEC_REASONS)[number];
 
 /**
  * Why a payment is invalid. The verifier answers with the spec's code, the one

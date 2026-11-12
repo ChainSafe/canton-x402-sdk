@@ -24,10 +24,37 @@ not be one the merchant settles on.
 The payer now prepares against the quoted one, and the verifier pins the
 transaction's signed `Metadata.synchronizer_id` to it. That field is inside the
 block the signature covers, so it is the payer's commitment rather than a
-relay's choice. A mismatch is `transfer_mismatch` with detail `synchronizer` —
-the scheme spec defines no synchronizer rule and so no code for one, and
-borrowing a spec code that means something else would be worse than answering
-with the protocol-level one.
+relay's choice.
+
+A mismatch answers **`invalid_exact_canton_synchronizer_mismatch`**, new in
+core, with `transfer_mismatch` in `extensions.reason` and `synchronizer` in the
+detail — the shape every other mismatch already uses.
+
+The scheme spec names `extra.synchronizerId` but defines no rule for it and so
+no code, so this one is ours. In the scheme's own family rather than borrowed
+from the protocol's, for two reasons. `invalidReason` is the slot a client
+written against the scheme matches on, and the first cut put `transfer_mismatch`
+there — a protocol-level code of ours, which no such client matches and which
+`extensions.reason` was already carrying. And the obvious substitute,
+`invalid_network`, already answers Rule 1's quoted-network check: one code for
+two different failures tells a client less, not more. Two codes we ship are
+likewise absent from the spec's text (`execute_before_too_far`,
+`merchant_not_registered`, both present in the registered facilitator's own
+implementation), so the namespace is already wider than the document. The rule
+and the code belong upstream, and that is a separate proposal.
+
+`MISMATCH_REASON` is typed to the scheme's codes alone now
+(`SpecVerifyInvalidReason`, new in core) rather than to every code a response
+may carry, so reaching for one of our protocol-level codes in that slot is a
+build error rather than something to catch in review.
+
+**One thing the pin cannot do on its own.** It runs in the facilitator's
+`/verify`, and the scheme spec mandates no synchronizer rule — so against a
+conformant facilitator that implements only the spec's thirteen rules, the
+signed transfer's domain goes unchecked. The middleware's own
+`policy_synchronizer` compares the payer's ECHOED value against the quote, and
+both of those are unsigned. The binding is real against a facilitator that
+implements this check and advisory against one that does not.
 
 ### Logical in, physical out
 

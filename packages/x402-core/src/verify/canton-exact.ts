@@ -18,6 +18,7 @@ import { CantonPaymentRequirements, isCantonPaymentRequirements } from "../types
 import type {
   SchemeVerifier,
   VerifyInvalidReason,
+  SpecVerifyInvalidReason,
   VerifyResponse,
   VerifyResponseInvalid,
 } from "../types/facilitator";
@@ -229,17 +230,23 @@ function synchronizerMatches(signed: string | undefined, quoted: string): boolea
   return PHYSICAL_SYNCHRONIZER_SUFFIX.test(signed.slice(quoted.length + 2));
 }
 
-/** The spec's code for each field {@link findTransferMismatch} can name. */
+/**
+ * The scheme's code for each field {@link findTransferMismatch} can name.
+ *
+ * Typed to those alone: `VerifyInvalidReason` also admits our protocol-level
+ * codes, and one of them sat here answering the synchronizer — a slot no
+ * spec-written client would have matched.
+ */
 const MISMATCH_REASON = {
   memo: "invalid_exact_canton_memo_mismatch",
-  // The scheme spec defines no synchronizer rule and so no code for one. This
-  // check is ours, so it answers with the protocol-level code and names itself
-  // in the detail rather than borrowing a spec code that means something else.
-  synchronizer: "transfer_mismatch",
+  synchronizer: "invalid_exact_canton_synchronizer_mismatch",
   receiver: "invalid_exact_canton_merchant_mismatch",
   instrument: "invalid_exact_canton_instrument_id_mismatch",
   amount: "invalid_exact_canton_amount_mismatch",
-} as const satisfies Record<NonNullable<ReturnType<typeof findTransferMismatch>>, VerifyInvalidReason>;
+} as const satisfies Record<
+  NonNullable<ReturnType<typeof findTransferMismatch>>,
+  SpecVerifyInvalidReason
+>;
 
 /** The fields Rule 2 calls the proof. */
 const PROOF_FIELDS = ["preparedTransaction", "preparedTxHash", "signature"] as const;
