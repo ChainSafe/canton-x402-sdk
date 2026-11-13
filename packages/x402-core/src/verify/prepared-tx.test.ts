@@ -64,30 +64,21 @@ describe("decodePreparedTransaction", () => {
 });
 
 describe("decodePreparedTransaction on a non-canonical encoding", () => {
-  // Protobuf merges a repeated singular field and keeps the last member of a
-  // oneof, so a full decoder need not read the transfer a first-match walk
-  // would. Canton never encodes these. Each case decodes to a transfer when
-  // the canonical-encoding check is removed.
+  // What is left here are the UNKNOWN cases: a field, a wire type or a oneof
+  // member the schema does not define. The decode is run with
+  // `readUnknownField: "throw"` precisely so these are refused, because the
+  // signing hash does not cover a field it cannot see.
+  //
+  // The cases that used to sit beside them — a singular field written twice, a
+  // node carrying two known node types — are gone, and deliberately. Protobuf
+  // merges those and keeps the last, and so does the decode the hash is taken
+  // over, so refusing them was the walker disagreeing with the ledger rather
+  // than catching anything. See the describe below for what replaced them.
   const cases: [string, EncodeOptions][] = [
     ["a node that is also a create", { extra: { node: wrap(1, empty) } }],
-    ["a node whose v1 body is written twice", { extra: { damlNode: wrap(1000, transferBody(OTHER)) } }],
-    ["a transaction written twice", { extra: { prepared: wrap(1, empty) } }],
-    [
-      "an exercise whose choice id is written twice",
-      { choiceId: "SomeOtherChoice", extra: { exercise: wrap(9, utf8("TransferFactory_Transfer")) } },
-    ],
-    [
-      "an exercise whose chosen value is written twice",
-      { extra: { exercise: wrap(10, encodeChoiceArgument(TRANSFER)) } },
-    ],
     ["a node that is also a query_by_key", { extra: { node: wrap(5, empty) } }],
     ["a node with a field other than node_id and v1", { extra: { damlNode: wrap(1001, empty) } }],
-    ["a value with two members", { extra: { receiver: wrap(8, utf8("someone::1220")) } }],
     ["a value with a member this decoder does not know", { extra: { receiver: wrap(17, empty) } }],
-    [
-      "a record field whose value is written twice",
-      { extra: { receiverField: wrap(2, wrap(7, utf8("someone::1220"))) } },
-    ],
   ];
 
   it.each(cases)("returns null for %s", (_, opts) => {
@@ -126,23 +117,7 @@ describe("decodePreparedTransaction on a non-canonical encoding", () => {
     expect(decodePreparedTransaction(blob)).toEqual(TRANSFER);
   });
 
-  it("returns null for a metadata naming the synchronizer twice", () => {
-    // protobuf keeps the LAST when a singular field repeats, so reading the
-    // first would pin against one domain while the ledger settles on another.
-    // The fixture already writes one; this appends a second.
-    const blob = encodePreparedTransaction(TRANSFER, {
-      extra: { metadata: stringField(3, "attacker-domain::1220ffff") },
-    });
-    expect(decodePreparedTransaction(blob)).toBeNull();
-  });
 
-  it("returns null for a transaction whose metadata is written twice", () => {
-    // The synchronizer is read from PreparedTransaction{2: metadata}, so two
-    // of them are two answers to which domain the payer committed to. The
-    // fixture writes one; this adds a second.
-    const blob = encodePreparedTransaction(TRANSFER, { extra: { prepared: wrap(2, empty) } });
-    expect(decodePreparedTransaction(blob)).toBeNull();
-  });
 });
 
 describe("decodePreparedTransaction reads only the node tree under the roots", () => {
@@ -304,3 +279,16 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   out.set(b, a.length);
   return out;
 }
+
+describe("what replaced the walker's wire strictness", () => {
+  it("reads a repeated singular field the way the ledger does, not the way a first-match walker would", () => {
+    // protobuf keeps the LAST of a repeated singular field, and so does the
+    // decode behind the hash. The old walker read the FIRST and needed
+    // `assertCanonical` to stop itself pinning against a value the ledger
+    // would not use. Reading last removes the need for the guard, not the guard.
+    const blob = encodePreparedTransaction(TRANSFER, {
+      extra: { prepared: wrap(2, stringField(3, "other-domain::1220ffff")) },
+    });
+    expect(decodePreparedTransaction(blob)?.synchronizerId).toBe("other-domain::1220ffff");
+  });
+});
