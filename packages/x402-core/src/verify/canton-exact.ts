@@ -256,6 +256,75 @@ const MISMATCH_REASON = {
   SpecVerifyInvalidReason | CantonExactExtensionReason
 >;
 
+/**
+ * The Token Standard interface a transfer factory exposes, by module and
+ * entity.
+ *
+ * The INTERFACE, not the template. `TransferFactory_Transfer` is defined on
+ * this interface, and each registry implements it with its own template —
+ * Canton Coin with `ExternalPartyAmuletRules`, another issuer with its own. A
+ * check written against Canton Coin's template would refuse every other
+ * registry's instrument, though this package routes payments to them by
+ * design. The interface is what every transfer factory has in common.
+ *
+ * The package id is deliberately NOT pinned: it moves with every Splice
+ * release, and pinning it would refuse honest payments the day the network
+ * upgrades. The name alone proves nothing — anyone can compile a module called
+ * this — so what the match is worth is set out below.
+ */
+const TRANSFER_FACTORY_INTERFACE = {
+  moduleName: "Splice.Api.Token.TransferInstructionV1",
+  entityName: "TransferFactory",
+} as const;
+
+/**
+ * The real-factory proof, as far as this layer can take it.
+ *
+ * The exercise must go through the Token Standard transfer-factory interface,
+ * against a contract disclosed among the transaction's own input contracts and
+ * carrying the instrument's admin as a signatory.
+ *
+ * WHAT THIS DOES NOT DO — two gaps, both real.
+ *
+ * The disclosure is PAYER-WRITTEN. `input_contracts` is part of the blob the
+ * payer signs, so every field read here is a field the payer chose, including
+ * the signatory. What makes the check bite is not this layer: it is the
+ * synchronizer, which authenticates a disclosed contract against its contract
+ * id at submission, so a fabricated disclosure never settles. The proof is
+ * therefore self-attested here and enforced at settlement — a caller that
+ * verifies without settling gets no protection from it.
+ *
+ * The admin is MERCHANT-QUOTED, and step 14 has already held the transfer's
+ * admin equal to it, so both sides of the comparison come from the same
+ * merchant. Closing that needs the real DSO party, which this layer has no way
+ * to know and no configuration to carry; the facilitator holds it as
+ * `provider.dsoPartyId` and is where that comparison belongs.
+ *
+ * What the rule does buy: a payer cannot swap in a contract of their own that
+ * merely exposes a same-named choice and have it SETTLE, which before this
+ * check it could.
+ */
+function factoryProofFailure(transfer: DecodedTransfer): string | null {
+  const exercised = transfer.exercisedContract;
+  // Absent means the decoder could not resolve the exercised contract to
+  // exactly one input contract that agrees with it — see resolveExercised.
+  if (!exercised) return "factory_unresolved";
+  // A choice exercised on the template directly carries no interface, so an
+  // absent one is refused rather than read as "no interface required".
+  const inherited = exercised.interfaceId;
+  if (!inherited) return "factory_interface";
+  if (inherited.moduleName !== TRANSFER_FACTORY_INTERFACE.moduleName) return "factory_interface";
+  if (inherited.entityName !== TRANSFER_FACTORY_INTERFACE.entityName) return "factory_interface";
+  // The admin must be AMONG the signatories, not the only one. A registry's
+  // factory can legitimately carry more than one party — the reference
+  // facilitator keeps a configured allowlist of registry infrastructure
+  // parties for exactly this reason, noting that a bridged token's factory
+  // names the bridge operator too. Demanding a sole signatory would refuse
+  // those honest transfers. An empty list fails this on its own.
+  if (!exercised.signatories.includes(transfer.instrumentId.admin)) return "factory_signatory";
+  return null;
+}
+
 /** The fields Rule 2 calls the proof. */
 const PROOF_FIELDS = ["preparedTransaction", "preparedTxHash", "signature"] as const;
 
@@ -396,7 +465,13 @@ async function verifyCantonExact(
   //     party, or a smaller amount).
   const mismatch = findTransferMismatch(transfer, requirements);
   if (mismatch) return fail(MISMATCH_REASON[mismatch], "transfer_mismatch", payer, mismatch);
-  // 15. the transfer must still be executable. An absent deadline counts as
+  // 15. the exercise must go through a real transfer factory, proved from the
+  //     transaction's own input contracts. Placed after 14 because it reads
+  //     the admin that step has just held equal to the requirements', so the
+  //     two cannot disagree about which instrument this is.
+  const factory = factoryProofFailure(transfer);
+  if (factory) return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", payer, factory);
+  // 16. the transfer must still be executable. An absent deadline counts as
   //     expired: `executeBefore` is not optional in a real transfer, and
   //     reading a missing one as "no deadline" would make the check skippable
   //     by leaving the field out.

@@ -54,6 +54,37 @@ export interface DecodedTransfer {
    * {@link synchronizerMatches} takes either.
    */
   synchronizerId?: string;
+  /**
+   * The contract the transfer's exercise targets, resolved against the
+   * transaction's own `input_contracts` — the evidence the real-factory
+   * proof is decided on.
+   *
+   * Present only when the exercised contract id names exactly ONE input
+   * contract that agrees with the exercise about what it is. Absent means the
+   * transaction carries no usable proof of what it exercised, which the
+   * verifier refuses; it is not the same as the blob being undecodable, so the
+   * two stay distinguishable.
+   *
+   * Everything here is covered by the signing hash. `eventBlob` is NOT, so it
+   * is deliberately absent: a decision read off it would be a decision nobody
+   * signed.
+   */
+  exercisedContract?: {
+    /**
+     * Kept though nothing here reads it: it is the handle a caller holding a
+     * registry needs to check the contract against one, which is the part of
+     * this proof that cannot be done from the blob alone.
+     */
+    contractId: string;
+    signatories: readonly string[];
+    /**
+     * The interface the exercised choice was inherited from, absent when the
+     * choice is the template's own. A Token Standard transfer is exercised
+     * through `TransferFactory`, so this is what says which kind of transfer
+     * this is, independently of whose registry implements it.
+     */
+    interfaceId?: { packageId: string; moduleName: string; entityName: string };
+  };
 }
 
 /**
@@ -74,6 +105,14 @@ type VendorNode = NonNullable<Vendor["transaction"]>["nodes"][number];
 /** A Daml `Value` as the vendor types it: a `sum` oneof. */
 type VendorValue = { sum: { oneofKind: string } & Record<string, unknown> };
 type VendorField = { label: string; value?: VendorValue };
+type VendorIdentifier = { packageId: string; moduleName: string; entityName: string };
+type VendorCreate = {
+  contractId: string;
+  packageName: string;
+  templateId?: VendorIdentifier;
+  signatories: string[];
+};
+type VendorInputContract = { contract: { oneofKind?: string; v1?: VendorCreate } };
 
 /**
  * Pick a record field by label, falling back to positional index. A Daml LF
@@ -150,6 +189,57 @@ function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | n
   return { sender, receiver, amount, instrumentId: { id, admin }, executeBeforeMicros, memo };
 }
 
+/**
+ * Two template identifiers naming the same Daml template.
+ *
+ * The package id is NOT compared. An exercise's `template_id` names the package
+ * the choice was resolved against, which the payer's participant picks by
+ * package NAME; the input contract's names the package its contract was created
+ * under. Canton documents that the two differ once a contract has been upgraded
+ * or downgraded, so requiring them equal would refuse honest payments for the
+ * whole window of a Splice rollout. Name, module and entity are what an upgrade
+ * preserves, and `resolveExercised` pairs this with the package name.
+ */
+function sameTemplate(a: VendorIdentifier | undefined, b: VendorIdentifier | undefined): boolean {
+  if (!a || !b) return false;
+  return a.moduleName === b.moduleName && a.entityName === b.entityName;
+}
+
+/**
+ * The contract an exercise targets, found among the transaction's input
+ * contracts — every contract it uses but does not create, carried with its
+ * template and signatories and covered by the payer's signature.
+ *
+ * EXACTLY ONE match, not the first: a repeated entry would let a payer put two
+ * contracts under one id and have the reader pick while the ledger picks the
+ * other. An exercise naming no contract resolves to nothing — the id decodes as
+ * "" when absent, so matching it would find an entry that is equally blank.
+ *
+ * The exercise and the disclosure must agree on what the contract IS — same
+ * package name, same module, same entity — because a transaction that says two
+ * different things about one contract is not one to read further. They need not
+ * agree on the package id; see `sameTemplate`.
+ */
+function resolveExercised(
+  exercise: { contractId?: string; packageName?: string; templateId?: VendorIdentifier; interfaceId?: VendorIdentifier },
+  inputContracts: readonly VendorInputContract[],
+): DecodedTransfer["exercisedContract"] | undefined {
+  const contractId = exercise.contractId;
+  if (!contractId) return undefined;
+  const matches = inputContracts.filter(
+    (ic) => ic.contract.oneofKind === "v1" && ic.contract.v1?.contractId === contractId,
+  );
+  if (matches.length !== 1) return undefined;
+  const create = matches[0].contract.v1;
+  if (!create?.templateId || !sameTemplate(create.templateId, exercise.templateId)) return undefined;
+  if (create.packageName !== exercise.packageName) return undefined;
+  return {
+    contractId: create.contractId,
+    signatories: create.signatories,
+    ...(exercise.interfaceId === undefined ? {} : { interfaceId: exercise.interfaceId }),
+  };
+}
+
 /** The node's single body: exercise, rollback, or something that moves nothing. */
 function bodyOf(node: VendorNode): { kind: string; body: Record<string, unknown> } | null {
   const versioned = node.versionedNode;
@@ -214,6 +304,7 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
     reach(txn.roots, false);
 
     let transferArg: VendorValue | undefined; // the root TransferFactory_Transfer's chosen_value
+    let exercised: DecodedTransfer["exercisedContract"];
     for (let next = stack.pop(); next; next = stack.pop()) {
       const node = nodes.get(next.nodeId);
       if (!node) throw new Error(`node ${next.nodeId} is missing`);
@@ -225,7 +316,15 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
       }
       if (body.kind !== "exercise") continue;
 
-      const exercise = body.body as { choiceId: string; chosenValue?: VendorValue; children: string[] };
+      const exercise = body.body as {
+        choiceId: string;
+        chosenValue?: VendorValue;
+        children: string[];
+        contractId?: string;
+        packageName?: string;
+        templateId?: VendorIdentifier;
+        interfaceId?: VendorIdentifier;
+      };
       reach(exercise.children, next.rolledBack);
       if (exercise.choiceId !== TRANSFER_CHOICE) continue;
       // A transfer under a rollback node moves nothing.
@@ -241,11 +340,17 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
         throw new Error("the transfer is not the transaction's root");
       }
       transferArg = exercise.chosenValue;
+      exercised = resolveExercised(exercise, decoded.metadata?.inputContracts ?? []);
     }
     if (reached.size !== nodes.size) throw new Error("a node is not reachable from the roots");
 
     const transfer = transferArg ? readTransfer(transferArg) : null;
-    return transfer && synchronizerId !== undefined ? { ...transfer, synchronizerId } : transfer;
+    if (!transfer) return null;
+    return {
+      ...transfer,
+      ...(synchronizerId === undefined ? {} : { synchronizerId }),
+      ...(exercised === undefined ? {} : { exercisedContract: exercised }),
+    };
   } catch {
     return null;
   }
