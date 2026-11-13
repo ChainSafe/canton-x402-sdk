@@ -7,8 +7,11 @@ Monorepo for the `@chainsafe/x402-*` packages — x402 payments on the Canton Ne
 | Package | Purpose |
 | --- | --- |
 | `@chainsafe/x402-core` | Shared wire types, canonical requirements hashing (RFC-8785), verify primitives, network presets. No framework deps. |
-| `@chainsafe/x402-server-sdk` | Payer SDK — prepare + sign a transfer with a party key + ledger access; auto-pay `fetch`; facilitator client. |
+| `@chainsafe/x402-client` | Facilitator client — `FacilitatorClient` calls a facilitator's `verify`, `settle` and `supported` over HTTP, caching `/v2/supported`. Chain-agnostic; the Express middleware takes one, and the server SDK re-exports it. |
+| `@chainsafe/x402-server-sdk` | Payer SDK — prepare + sign a transfer with a party key + ledger access; auto-pay `fetch`. |
 | `@chainsafe/x402-express` | Merchant middleware — `paymentRequired()` gating for Express. |
+
+All packages require **Node ≥ 22.2** (`engines`; the first 22 with `zlib.crc32`).
 
 ## Examples
 
@@ -18,7 +21,8 @@ Monorepo for the `@chainsafe/x402-*` packages — x402 payments on the Canton Ne
 
 ## Development
 
-Requires Node ≥ 22.2 and pnpm. `.nvmrc` pins the version CI uses, and `packageManager` the pnpm.
+Development uses Node 26 (pinned in `.nvmrc`) and pnpm (pinned in `packageManager`).
+CI also builds and tests on Node 22.2.0, so the packages' minimum is exercised.
 
 ```bash
 pnpm install
