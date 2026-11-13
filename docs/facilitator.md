@@ -13,7 +13,7 @@ moves a payer's funds on its own authority: the only write that moves them is
 
 ## What verify guarantees
 
-These run in order, with no chain write. The first six are shared code — the
+These run in order, with no chain write. The first seven are shared code — the
 same `@chainsafe/x402-core` verifier the SDK exposes — so a payer can pre-flight
 its payload against them, and they refuse with the Canton scheme spec's codes,
 keeping the code they used before in `extensions.reason`. The last is the
@@ -50,7 +50,18 @@ facilitator's alone, since only it holds the state involved:
    transfer's `x402.memo` must equal your `extra.memo` exactly — in both
    directions, so a transfer carrying a memo you did not quote is refused as
    well.
-7. **No replay, and you're an allowed destination** — the payment has not
+7. **The transfer went through a real factory** — the contract the transfer
+   choice was exercised on must be one the transaction itself discloses,
+   exercised through the Token Standard `TransferFactory` interface, and
+   carrying the instrument's admin among its signatories
+   (`invalid_exact_canton_malformed_payload`, with a `factory_` detail naming
+   which part failed). Without it a payer could exercise a contract of their
+   own that merely exposes a choice of the same name, and the payment would
+   reduce to "something called transfer happened". The disclosure travels
+   inside what the payer signed, so this check takes it on the payer's word;
+   the synchronizer authenticates it against the contract id at submission,
+   which is where a fabricated one fails.
+8. **No replay, and you're an allowed destination** — the payment has not
    settled before (the ledger is the real guard: a replayed transfer names
    input holdings that are already spent), and for an authenticated merchant
    `payTo` must be a party that key is allowed to receive at (your destination

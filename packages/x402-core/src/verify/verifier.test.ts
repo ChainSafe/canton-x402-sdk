@@ -22,6 +22,7 @@ import {
   encodePreparedTransactionGraph,
   wrap,
 } from "./prepared-tx.fixtures";
+import type { EncodeOptions } from "./prepared-tx.fixtures";
 import type {
   CantonPaymentPayload,
   CantonPaymentRequirements,
@@ -39,7 +40,14 @@ const gzipped = (protobufB64: string): string =>
   gzipPreparedTransaction(Buffer.from(protobufB64, "base64"));
 
 // A deterministic payer keypair + a well-formed, correctly-signed payload for it.
-async function buildSignedFixture(overrides: { executeBeforeSeconds?: number; memo?: string } = {}) {
+async function buildSignedFixture(
+  overrides: {
+    executeBeforeSeconds?: number;
+    memo?: string;
+    /** Deform the exercised factory contract; omitted means the real shape. */
+    factory?: EncodeOptions["factory"];
+  } = {},
+) {
   const executeBeforeSeconds = overrides.executeBeforeSeconds ?? 120;
   const seed = new Uint8Array(32).fill(3);
   const privateKey = toB64(seed);
@@ -75,8 +83,11 @@ async function buildSignedFixture(overrides: { executeBeforeSeconds?: number; me
     amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
     instrumentId: requirements.extra.instrumentId,
     executeBeforeMicros,
-    ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
-  });
+      ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
+    },
+    // A real payer exercises the admin-signed factory; the check needs it.
+    { factory: overrides.factory ?? {} },
+  );
   const preparedTransaction = gzipped(protobuf);
   const preparedTxHash = await computePreparedTransactionHash(
     protobuf,
@@ -133,13 +144,17 @@ async function reDeadline(
   executeBeforeMicros: bigint | undefined,
 ): Promise<CantonPaymentPayload> {
   const { payload, requirements, payer, privateKey } = fixture;
-  const protobuf = encodePreparedTransaction({
-    sender: payer,
-    receiver: requirements.payTo,
-    amount: atomicToLedger(requirements.amount, 10) as string,
-    instrumentId: requirements.extra.instrumentId,
-    ...(executeBeforeMicros === undefined ? {} : { executeBeforeMicros }),
-  });
+  const protobuf = encodePreparedTransaction(
+    {
+      sender: payer,
+      receiver: requirements.payTo,
+      amount: atomicToLedger(requirements.amount, 10) as string,
+      instrumentId: requirements.extra.instrumentId,
+      ...(executeBeforeMicros === undefined ? {} : { executeBeforeMicros }),
+    },
+    // A real payer exercises the admin-signed factory; the check needs it.
+    { factory: {} },
+  );
   const preparedTxHash = await computePreparedTransactionHash(protobuf, HashingSchemeVersion.V2);
   return {
     ...payload,
@@ -260,12 +275,16 @@ describe("cantonExactVerifier", () => {
     // and signature are right for this transaction, so only that check refuses.
     const { payload, requirements, privateKey } = await buildSignedFixture();
     const victim = `victim::${fingerprintForPublicKey(toB64(getPublicKey(new Uint8Array(32).fill(9))))}`;
-    const protobuf = encodePreparedTransaction({
-      sender: victim,
-      receiver: requirements.payTo,
-      amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
-      instrumentId: requirements.extra.instrumentId,
-    });
+    const protobuf = encodePreparedTransaction(
+      {
+        sender: victim,
+        receiver: requirements.payTo,
+        amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
+        instrumentId: requirements.extra.instrumentId,
+      },
+      // A real payer exercises the admin-signed factory; the check needs it.
+      { factory: {} },
+    );
     const preparedTxHash = await computePreparedTransactionHash(protobuf, HashingSchemeVersion.V2);
     const p = {
       ...payload,
@@ -685,6 +704,178 @@ describe("cantonExactVerifier", () => {
     const p = { ...payload, payload: innerNoScheme };
     expect(await verifier.verify(p, requirements)).toEqual({ isValid: true, payer });
   });
+
+  // The transfer choice must be exercised through a real transfer factory. The
+  // payer picks the contract, so a forged one is the attack: these fix what
+  // "real" means. Each fixture is re-signed, so the refusal is this rule's and
+  // not a stale signature.
+  describe("the exercised factory contract", () => {
+    const factoryRefusal = (detail: string) => ({
+      isValid: false,
+      invalidReason: "invalid_exact_canton_malformed_payload",
+      extensions: { reason: "transfer_mismatch", detail },
+    });
+
+    it("refuses an exercise on a contract the transaction never discloses", async () => {
+      // No input_contracts entry: nothing says what was exercised.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { omitInputContract: true },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        factoryRefusal("factory_unresolved"),
+      );
+    });
+
+    it("refuses an exercised id disclosed more than once", async () => {
+      // Two entries for one id: which one was exercised is not decidable.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { duplicateInputContract: true },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        factoryRefusal("factory_unresolved"),
+      );
+    });
+
+    it("refuses a disclosure whose template module alone disagrees", async () => {
+      // Exercising one template against a contract disclosed as another:
+      // believing either one over the other would be a guess. Module and
+      // entity get a test each, so neither arm can be dropped unnoticed.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { inputTemplateId: { moduleName: "Splice.Wallet" } },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        factoryRefusal("factory_unresolved"),
+      );
+    });
+
+    it("refuses a disclosure whose template entity alone disagrees", async () => {
+      // Separate from the test above, which changes module AND entity: one
+      // fixture moving both leaves either arm free to be dropped.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { inputTemplateId: { entityName: "NotTheSameEntity" } },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        factoryRefusal("factory_unresolved"),
+      );
+    });
+
+    it("refuses an exercise that names no contract at all", async () => {
+      // The id decodes as "" when absent, so without the guard it would match
+      // a disclosure that is equally blank and read as a resolved factory.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { contractId: "" },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        factoryRefusal("factory_unresolved"),
+      );
+    });
+
+    it("refuses a disclosure whose package name disagrees with the exercise's", async () => {
+      // The package NAME is what an upgrade preserves, so unlike the package
+      // id the two sides must agree on it.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { inputPackageName: "not-splice-amulet" },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        factoryRefusal("factory_unresolved"),
+      );
+    });
+
+    it("refuses a choice exercised on the template directly, with no interface", async () => {
+      // A transfer factory's choice is defined on the interface. No interface
+      // means some other choice that merely shares the name.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { omitInterfaceId: true },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        factoryRefusal("factory_interface"),
+      );
+    });
+
+    it("refuses an interface whose module is not the Token Standard's", async () => {
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { interfaceId: { moduleName: "Splice.Wallet.Impostor" } },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        factoryRefusal("factory_interface"),
+      );
+    });
+
+    it("refuses an interface whose entity is not TransferFactory", async () => {
+      // Checked separately from the module: one test changing both at once
+      // would leave either arm free to be dropped.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { interfaceId: { entityName: "NotTransferFactory" } },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        factoryRefusal("factory_interface"),
+      );
+    });
+
+    it("refuses a factory the instrument's admin did not sign", async () => {
+      // Right interface, right shape, wrong issuer: an interface anyone can
+      // implement, so the signatory is what binds it to this instrument.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { signatories: ["mallory::1220mal"] },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        factoryRefusal("factory_signatory"),
+      );
+    });
+
+    it("refuses a factory with no signatories at all", async () => {
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { signatories: [] },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        factoryRefusal("factory_signatory"),
+      );
+    });
+
+    it("accepts a factory carrying a registry party beside the admin", async () => {
+      // A registry's factory can name its operator — and a bridged token's its
+      // bridge operator — alongside the admin. The reference facilitator keeps
+      // an allowlist for these, so requiring a sole signatory would refuse
+      // honest transfers.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { signatories: ["DSO::1220dso", "registry-op::1220op"] },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
+    });
+
+    it("accepts the real factory", async () => {
+      // The same path the refusals above deviate from, so they are known to
+      // fail on the rule and not on the fixture.
+      const { payload, requirements } = await buildSignedFixture();
+      expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
+    });
+
+    it("accepts a factory whose template is not Canton Coin's", async () => {
+      // The rule matches the Token Standard INTERFACE, which every registry
+      // implements with its own template. Checking Canton Coin's template
+      // instead would refuse every other registry's instrument, which this
+      // package routes payments to by design.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: {
+          templateId: { moduleName: "Other.Registry.Rules", entityName: "OtherRules" },
+        },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
+    });
+
+    it("accepts an exercise and a disclosure whose package IDS differ", async () => {
+      // Canton documents these may differ once a contract has been upgraded or
+      // downgraded: the exercise names the package the choice resolved
+      // against, the disclosure the one its contract was created under.
+      // Requiring them equal would refuse honest payments for the whole window
+      // of a Splice rollout.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { inputTemplateId: { packageId: "a".repeat(64) } },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
+    });
+  });
+
 });
 
 describe("createVerifierRegistry", () => {
