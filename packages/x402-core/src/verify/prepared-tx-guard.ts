@@ -18,6 +18,7 @@ export type PreparedTransactionGuardFailure =
   | "duplicate_node_id"
   | "duplicate_reference"
   | "missing_node"
+  | "non_canonical_node_id"
   | "unreachable_node";
 
 export type PreparedTransactionGuardResult =
@@ -26,6 +27,26 @@ export type PreparedTransactionGuardResult =
 type PreparedTransactionNode = NonNullable<
   ReturnType<typeof decodePreparedTransaction>["transaction"]
 >["nodes"][number];
+
+/**
+ * A node id as Canton reads it: it parses ids as integers, so "0", "00", "+0"
+ * and "\u0660" are all node 0 to Canton while a string compare tells them apart.
+ * Only the canonical spelling of a non-negative int32 keeps the two in step.
+ *
+ * The signing hash does NOT backstop this: node ids are absent from its
+ * preimage (input contracts are hashed against the literal "unused_node_id"),
+ * and the decode keys nodes by the raw string. So two spellings are two nodes
+ * here and one node at the ledger unless this refuses the non-canonical one.
+ *
+ * Throws, because every caller treats a bad id as "this is not a transaction
+ * we can read" rather than as a value to fall back on.
+ */
+export function canonicalNodeId(id: string): string {
+  if (!/^(0|[1-9][0-9]{0,9})$/.test(id) || Number(id) > 2147483647) {
+    throw new Error(`node id ${JSON.stringify(id)} is not a canonical integer`);
+  }
+  return id;
+}
 
 /** Children traversed recursively by core-tx-visualizer's V2 hasher. */
 function nodeChildren(node: PreparedTransactionNode): readonly string[] {
@@ -62,7 +83,7 @@ export function guardPreparedTransaction(
 
   let decoded: ReturnType<typeof decodePreparedTransaction>;
   try {
-    decoded = decodePreparedTransaction(preparedTransaction);
+    decoded = decodePreparedTransaction(preparedTransaction, { readUnknownField: "throw" });
   } catch {
     return { ok: false, reason: "undecodable" };
   }
@@ -83,8 +104,14 @@ export function guardPreparedTransaction(
 
   const nodes = new Map<string, (typeof transaction.nodes)[number]>();
   for (const node of transaction.nodes) {
-    if (nodes.has(node.nodeId)) return { ok: false, reason: "duplicate_node_id" };
-    nodes.set(node.nodeId, node);
+    let nodeId: string;
+    try {
+      nodeId = canonicalNodeId(node.nodeId);
+    } catch {
+      return { ok: false, reason: "non_canonical_node_id" };
+    }
+    if (nodes.has(nodeId)) return { ok: false, reason: "duplicate_node_id" };
+    nodes.set(nodeId, node);
   }
 
   // Mark a reference when queued, not when visited. This rejects cycles,
