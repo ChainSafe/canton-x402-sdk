@@ -85,6 +85,18 @@ export const CantonRequirementsExtraSchema = v.looseObject({
    */
   executeBeforeSeconds: positiveSeconds,
   /**
+   * The facilitator's own party: the relayer that submits the payer-signed
+   * transfer and pays its traffic fee. Clients MUST NOT alter it, and the
+   * facilitator refuses one that is not its own (Rule 9). Nothing the payer
+   * signs carries it, so core cannot check it — only the facilitator knows
+   * which party it is.
+   *
+   * Optional here although the spec lists it without "(optional)": this schema
+   * is also how a facilitator reads incoming requirements, and requiring it
+   * would refuse every merchant whose SDK predates it.
+   */
+  feePayer: v.optional(nonEmptyString),
+  /**
    * Optional merchant reference. When set, the transfer's metadata MUST carry
    * the identical value under `x402.memo` (Rule 12) — so quoting one makes it
    * part of what the payer signs, not a hint.

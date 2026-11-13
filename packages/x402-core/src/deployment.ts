@@ -76,6 +76,11 @@ export interface CantonDeploymentExtra {
   instrumentId: InstrumentId;
   /** The synchronizer to prepare against. Required of a canton-exact extra. */
   synchronizerId: string;
+  /**
+   * The facilitator's own party, to quote as `extra.feePayer`. Absent when the
+   * facilitator does not advertise one.
+   */
+  feePayer?: string;
 }
 
 /** What a merchant needs in order to quote a canton-exact payment. */
@@ -153,7 +158,8 @@ export function selectDeployments<TExtra>(
 
 /**
  * Read a kind's `extra` as canton-exact: the instruments it settles, each with
- * its symbol and the synchronizer to submit to.
+ * its symbol, the synchronizer to submit to, and the facilitator's own party
+ * when it advertises one.
  *
  * Not exported for the same reason: a second scheme writes its own selector
  * against {@link DeploymentExtraSelector} rather than reaching for this one.
@@ -167,6 +173,9 @@ function cantonExtraSelector(
       const extra: CantonDeploymentExtra = {
         instrumentId,
         synchronizerId: advertised.synchronizerId,
+        // Only when advertised, so an absent one stays absent rather than
+        // turning into a `feePayer: undefined` key.
+        ...(advertised.feePayer === undefined ? {} : { feePayer: advertised.feePayer }),
       };
       return {
         // The advertised symbol when there is one, since the deployment knows

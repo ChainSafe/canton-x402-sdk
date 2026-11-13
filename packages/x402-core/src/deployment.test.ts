@@ -84,6 +84,22 @@ describe("selectCantonDeployments", () => {
     expect(terms.asset).toBe("CC");
   });
 
+  it("carries the facilitator's party when the kind advertises one", () => {
+    // What a merchant quotes as extra.feePayer (Rule 9), read from the service
+    // that will settle rather than configured by hand.
+    const [terms] = selectCantonDeployments(
+      response(kind({ extra: { feePayer: "x402-facilitator::1220aa" } })),
+    );
+    expect(terms.extra.feePayer).toBe("x402-facilitator::1220aa");
+  });
+
+  it("leaves feePayer out when the kind advertises none, rather than setting it undefined", () => {
+    // A facilitator that predates it. An undefined key would still be a key in
+    // the quote's extra; absent has to stay absent.
+    const [terms] = selectCantonDeployments(response(kind()));
+    expect(terms.extra).not.toHaveProperty("feePayer");
+  });
+
   it("refuses a deployment that advertises no synchronizer, naming the field", () => {
     // It is what a payer prepares against, so terms without one are not terms.
     const { synchronizerId: _drop, ...rest } = REQUIRED_EXTRA;
@@ -188,6 +204,12 @@ describe("cantonSupportedExtra (types/facilitator)", () => {
     );
     expect(err).toBeInstanceOf(MalformedSupportedExtraError);
     expect(err.message).toContain("extra.instruments");
+  });
+
+  it("names feePayer when it is advertised empty", () => {
+    const err = catchError(() => cantonSupportedExtra(kind({ extra: { feePayer: "" } }) as never));
+    expect(err).toBeInstanceOf(MalformedSupportedExtraError);
+    expect(err.message).toContain("extra.feePayer");
   });
 
   it("still passes an extra that carries every required key", () => {

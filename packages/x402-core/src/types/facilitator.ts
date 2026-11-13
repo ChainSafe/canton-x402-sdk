@@ -280,11 +280,10 @@ export type SupportedInstrument = v.InferOutput<typeof SupportedInstrumentSchema
  * The canton-exact reading of `kinds[].extra`.
  *
  * `extra` is Optional and scheme-defined in x402 v2 §7.3, so what is in there is
- * this scheme's business. Every field is optional and unknown keys pass: a
- * conforming facilitator may omit any of this, and `extra` is where other
- * deployments put their own keys. Nothing here is trusted to exist — the reader
- * says so when something it needs is missing, instead of taking `undefined` for
- * a value.
+ * this scheme's business. The fields a payer cannot do without are required,
+ * and the reader says which one is missing rather than taking `undefined` for a
+ * value; the rest are optional. Unknown keys pass, since `extra` is where other
+ * deployments put their own.
  */
 export const CantonSupportedExtraSchema = v.looseObject({
   /** Asset transfer methods this deployment speaks, e.g. `transfer-factory`. */
@@ -293,6 +292,11 @@ export const CantonSupportedExtraSchema = v.looseObject({
   synchronizerId: v.pipe(v.string(), v.minLength(1)),
   /** How a prepared transaction travels, e.g. `inline`. */
   carriages: v.array(v.pipe(v.string(), v.minLength(1))),
+  /**
+   * The facilitator's own party, for a merchant to quote as `extra.feePayer`
+   * (Rule 9). Optional: a facilitator that predates it does not advertise one.
+   */
+  feePayer: v.optional(v.pipe(v.string(), v.minLength(1))),
   /**
    * The instruments this deployment lists. Optional: what an absent, empty or
    * unusable list means is the reader's, not the shape's — see

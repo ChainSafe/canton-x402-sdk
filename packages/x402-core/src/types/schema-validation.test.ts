@@ -138,6 +138,18 @@ describe("schema-first guards + parsers", () => {
     expect(isCantonPaymentRequirements(withMemo(42))).toBe(false);
   });
 
+  it("takes extra.feePayer as optional, so a facilitator still reads requirements from an older SDK", () => {
+    const withFeePayer = (feePayer: unknown) => ({
+      ...requirements,
+      extra: { ...requirements.extra, feePayer },
+    });
+    expect(isCantonPaymentRequirements(requirements)).toBe(true); // absent is fine
+    expect(isCantonPaymentRequirements(withFeePayer("x402-facilitator::1220aa"))).toBe(true);
+    // Present but empty names no party, and a number is not one.
+    expect(isCantonPaymentRequirements(withFeePayer(""))).toBe(false);
+    expect(isCantonPaymentRequirements(withFeePayer(42))).toBe(false);
+  });
+
   it("rejects an empty hash or signature in the inner payload", () => {
     // The verifier checks their encodings, but an empty one should not get
     // that far: present but empty is no hash and no signature.
