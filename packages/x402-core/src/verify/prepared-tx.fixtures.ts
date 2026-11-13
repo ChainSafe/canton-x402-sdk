@@ -21,6 +21,11 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+/** A bare `<field>: <string>` entry, for building a repeated field by hand. */
+export function stringField(field: number, s: string): Uint8Array {
+  return Writer.create().uint32(tag(field, WIRE_LEN)).string(s).finish();
+}
+
 /** A Daml `Value` holding a scalar string in the given oneof field. */
 function scalarValue(field: 6 | 7 | 8, s: string): Uint8Array {
   return Writer.create().uint32(tag(field, WIRE_LEN)).string(s).finish();
@@ -90,7 +95,14 @@ function concat(bytes: Uint8Array, extra?: Uint8Array): Uint8Array {
  * The layers the decoder reads, outermost first. `extra` appends raw bytes to
  * one of them, after its honest content, to build non-canonical encodings.
  */
-export type EncodeLayer = "prepared" | "damlNode" | "node" | "exercise" | "receiverField" | "receiver";
+export type EncodeLayer =
+  | "prepared"
+  | "metadata"
+  | "damlNode"
+  | "node"
+  | "exercise"
+  | "receiverField"
+  | "receiver";
 
 export interface EncodeOptions {
   /** Encode records without labels (order-only) to exercise the positional path. */
@@ -304,17 +316,20 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
     .uint32(tag(2, WIRE_LEN))
     .bytes(submitterInfo)
     .uint32(tag(3, WIRE_LEN))
-    .string("test-synchronizer")
+    // What Canton signs: the PHYSICAL id. A fixture that passes none gets the
+    // logical id the requirements fixtures quote, so the pin matches.
+    .string(transfer.synchronizerId ?? "global-domain::1220be58c29e")
     .uint32(tag(5, WIRE_LEN))
     .string("test-transaction")
     .finish();
+  const metadataBytes = concat(metadata, extra.metadata);
 
   const prepared = concat(
     Writer.create()
       .uint32(tag(1, WIRE_LEN))
       .bytes(damlTxn.finish())
       .uint32(tag(2, WIRE_LEN))
-      .bytes(metadata)
+      .bytes(metadataBytes)
       .finish(),
     extra.prepared,
   );

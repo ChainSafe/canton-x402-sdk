@@ -72,11 +72,12 @@ describe("findTransferMismatch", () => {
     network: "canton:devnet",
     amount: "100000000",
     asset: "CC",
-    extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+    extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
     payTo: "merchant::1220dead",
     maxTimeoutSeconds: 60,
   };
   const ok: DecodedTransfer = {
+  synchronizerId: "global-domain::1220be58c29e",
     sender: PAYER,
     receiver: "merchant::1220dead",
     amount: "0.01",
@@ -117,5 +118,68 @@ describe("findTransferMismatch", () => {
     // The payload names no payer, so any sender is accepted here; the ledger
     // checks at execute that the sender signed.
     expect(findTransferMismatch({ ...ok, sender: "someoneelse::1220" }, requirements)).toBeNull();
+  });
+});
+
+describe("the synchronizer the payer signed", () => {
+  const quoted = "global-domain::1220be58c29e";
+  const req = (over = {}) =>
+    ({
+      scheme: "exact",
+      network: "canton:devnet",
+      amount: "100000000",
+      asset: "CC",
+      payTo: "merchant::1220dead",
+      maxTimeoutSeconds: 60,
+      extra: {
+        assetTransferMethod: "transfer-factory",
+        synchronizerId: quoted,
+        executeBeforeSeconds: 120,
+        instrumentId: { id: "Amulet", admin: "DSO::1220dso" },
+        ...over,
+      },
+    }) as unknown as CantonPaymentRequirements;
+  const transfer = (synchronizerId?: string): DecodedTransfer => ({
+    sender: "alice::1220beef",
+    receiver: "merchant::1220dead",
+    amount: "0.01",
+    instrumentId: { id: "Amulet", admin: "DSO::1220dso" },
+    ...(synchronizerId === undefined ? {} : { synchronizerId }),
+  });
+
+  it("takes the logical id exactly", () => {
+    expect(findTransferMismatch(transfer(quoted), req())).toBeNull();
+  });
+
+  it("takes the PHYSICAL id too, which newer Canton signs", () => {
+    // `prepare` takes the logical id and refuses the physical one, yet newer
+    // releases sign the physical form into the bytes it returns. Exact
+    // equality would refuse every honest payment from one of those. The case
+    // above covers the logical form, which is what LocalNet signs.
+    for (const suffix of ["35-2", "0-0", "100-27"]) {
+      expect(findTransferMismatch(transfer(`${quoted}::${suffix}`), req())).toBeNull();
+    }
+  });
+
+  it("refuses anything else after the logical id", () => {
+    // Not "": that is the logical id exactly, which the case above accepts.
+    for (const tail of ["::", "::35", "::35-2-1", "::v35-2", "::35-2x", "-35-2", "x"]) {
+      expect(findTransferMismatch(transfer(`${quoted}${tail}`), req())).toBe("synchronizer");
+    }
+  });
+
+  it("refuses another domain, however similar", () => {
+    for (const other of [
+      "global-domain::1220be58c29f",
+      "other-domain::1220be58c29e",
+      "global-domain::1220be58c29e-extra",
+    ]) {
+      expect(findTransferMismatch(transfer(other), req())).toBe("synchronizer");
+    }
+  });
+
+  it("counts an unsigned synchronizer as a mismatch", () => {
+    // A transfer naming no domain is not one that named the merchant's.
+    expect(findTransferMismatch(transfer(undefined), req())).toBe("synchronizer");
   });
 });

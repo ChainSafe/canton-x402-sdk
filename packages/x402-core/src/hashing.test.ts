@@ -10,7 +10,7 @@ import type { CantonPaymentRequirements } from "./index";
 // requirements — so this test pins byte-for-byte parity. Regenerate ONLY if the facilitator's
 // algorithm intentionally changes (and update the facilitator in lockstep).
 //
-// Last regenerated when `resource` and `description` were dropped (#76). The hash covers every value in the object, so a new field
+// Last regenerated when `extra.synchronizerId` was added (#76). The hash covers every value in the object, so a new field
 // moves it even though the algorithm is untouched. `maxTimeoutSeconds` is the
 // first NUMBER in this vector, so it is also what pins number formatting
 // across the two canonicalizers.
@@ -19,7 +19,12 @@ const REQUIREMENTS: CantonPaymentRequirements = {
   network: "canton:devnet",
   amount: "100000000",
   asset: "CC",
-  extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+  extra: {
+    assetTransferMethod: "transfer-factory",
+    synchronizerId: "global-domain::1220be58c29e",
+    executeBeforeSeconds: 120,
+    instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" },
+  },
   payTo: "merchant::1220dead",
   maxTimeoutSeconds: 60,
 };
@@ -27,11 +32,12 @@ const REQUIREMENTS: CantonPaymentRequirements = {
 const GOLDEN_CANONICAL =
   '{"amount":"100000000","asset":"CC",' +
   '"extra":{"assetTransferMethod":"transfer-factory","executeBeforeSeconds":120,' +
-  '"instrumentId":{"admin":"DSO::1220be58c29e","id":"Amulet"}},' +
+  '"instrumentId":{"admin":"DSO::1220be58c29e","id":"Amulet"},' +
+  '"synchronizerId":"global-domain::1220be58c29e"},' +
   '"maxTimeoutSeconds":60,"network":"canton:devnet",' +
   '"payTo":"merchant::1220dead","scheme":"exact"}';
 
-const GOLDEN_HASH = "7ce2010798b65d3c3082b29a8e1071a96191457a844cac4330aa662f4ca9fb54";
+const GOLDEN_HASH = "d49b82dc50e5d6a80742d88a6f9f4972c7e7eb6bd50869cdda1c080d1e749e5c";
 
 describe("requirements hashing — facilitator parity", () => {
   it("canonicalizes to the golden string (keys sorted, nested sorted)", () => {

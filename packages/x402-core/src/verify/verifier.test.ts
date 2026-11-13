@@ -55,7 +55,7 @@ async function buildSignedFixture(overrides: { executeBeforeSeconds?: number; me
     asset: "CC",
     extra: {
       assetTransferMethod: "transfer-factory",
-      executeBeforeSeconds,
+      synchronizerId: "global-domain::1220be58c29e", executeBeforeSeconds,
       instrumentId: { id: "Amulet", admin: "DSO::1220dso" },
       ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
     },
@@ -314,6 +314,13 @@ describe("cantonExactVerifier", () => {
         { ...requirements, extra: { ...requirements.extra, instrumentId: { id: "USDC", admin: "DSO::1220dso" } } },
         "instrument",
         "invalid_exact_canton_instrument_id_mismatch",
+      ],
+      // Its own code: `transfer_mismatch` here would be a protocol-level code
+      // of ours in the slot a spec-written client matches on.
+      [
+        { ...requirements, extra: { ...requirements.extra, synchronizerId: "other-domain::1220ffff" } },
+        "synchronizer",
+        "invalid_exact_canton_synchronizer_mismatch",
       ],
     ] as const;
     for (const [req, detail, invalidReason] of cases) {

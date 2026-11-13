@@ -18,6 +18,8 @@ import { CantonPaymentRequirements, isCantonPaymentRequirements } from "../types
 import type {
   SchemeVerifier,
   VerifyInvalidReason,
+  CantonExactExtensionReason,
+  SpecVerifyInvalidReason,
   VerifyResponse,
   VerifyResponseInvalid,
 } from "../types/facilitator";
@@ -203,13 +205,56 @@ function fail(
   };
 }
 
-/** The spec's code for each field {@link findTransferMismatch} can name. */
+/**
+ * What distinguishes the PHYSICAL synchronizer id from the LOGICAL one in
+ * `Metadata.synchronizer_id`: `<protocol-version>-<serial>`. Both are the
+ * synchronizer's own, not the participant's — the protocol version is fixed
+ * when it is initialised, the serial steps on a logical upgrade. Two decimal
+ * runs, one hyphen, nothing else.
+ */
+const PHYSICAL_SYNCHRONIZER_SUFFIX = /^[0-9]+-[0-9]+$/;
+
+/**
+ * Is the signed synchronizer id the one the merchant quoted?
+ *
+ * `prepare` takes the logical id and refuses the physical one, and the bytes
+ * it returns carry EITHER form depending on the Canton release — the logical
+ * id on what LocalNet runs, the physical one on newer releases. So both are
+ * taken: exact equality would refuse every honest payment from the latter.
+ *
+ * A suffixed match is not a weakening: the `1220…` is the domain's namespace
+ * fingerprint, so `<quoted>::<n>-<m>` is provably the same domain at some
+ * protocol version and serial. Another name, another fingerprint, a
+ * non-numeric or three-part suffix, or any trailing text is refused, and an
+ * absent id counts as a mismatch.
+ */
+function synchronizerMatches(signed: string | undefined, quoted: string): boolean {
+  if (signed === undefined) return false;
+  if (signed === quoted) return true;
+  if (!signed.startsWith(`${quoted}::`)) return false;
+  return PHYSICAL_SYNCHRONIZER_SUFFIX.test(signed.slice(quoted.length + 2));
+}
+
+/**
+ * The code for each field {@link findTransferMismatch} can name.
+ *
+ * Typed to the spec's table plus this scheme's own extensions, and nothing
+ * else: `VerifyInvalidReason` also admits our protocol-level codes, and one of
+ * them sat here answering the synchronizer — a slot no spec-written client
+ * would have matched. The synchronizer still answers an extension, because the
+ * spec defines no code for it; the type now says so rather than filing it
+ * under the spec's.
+ */
 const MISMATCH_REASON = {
   memo: "invalid_exact_canton_memo_mismatch",
+  synchronizer: "invalid_exact_canton_synchronizer_mismatch",
   receiver: "invalid_exact_canton_merchant_mismatch",
   instrument: "invalid_exact_canton_instrument_id_mismatch",
   amount: "invalid_exact_canton_amount_mismatch",
-} as const satisfies Record<NonNullable<ReturnType<typeof findTransferMismatch>>, VerifyInvalidReason>;
+} as const satisfies Record<
+  NonNullable<ReturnType<typeof findTransferMismatch>>,
+  SpecVerifyInvalidReason | CantonExactExtensionReason
+>;
 
 /** The fields Rule 2 calls the proof. */
 const PROOF_FIELDS = ["preparedTransaction", "preparedTxHash", "signature"] as const;
@@ -386,7 +431,7 @@ export function decodePayloadTransfer(preparedTransaction: string): DecodedTrans
 export function findTransferMismatch(
   transfer: DecodedTransfer,
   requirements: CantonPaymentRequirements,
-): "receiver" | "instrument" | "amount" | "memo" | null {
+): "receiver" | "instrument" | "amount" | "memo" | "synchronizer" | null {
   // No sender check: the sender is the payer by definition (spec Rule 8), and
   // the verifier has already bound the signing key to it by fingerprint.
   // Rule 12, both ways. The spec only requires the check when the merchant
@@ -397,6 +442,12 @@ export function findTransferMismatch(
   // would otherwise credit whichever order a payer chose to name, paying a
   // cheap resource to settle an expensive one.
   if (transfer.memo !== requirements.extra.memo) return "memo";
+  // The domain the payer prepared for, from the signed block, so it is theirs
+  // to commit. Without it a payment lands on whatever synchronizer the
+  // transfer names, which need not be one the merchant settles on.
+  if (!synchronizerMatches(transfer.synchronizerId, requirements.extra.synchronizerId)) {
+    return "synchronizer";
+  }
   if (transfer.receiver !== requirements.payTo) return "receiver";
   // From `extra`, not `asset`: the latter is only a symbol, which cannot say
   // which registry issued the instrument.

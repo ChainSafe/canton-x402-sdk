@@ -69,6 +69,13 @@ export const CantonRequirementsExtraSchema = v.looseObject({
    * why a wrong value is refused here instead of ignored.
    */
   assetTransferMethod: v.literal(ASSET_TRANSFER_METHOD),
+  /**
+   * The synchronizer the payment settles on, as the LOGICAL id
+   * `global-domain::1220…`. Required by the scheme spec, and the only place it
+   * travels since the network id became a name: the payer prepares against it
+   * and the verifier pins the signed transaction to it.
+   */
+  synchronizerId: nonEmptyString,
   instrumentId: InstrumentIdSchema,
   /**
    * Seconds from request time. The client turns it into the transfer's absolute

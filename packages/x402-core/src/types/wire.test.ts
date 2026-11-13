@@ -28,7 +28,7 @@ describe("x402-core wire types", () => {
       network: "canton:devnet",
       amount: "100000000",
       asset: "CC",
-      extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+      extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
       payTo: "merchant::1220dead",
       maxTimeoutSeconds: 60,
     };
@@ -38,7 +38,7 @@ describe("x402-core wire types", () => {
       accepted: requirements,
       payload: {
         assetTransferMethod: "transfer-factory",
-        preparedTransaction: "cHJlcGFyZWQ=",
+    preparedTransaction: "cHJlcGFyZWQ=",
         preparedTxHash: "deadbeef",
         signature: "cafe",
         publicKey: "cHVibGljS2V5",
@@ -149,7 +149,7 @@ describe("x402-core wire types", () => {
       network: "canton:devnet",
       amount: "100000000",
       asset: "CC",
-      extra: { assetTransferMethod: "transfer-factory", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+      extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
       payTo: "merchant::1220dead",
       maxTimeoutSeconds: 60,
     };
