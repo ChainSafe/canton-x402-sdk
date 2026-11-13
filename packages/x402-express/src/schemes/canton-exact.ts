@@ -94,6 +94,16 @@ export interface CantonRequirementsSpec extends BaseRequirementsSpec {
    */
   synchronizerId?: Resolvable<string>;
   /**
+   * The facilitator's own party, quoted as `extra.feePayer`: the relayer that
+   * submits the transfer and pays its traffic fee, and the only value the
+   * facilitator accepts there (Rule 9). Read from `GET /v2/supported`, and the
+   * advertised one always wins, since any other party is refused. So this is
+   * only used where nothing is advertised: `network` pinned alongside a whole
+   * `AssetSpec`, which reads nothing, or a facilitator that does not advertise
+   * one. Left out there, the quote carries no `feePayer`.
+   */
+  feePayer?: Resolvable<string>;
+  /**
    * Seconds of life the payer gives the transfer it signs. Default 120. Unlike
    * `maxTimeoutSeconds` this one reaches the ledger, as the transfer's
    * `executeBefore`, and the verifier refuses a transfer already inside its
@@ -140,6 +150,11 @@ const EXTRA_RULES: Record<keyof typeof CantonRequirementsExtraSchema.entries, Ru
   // another and have the verifier pin the transfer to that instead; the
   // verifier holds the signed transaction to whatever reaches it.
   synchronizerId: { compare: "equal", reason: "policy_synchronizer" },
+  // Clients MUST NOT alter it. The facilitator refuses a party that is not its
+  // own, but the payer signs nothing that carries this, so an altered or
+  // stripped echo is caught here instead of costing a verify call. Absent on
+  // both sides, as when the facilitator advertises none, passes.
+  feePayer: { compare: "equal", reason: "policy_fee_payer" },
   // Echo fidelity only. The payer folds this into the transfer's absolute
   // `executeBefore`, and the verifier checks that deadline is still ahead of
   // now — with no upper bound, so a transfer signed far further out than the
@@ -209,6 +224,9 @@ export const cantonExact: SchemeAdapter<
         assetTransferMethod: ASSET_TRANSFER_METHOD,
         synchronizerId: terms.synchronizerId,
         instrumentId: terms.instrumentId,
+        // Only when there is one: an undefined key would still be a key, and
+        // the payer echoes `extra` whole.
+        ...(terms.feePayer === undefined ? {} : { feePayer: terms.feePayer }),
         executeBeforeSeconds:
           spec.executeBeforeSeconds === undefined
             ? DEFAULT_EXECUTE_BEFORE_SECONDS
@@ -248,6 +266,7 @@ async function resolveDeploymentTerms(
   asset: string;
   synchronizerId: string;
   instrumentId: AssetSpec["instrumentId"];
+  feePayer?: string;
 }> {
   const scheme = await resolve(spec.scheme ?? cantonExact.id, req);
   const network = spec.network === undefined ? undefined : await resolve(spec.network, req);
@@ -275,6 +294,7 @@ async function resolveDeploymentTerms(
       asset: assetSymbol(pinned.instrumentId),
       synchronizerId,
       instrumentId: pinned.instrumentId,
+      feePayer: await merchantFeePayer(req, spec),
     };
   }
 
@@ -299,7 +319,30 @@ async function resolveDeploymentTerms(
         ? advertised.extra.synchronizerId
         : await resolve(spec.synchronizerId, req),
     instrumentId: pinned?.instrumentId ?? advertised.extra.instrumentId,
+    // The facilitator's own, whatever the merchant named: Rule 9 refuses any
+    // other party. Unlike the synchronizer, which is the merchant's choice.
+    feePayer: advertised.extra.feePayer ?? (await merchantFeePayer(req, spec)),
   };
+}
+
+/**
+ * The merchant's `feePayer`, for where the facilitator advertises none. A
+ * {@link TermsError} for an empty one, since it would name no party and the
+ * payer would echo it into a payment the middleware then refuses as malformed.
+ */
+async function merchantFeePayer(
+  req: Request,
+  spec: CantonRequirementsSpec,
+): Promise<string | undefined> {
+  if (spec.feePayer === undefined) return undefined;
+  const feePayer = await resolve(spec.feePayer, req);
+  if (typeof feePayer !== "string" || feePayer.length === 0) {
+    throw new TermsError(
+      "paymentRequired: `feePayer` names no party. Give the facilitator's own party id, " +
+        "or leave it out.",
+    );
+  }
+  return feePayer;
 }
 
 /**

@@ -120,6 +120,23 @@ describe("CantonX402Payer.authorize", () => {
     );
   });
 
+  it("echoes the quoted feePayer untouched, and does not need one to pay", async () => {
+    // Clients MUST NOT alter extra.feePayer, and nothing the payer signs
+    // carries it: it reaches the facilitator only inside `accepted`. A payer
+    // that rebuilt `accepted` from the keys it knows would drop it, and the
+    // merchant would refuse the payment as policy_fee_payer.
+    const { sdk } = mockSdk();
+    const payer = makePayer(sdk);
+    const quoted = makeRequirements({ extra: { ...EXTRA, feePayer: "x402-facilitator::1220fa" } });
+    expect(payer.supports(quoted)).toBe(true);
+    const result = await payer.authorize(quoted);
+    expect((result.accepted.extra as { feePayer?: string }).feePayer).toBe(
+      "x402-facilitator::1220fa",
+    );
+    // A merchant on an SDK that predates it quotes none, and that still pays.
+    expect(payer.supports(makeRequirements())).toBe(true);
+  });
+
   it("gives the transfer the quoted deadline, not the wallet SDK's default", async () => {
     // Left unset the SDK picks 24 hours, which would make the merchant's
     // horizon decorative and Rule 10 pass on every payment regardless.

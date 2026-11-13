@@ -1299,6 +1299,22 @@ describe("paymentRequired: which quote a payment is for", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects a feePayer the merchant did not quote", async () => {
+    // Clients MUST NOT alter extra.feePayer, and adding one to a quote that
+    // carried none is altering it. Nothing the payer signs carries it, so this
+    // is the check that stops it before it costs a verify call.
+    const fetchMock = stubFacilitator();
+    const res = await request(makeApp())
+      .get("/paid")
+      .set(
+        "PAYMENT-SIGNATURE",
+        paymentHeader({ extra: { ...ECHOED_EXTRA, feePayer: "someone-else::1220ffff" } }),
+      );
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("policy_fee_payer");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects an echoed executeBeforeSeconds the merchant did not quote", async () => {
     // It reaches the ledger as the transfer's executeBefore, so echoing another
     // value is the payer choosing how long the quote stays settleable.
@@ -1548,6 +1564,8 @@ describe("paymentRequired: configuring from /v2/supported", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   const DSO = "DSO::1220be58";
+  /** The facilitator's own party, as it advertises it for extra.feePayer. */
+  const FACILITATOR = "x402-facilitator::1220fa";
   const SUPPORTED = {
     kinds: [
       {
@@ -1558,10 +1576,16 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           transferMethods: ["transfer-factory"],
           synchronizerId: SYNC,
           carriages: ["inline"],
+          feePayer: FACILITATOR,
           instruments: [{ admin: DSO, instrumentId: { id: "Amulet", admin: DSO }, symbol: "CC" }],
         },
       },
     ],
+  };
+  /** The same deployment from a facilitator that predates feePayer. */
+  const { feePayer: _advertised, ...EXTRA_WITHOUT_FEE_PAYER } = SUPPORTED.kinds[0].extra;
+  const SUPPORTED_WITHOUT_FEE_PAYER = {
+    kinds: [{ ...SUPPORTED.kinds[0], extra: EXTRA_WITHOUT_FEE_PAYER }],
   };
 
   /** A facilitator that also answers discovery. */
@@ -1822,6 +1846,147 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     ).get("/paid");
     expect(res.status).toBe(402);
     expect(res.body.accepts[0].extra.instrumentId).toEqual({ id: "USDCx", admin: "ISSUER::x" });
+  });
+
+  describe("the facilitator's party, quoted as extra.feePayer", () => {
+    const verifyCalls = (fetchMock: ReturnType<typeof stubWithSupported>) =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes("/v2/verify"));
+
+    /** baseOptions' merchant, which pins everything, naming a feePayer too. */
+    const pinnedNaming = (feePayer: string, over: Partial<PaymentRequiredOptions> = {}) =>
+      makeApp({
+        ...over,
+        requirements: {
+          network: "canton:x",
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          accepts: [
+            {
+              asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+              synchronizerId: SYNC,
+              feePayer,
+              amount: "500000000",
+            },
+          ],
+        },
+      });
+
+    /** A discovering merchant that also names a feePayer of its own. */
+    const namingItsOwn = (feePayer: string) =>
+      discoveringApp({
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          feePayer,
+          accepts: [{ amount: "500000000", asset: "Amulet" }],
+        },
+      });
+
+    it("quotes the party the facilitator advertises", async () => {
+      stubWithSupported();
+      const res = await request(discoveringApp()).get("/paid");
+      expect(res.status).toBe(402);
+      expect(res.body.accepts[0].extra.feePayer).toBe(FACILITATOR);
+    });
+
+    it("quotes the advertised party over the merchant's own", async () => {
+      // Rule 9 refuses any party but the facilitator's, so the merchant's
+      // value can only be wrong here. Unlike the synchronizer, which it may
+      // overrule.
+      stubWithSupported();
+      const res = await request(namingItsOwn("merchant-guess::1220dead")).get("/paid");
+      expect(res.status).toBe(402);
+      expect(res.body.accepts[0].extra.feePayer).toBe(FACILITATOR);
+    });
+
+    it("quotes none when the facilitator advertises none, and the payment still goes through", async () => {
+      // A facilitator that predates feePayer. The ChainSafe one accepts an
+      // absent feePayer for now, so the merchant must not fail its 402 over it.
+      const fetchMock = stubWithSupported(SUPPORTED_WITHOUT_FEE_PAYER);
+      const app = discoveringApp();
+      const challenge = await request(app).get("/paid");
+      expect(challenge.status).toBe(402);
+      const quote = challenge.body.accepts[0];
+      expect(quote.extra).not.toHaveProperty("feePayer");
+      expect(isCantonPaymentRequirements(quote)).toBe(true);
+      const res = await request(app)
+        .get("/paid")
+        .set(
+          "PAYMENT-SIGNATURE",
+          paymentHeader({ network: "canton:devnet", asset: "CC", extra: quote.extra }),
+        );
+      expect(res.status).toBe(200);
+      expect(verifyCalls(fetchMock)).toHaveLength(1);
+    });
+
+    it("falls back to the merchant's party when the facilitator advertises none", async () => {
+      stubWithSupported(SUPPORTED_WITHOUT_FEE_PAYER);
+      const res = await request(namingItsOwn(FACILITATOR)).get("/paid");
+      expect(res.status).toBe(402);
+      expect(res.body.accepts[0].extra.feePayer).toBe(FACILITATOR);
+    });
+
+    it("verifies a payment that echoes the quoted party", async () => {
+      const fetchMock = stubWithSupported();
+      const app = discoveringApp();
+      const quote = (await request(app).get("/paid")).body.accepts[0];
+      expect(quote.extra.feePayer).toBe(FACILITATOR);
+      const res = await request(app)
+        .get("/paid")
+        .set(
+          "PAYMENT-SIGNATURE",
+          paymentHeader({ network: "canton:devnet", asset: "CC", extra: quote.extra }),
+        );
+      expect(res.status).toBe(200);
+      expect(verifyCalls(fetchMock)).toHaveLength(1);
+    });
+
+    it("refuses an altered or a stripped feePayer before calling the facilitator", async () => {
+      const fetchMock = stubWithSupported();
+      const app = discoveringApp();
+      const quote = (await request(app).get("/paid")).body.accepts[0];
+      const { feePayer: _quoted, ...stripped } = quote.extra;
+      for (const extra of [{ ...quote.extra, feePayer: "someone-else::1220ffff" }, stripped]) {
+        const res = await request(app)
+          .get("/paid")
+          .set(
+            "PAYMENT-SIGNATURE",
+            paymentHeader({ network: "canton:devnet", asset: "CC", extra }),
+          );
+        expect(res.status).toBe(402);
+        expect(res.body.error).toBe("policy_fee_payer");
+      }
+      expect(verifyCalls(fetchMock)).toHaveLength(0);
+    });
+
+    it("quotes the merchant's party where nothing is discovered, without calling /v2/supported", async () => {
+      // `network` and a whole `asset` pinned: the one path with no advertised
+      // party to read, so the merchant's is all there is.
+      const fetchMock = stubWithSupported();
+      const res = await request(pinnedNaming(FACILITATOR)).get("/paid");
+      expect(res.status).toBe(402);
+      expect(res.body.accepts[0].extra.feePayer).toBe(FACILITATOR);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("quotes none where nothing is discovered and the merchant names none", async () => {
+      stubWithSupported();
+      const res = await request(makeApp()).get("/paid");
+      expect(res.status).toBe(402);
+      expect(res.body.accepts[0].extra).not.toHaveProperty("feePayer");
+    });
+
+    it("is a TermsError when the merchant's party is empty", async () => {
+      // It would name no party, and the payer would echo it into a payment
+      // refused as malformed. The merchant's config, so it fails loudly.
+      stubWithSupported();
+      const onReject = vi.fn();
+      const res = await request(pinnedNaming("", { onReject })).get("/paid");
+      expect(res.status).toBe(500);
+      const { error } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(error).toBeInstanceOf(TermsError);
+      expect((error as Error).message).toMatch(/`feePayer` names no party/);
+    });
   });
 
   it("answers 502 when the facilitator cannot be reached for discovery", async () => {
@@ -2249,6 +2414,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
             extra: {
               assetTransferMethod: "transfer-factory",
               synchronizerId: SYNC,
+              feePayer: FACILITATOR,
               executeBeforeSeconds: 120,
               instrumentId: { id: "Amulet", admin: DSO },
             },
