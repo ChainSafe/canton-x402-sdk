@@ -309,6 +309,9 @@ async function resolveDeploymentTerms(
   const advertised = exactlyOne(
     await selectCantonDeployments(await ctx.facilitator.supported(), prefer),
   );
+  // Resolved even when the advertised party wins, so an empty one fails now
+  // rather than on the day the facilitator stops advertising.
+  const merchantsFeePayer = await merchantFeePayer(req, spec);
   return {
     scheme,
     network: network ?? advertised.network,
@@ -321,13 +324,14 @@ async function resolveDeploymentTerms(
     instrumentId: pinned?.instrumentId ?? advertised.extra.instrumentId,
     // The facilitator's own, whatever the merchant named: Rule 9 refuses any
     // other party. Unlike the synchronizer, which is the merchant's choice.
-    feePayer: advertised.extra.feePayer ?? (await merchantFeePayer(req, spec)),
+    feePayer: advertised.extra.feePayer ?? merchantsFeePayer,
   };
 }
 
 /**
  * The merchant's `feePayer`, for where the facilitator advertises none. A
- * {@link TermsError} for an empty one, since it would name no party and the
+ * {@link TermsError} for an empty one, whether or not it is used, since it
+ * would name no party and the
  * payer would echo it into a payment the middleware then refuses as malformed.
  */
 async function merchantFeePayer(

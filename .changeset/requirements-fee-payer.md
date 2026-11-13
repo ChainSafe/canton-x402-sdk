@@ -25,14 +25,18 @@ alter it.
 `CantonDeploymentExtra` and `CantonRequirementsExtraSchema`. It is optional
 because the requirements schema is also how a facilitator reads what merchants
 send, and requiring it would refuse every merchant on an older SDK. Core's
-verifier does not check it: nothing the payer signs carries it, and only the
-facilitator knows which party it is.
+verifier does not check Rule 9: nothing the payer signs carries the party, and
+only the facilitator knows which one it is. It does now refuse a malformed one
+(empty, `null` or not a string) as `invalid_payment_requirements`, as it does a
+malformed `memo`, so a facilitator on this core answers that before its own
+Rule 9 check.
 
 **Express.** The middleware quotes the `feePayer` the facilitator advertises in
 `kinds[].extra` on `GET /v2/supported`, and quotes none when it advertises none.
-A new optional `feePayer` on the requirements spec covers the path that reads
-nothing, `network` pinned alongside a whole `asset`. The advertised party always
-wins over it, since any other is refused, and an empty one is a `TermsError`.
+A new optional `feePayer` on the requirements spec is quoted only where nothing
+is advertised: `network` pinned alongside a whole `asset`, which reads nothing,
+or a facilitator that does not advertise one. The advertised party always wins
+over it, since any other is refused. An empty one is a `TermsError` either way.
 
 On the paid retry an echoed `feePayer` is held to the quote like the
 synchronizer is, so an altered, stripped or added one answers

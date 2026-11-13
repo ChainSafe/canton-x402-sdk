@@ -1976,16 +1976,31 @@ describe("paymentRequired: configuring from /v2/supported", () => {
       expect(res.body.accepts[0].extra).not.toHaveProperty("feePayer");
     });
 
-    it("is a TermsError when the merchant's party is empty", async () => {
+    it("is a TermsError when the merchant's party is empty, even while one is advertised", async () => {
       // It would name no party, and the payer would echo it into a payment
-      // refused as malformed. The merchant's config, so it fails loudly.
+      // refused as malformed. The merchant's config, so it fails loudly — and
+      // now, not on the day the facilitator stops advertising its own.
       stubWithSupported();
-      const onReject = vi.fn();
-      const res = await request(pinnedNaming("", { onReject })).get("/paid");
-      expect(res.status).toBe(500);
-      const { error } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
-      expect(error).toBeInstanceOf(TermsError);
-      expect((error as Error).message).toMatch(/`feePayer` names no party/);
+      for (const app of [
+        (onReject: () => void) => pinnedNaming("", { onReject }),
+        (onReject: () => void) =>
+          discoveringApp({
+            onReject,
+            requirements: {
+              payTo: "merchant::x",
+              resource: "https://f.example/paid",
+              feePayer: "",
+              accepts: [{ amount: "500000000", asset: "Amulet" }],
+            },
+          }),
+      ]) {
+        const onReject = vi.fn();
+        const res = await request(app(onReject)).get("/paid");
+        expect(res.status).toBe(500);
+        const { error } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+        expect(error).toBeInstanceOf(TermsError);
+        expect((error as Error).message).toMatch(/`feePayer` names no party/);
+      }
     });
   });
 
