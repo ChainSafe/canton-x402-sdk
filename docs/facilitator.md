@@ -44,7 +44,10 @@ facilitator's alone, since only it holds the state involved:
    rejected: `invalid_exact_canton_merchant_mismatch`,
    `invalid_exact_canton_instrument_id_mismatch`,
    `invalid_exact_canton_amount_mismatch` or
-   `invalid_exact_canton_memo_mismatch`. The amount
+   `invalid_exact_canton_memo_mismatch`. A transaction prepared on a
+   synchronizer other than `extra.synchronizerId` is
+   `invalid_exact_canton_synchronizer_mismatch`, a ChainSafe extension: the
+   spec defines no code for it. The amount
    must be EQUAL, not merely sufficient — `exact` is the scheme's
    distinguishing property, and a payer who overpays has no refund path. The
    transfer's `x402.memo` must equal your `extra.memo` exactly — in both
@@ -56,6 +59,13 @@ facilitator's alone, since only it holds the state involved:
    `payTo` must be a party that key is allowed to receive at (your destination
    policy). A destination denial comes back as `transfer_mismatch` with a
    `destination_not_allowed` detail on verify, and as `unauthorized` on settle.
+
+The facilitator also holds the payment to its own party, which only it knows,
+and refuses with the spec's codes: an `extra.feePayer` naming another party is
+`invalid_exact_canton_fee_payer_mismatch` (Rule 9), and a transfer whose sender
+is the facilitator's own party is `invalid_exact_canton_self_payment`
+(Rule 11). An absent `extra.feePayer` still passes for now; a later release
+will refuse it.
 
 ## What settlement does
 

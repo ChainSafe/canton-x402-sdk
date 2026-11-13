@@ -42,9 +42,11 @@ app.use(
       accepts: [
         { amount: "500000000", asset: "Amulet" }, // atomic units: 1 CC = 1e10
       ],
-      // `asset` names the instrument; its registry party and the `network`
-      // are read from the facilitator's /v2/supported. Pin them yourself by
-      // setting `network`, and `asset: { instrumentId: { id, admin } }`.
+      // `asset` names the instrument; its registry party, the `network`, the
+      // synchronizer and the facilitator's own party (`feePayer`) are read
+      // from the facilitator's /v2/supported. Pin `network` and
+      // `asset: { instrumentId: { id, admin } }` to skip that, and name
+      // `synchronizerId` and `feePayer` yourself then.
     },
   }),
 );
@@ -103,9 +105,12 @@ Verification uses the requirements the payment carries as **`accepted`**, not
 freshly-rebuilt ones: the payer signed a transfer against *those*, and the
 scheme's job is to check the signed transfer against them. They are not
 themselves signed, which is why they are first held against your own terms —
-`scheme`, `network`, `payTo`, the instrument (not just its symbol),
-the quoted `executeBeforeSeconds`, `maxTimeoutSeconds`, and an amount that is
-not under the price.
+`scheme`, `network`, `payTo`, the instrument (not just its symbol), the
+synchronizer, the fee payer, the quoted `executeBeforeSeconds`,
+`maxTimeoutSeconds`, and an amount that is not under the price. An altered
+`extra.synchronizerId` is `policy_synchronizer`, and an `extra.feePayer` that
+was altered, stripped or added is `policy_fee_payer` (absent on both sides
+passes); neither costs a verify.
 
 Each field is classified once, in a table keyed off a schema's own entries — the
 common fields in the middleware, `extra` in the scheme adapter — so a field
@@ -204,15 +209,17 @@ requirements: {
 
 Every entry is a spec, so each gets discovery and the defaults, and there is no privileged first entry. Any shared field except `resource` and `description` — which name the sale, not a way of paying for it — may be overridden per entry (a second instrument settling to a different party, say), and each entry carries its own price, because 0.05 of one token is not 0.05 of another and nothing here checks two entries are worth the same.
 
-Per-entry fields are `{ amount, asset, executeBeforeSeconds?, memo? }` plus an override of any shared one but `resource` and `description`. Any of them may also be set **once at the top level**, beside `payTo`, and `memo` usually should be — see below. `amount` and `asset` are required on every entry regardless, so naming those at the top level does nothing. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120). Every field may be a fixed value **or** a `(req) => value` resolver.
+Per-entry fields are `{ amount, asset, synchronizerId?, feePayer?, executeBeforeSeconds?, memo? }` plus an override of any shared one but `resource` and `description`. Any of them may also be set **once at the top level**, beside `payTo`, and `memo` usually should be — see below. `amount` and `asset` are required on every entry regardless, so naming those at the top level does nothing. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod`, `extra.executeBeforeSeconds` (default 120), and `extra.synchronizerId` and `extra.feePayer` from `/v2/supported` (see below). Every field may be a fixed value **or** a `(req) => value` resolver.
 
-For full control, a **builder** `(req) => CantonPaymentRequirements[]` returns the whole list and you own `maxTimeoutSeconds` and the whole of `extra`.
+For full control, a **builder** `(req) => CantonPaymentRequirements[]` returns the whole list and you own `maxTimeoutSeconds` and the whole of `extra`, `synchronizerId` and `feePayer` included.
 
 `payTo`, and each entry's `amount` and `asset`, are what you must give. `amount` is atomic units *of something*, so every way to pay says what — there is no deployment default to fall back on, and quoting one would be choosing what you charge.
 
 `asset` takes either form. An **instrument id** — `"Amulet"` for Canton Coin, which is the one id that differs from its wire symbol (`"CC"`) — names the instrument and leaves the registry party to the facilitator's `GET /v2/supported`, so that party is read from the service doing the validating instead of living as a second copy in your config. The whole `{ instrumentId: { id, admin } }` pins it, admin included.
 
 `network` is the one field discovery can supply on its own, and it is narrowed to the instrument the entry names, so the network quoted is one that settles it. Pin it to skip that. The `/v2/supported` response is cached by `FacilitatorClient` (`supportedTtlMs`, default 5 minutes), so discovery is one round trip per TTL and none at all when `network` and a whole `asset` are both pinned.
+
+Two more values come from there. `extra.synchronizerId` is the synchronizer the payer prepares its transfer on, as the logical id `global-domain::1220…`; set `synchronizerId` to name it yourself, and you must when `network` and a whole `asset` are both pinned, since nothing is read then. `extra.feePayer` is the facilitator's own party, which relays the transfer and pays its traffic fee. The advertised one always wins, because the facilitator refuses any other party, so a `feePayer` you set is used only when `/v2/supported` supplies none — chiefly in that fully pinned case. With neither, the entry carries no `feePayer`: the ChainSafe facilitator still accepts that for now, but a later release will refuse it, as the upstream reference facilitator already does.
 
 If more than one network settles the instrument, or the id the entry names is not one the deployment carries, that is an error rather than a guess — and the refusal lists what it does carry.
 

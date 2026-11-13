@@ -37,6 +37,7 @@ None required. There is no request body.
       "extra": {
         "transferMethods": ["transfer-factory"],
         "synchronizerId": "global-domain::1220be58c2…",
+        "feePayer": "x402-facilitator::1220…",
         "carriages": ["inline"],
         "instruments": [
           {
@@ -53,7 +54,8 @@ None required. There is no request body.
         }
       }
     }
-  ]
+  ],
+  "signers": { "canton:*": ["x402-facilitator::1220…"] }
 }
 ```
 
@@ -65,11 +67,13 @@ None required. There is no request body.
 | `scheme`                   | `exact` — the scheme id defined by the registered Canton scheme spec. Copy into `paymentRequirements.scheme`.                                                                              |
 | `network`                  | A network name: `canton:mainnet`, `canton:testnet`, `canton:devnet` or `canton:localnet`. It does not carry the synchronizer id — read it from here rather than deriving it.              |
 | `extra.instruments[]`      | What the deployment settles, one entry per instrument: `instrumentId` as `{ id, admin }`, the registry `admin` party, and a display `symbol`. `admin` is the party the facilitator checks a payment's holding against, so configure from here rather than by hand. `paymentRequired()` reads the `admin` for you when a way to pay names its `asset` by id. |
-| `extra.synchronizerId`     | The synchronizer the deployment submits to — the id a payer prepares its transfer against. |
+| `extra.synchronizerId`     | The synchronizer the deployment submits to, as the logical id `global-domain::1220…`. Copy it into the requirements' `extra.synchronizerId`: it is the id a payer prepares its transfer against. `paymentRequired()` reads it for you. |
+| `extra.feePayer`           | The facilitator's own Canton party: it relays the payer-signed transfer and pays its traffic fee. Copy it into the requirements' `extra.feePayer` unchanged, since the facilitator refuses any other party. Optional: an older facilitator does not advertise one. `paymentRequired()` reads it for you. |
 | `extra.transferMethods[]`  | The asset transfer methods it speaks; `transfer-factory` for canton-exact. |
 | `extra.carriages[]`        | How a prepared transaction travels. `inline` means it is carried in the `PAYMENT-SIGNATURE` header itself. |
 | `extra.asset.instrumentId` | **Superseded by `extra.instruments[]`**, which says the same thing and can say it for more than one instrument. Still sent for merchants reading it; prefer `instruments`. |
-| `extra.*`                  | `extra` is Optional and scheme-defined in x402 v2 §7.3, so a deployment may add its own keys and omit any of the above. Read what you need and ignore the rest. |
+| `extra.*`                  | `extra` is Optional and scheme-defined in x402 v2 §7.3, so a deployment may add its own keys and omit any of the above. Read what you need and ignore the rest. The SDK does need `transferMethods`, `synchronizerId` and `carriages`, and refuses a canton-exact kind without them. |
+| `signers`                  | Top level, beside `kinds`: the same party as `extra.feePayer`, keyed by network pattern. The SDK reads `extra.feePayer` instead. |
 
 ### curl
 
@@ -122,7 +126,9 @@ guarantee.
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
+      "synchronizerId": "global-domain::1220be58c2…",
       "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
+      "feePayer": "x402-facilitator::1220…",
       "executeBeforeSeconds": 120
     },
     "payTo": "merchant::1220…",
@@ -145,6 +151,8 @@ guarantee.
 | `extra.instrumentId`                        | Required `{admin, id}`: `asset` alone cannot say which registry issued the instrument, and the facilitator binds the transfer against this.
 | `maxTimeoutSeconds`                         | Required — seconds the client has to complete payment. A whole number of at least 1; `0`, a negative, a fraction and `Infinity` are all refused.
 | `extra.assetTransferMethod`                 | Required, and MUST be `"transfer-factory"`. A reserved protocol key, so any other value is refused rather than carried through as scheme data.
+| `extra.synchronizerId`                      | Required — the logical synchronizer id (`global-domain::1220…`) from `/v2/supported`. The payer prepares its transfer on it, and a transaction prepared on another synchronizer is refused with `invalid_exact_canton_synchronizer_mismatch`.
+| `extra.feePayer`                            | The facilitator's own party, copied unchanged from `/v2/supported`. Any other party is refused with `invalid_exact_canton_fee_payer_mismatch` (spec Rule 9). Optional for now: an absent one is still accepted, and a later release will refuse it.
 | `extra.executeBeforeSeconds`                | Required — seconds from request time. The client turns it into the transfer's `executeBefore`; verification refuses a transfer whose deadline is not still at least 5 seconds ahead (`invalid_exact_canton_expired`).
 | `extra.memo`                                | Optional, UTF-8, at most 256 **bytes**. Binds in both directions: the transfer's `x402.memo` must equal it exactly, and a transfer carrying one when you quoted none is refused too — `x402.memo` is the scheme's key, not the payer's. Either way the refusal is `invalid_exact_canton_memo_mismatch`.
 | `description`                               | Optional.                                                                                                                                                                                                                                                                      |
@@ -181,6 +189,11 @@ them:
 `invalid_exact_canton_instrument_id_mismatch`,
 `invalid_exact_canton_memo_mismatch`, `invalid_exact_canton_expired`
 
+One shared check answers with a ChainSafe extension instead, since the spec
+names `extra.synchronizerId` but defines no code for it:
+`invalid_exact_canton_synchronizer_mismatch`, for a transaction prepared on
+another synchronizer. A client written against the spec will not recognise it.
+
 `extensions.reason` carries the code each of them answered with before:
 `scheme_mismatch`, `network_mismatch`, `bad_fingerprint`, `bad_signature`,
 `prepared_transaction_hash_mismatch`, `invalid_prepared_transaction_structure`,
@@ -189,7 +202,12 @@ them:
 say, such as the field of a transfer that does not match.
 
 The facilitator's own checks still answer with its own codes: `nonce_replayed`,
-and `transfer_mismatch` with detail `destination_not_allowed`.
+and `transfer_mismatch` with detail `destination_not_allowed`. The two that
+need its own party answer with the spec's:
+`invalid_exact_canton_fee_payer_mismatch` when `extra.feePayer` names another
+party (Rule 9), and `invalid_exact_canton_self_payment` when the transfer's
+sender is the facilitator's party (Rule 11). An absent `extra.feePayer` still
+passes for now.
 
 A body that is not a well-formed request answers `400` with
 `invalidReason: "bad_request"`, and an unexpected fault answers `500` with
@@ -223,7 +241,9 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
+      "synchronizerId": "global-domain::1220be58c2…",
       "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
+      "feePayer": "x402-facilitator::1220…",
       "executeBeforeSeconds": 120
     },
     "payTo": "merchant::1220…",
@@ -276,7 +296,9 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
+      "synchronizerId": "global-domain::1220be58c2…",
       "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
+      "feePayer": "x402-facilitator::1220…",
       "executeBeforeSeconds": 120
     },
     "payTo": "merchant::1220…",

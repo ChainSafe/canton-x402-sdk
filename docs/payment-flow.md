@@ -24,9 +24,11 @@ server (step 4).
    paid for: the request URL and the route's description. Each `accepts` entry
    carries `scheme`,
    `network`, `amount`, `asset`, `extra.assetTransferMethod`,
+   `extra.synchronizerId` (the synchronizer the payer prepares on),
    `extra.instrumentId`, `extra.executeBeforeSeconds` (120 by default, and
-   optionally an `extra.memo`), `payTo` (your Canton party) and a
-   `maxTimeoutSeconds` (60 by default).
+   optionally an `extra.memo`), `extra.feePayer` (the facilitator's own party,
+   which pays the transfer's traffic fee, when the facilitator advertises one),
+   `payTo` (your Canton party) and a `maxTimeoutSeconds` (60 by default).
 
 2. **Payer builds the transfer**
 

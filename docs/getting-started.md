@@ -54,8 +54,10 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
 4. **Know what your facilitator settles (you do not have to configure it)**
 
    `GET $FACILITATOR_URL/v2/supported` says what a deployment settles: the
-   `network` id, and in `kinds[].extra` the synchronizer it submits to and the
-   instruments it validates, each with the registry party that admins it.
+   `network` id, and in `kinds[].extra` the synchronizer it submits to, the
+   facilitator's own party (`feePayer`, which pays each transfer's traffic
+   fee), and the instruments it validates, each with the registry party that
+   admins it.
 
    The middleware reads this for you. Name the instrument by id — `asset:
    "Amulet"` — and leave `network` out, and the rest comes from the facilitator:
@@ -67,8 +69,10 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
    `asset` itself is required on every way to pay: `amount` is atomic units of
    something, so each entry says what. Pin the rest to skip the lookup
    entirely — `network`, and `asset: { instrumentId: { id, admin } }` for the
-   registry party. If the facilitator settles that instrument on more than one
-   network, naming one with `network` is required rather than guessed. The
+   registry party. Nothing is read then, so name `synchronizerId` too, and
+   `feePayer` to quote the facilitator's party. If the facilitator settles
+   that instrument on more than one network, naming one with `network` is
+   required rather than guessed. The
    [API reference](/api-reference#get-v2-supported) describes every field.
 
 5. **Gate a route**
