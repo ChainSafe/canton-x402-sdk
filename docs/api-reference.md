@@ -55,6 +55,7 @@ None required. There is no request body.
       }
     }
   ],
+  "extensions": [],
   "signers": { "canton:*": ["x402-facilitator::1220…"] }
 }
 ```
@@ -74,6 +75,7 @@ None required. There is no request body.
 | `extra.asset.instrumentId` | **Superseded by `extra.instruments[]`**, which says the same thing and can say it for more than one instrument. Still sent for merchants reading it; prefer `instruments`. |
 | `extra.*`                  | `extra` is Optional and scheme-defined in x402 v2 §7.3, so a deployment may add its own keys and omit any of the above. Read what you need and ignore the rest. The SDK does need `transferMethods`, `synchronizerId` and `carriages`, and refuses a canton-exact kind without them. |
 | `signers`                  | Top level, beside `kinds`: the same party as `extra.feePayer`, keyed by network pattern. The SDK reads `extra.feePayer` instead. |
+| `extensions`               | Top level: the x402 extensions the facilitator supports. None today. |
 
 ### curl
 

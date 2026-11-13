@@ -56,7 +56,8 @@ server (step 4).
 5. **Merchant verifies, then settles**
 
    Your middleware re-checks the payment against your own terms — scheme,
-   network, `payTo`, asset, `maxTimeoutSeconds`, and that it is
+   network, `payTo`, asset, the synchronizer, the fee payer,
+   `maxTimeoutSeconds`, and that it is
    neither underpriced nor expired — using the exact requirements the payment was built against, its
    `accepted`, which the facilitator then holds the signed transfer to, so a
    payment built for other terms can't pass. It then POSTs
