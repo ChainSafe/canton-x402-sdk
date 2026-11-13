@@ -94,6 +94,13 @@ export interface CantonRequirementsSpec extends BaseRequirementsSpec {
    */
   synchronizerId?: Resolvable<string>;
   /**
+   * The relayer to quote as `extra.feePayer`. Read from `GET /v2/supported`
+   * when discovery runs, so a merchant names it only to override that, or
+   * where nothing is discovered. Required: quoting fails if neither can
+   * supply one.
+   */
+  feePayer?: Resolvable<string>;
+  /**
    * Seconds of life the payer gives the transfer it signs. Default 120. Unlike
    * `maxTimeoutSeconds` this one reaches the ledger, as the transfer's
    * `executeBefore`, and the verifier refuses a transfer already inside its
@@ -140,6 +147,11 @@ const EXTRA_RULES: Record<keyof typeof CantonRequirementsExtraSchema.entries, Ru
   // another and have the verifier pin the transfer to that instead; the
   // verifier holds the signed transaction to whatever reaches it.
   synchronizerId: { compare: "equal", reason: "policy_synchronizer" },
+  // Not `equal`: that asks "is this what I quoted?", and a 402 issued before a
+  // party rotation echoes the old one — which the facilitator still answers to
+  // and would accept. Nothing is lost by leaving it, since a payer can only
+  // name a party the facilitator answers to.
+  feePayer: { compare: "skip", why: "the facilitator's own; it judges the value against the parties it answers to" },
   // Echo fidelity only. The payer folds this into the transfer's absolute
   // `executeBefore`, and the verifier checks that deadline is still ahead of
   // now — with no upper bound, so a transfer signed far further out than the
@@ -208,6 +220,7 @@ export const cantonExact: SchemeAdapter<
       extra: {
         assetTransferMethod: ASSET_TRANSFER_METHOD,
         synchronizerId: terms.synchronizerId,
+        feePayer: terms.feePayer,
         instrumentId: terms.instrumentId,
         executeBeforeSeconds:
           spec.executeBeforeSeconds === undefined
@@ -247,6 +260,7 @@ async function resolveDeploymentTerms(
   network: string;
   asset: string;
   synchronizerId: string;
+  feePayer: string;
   instrumentId: AssetSpec["instrumentId"];
 }> {
   const scheme = await resolve(spec.scheme ?? cantonExact.id, req);
@@ -269,11 +283,20 @@ async function resolveDeploymentTerms(
           "/v2/supported — name the `synchronizerId` to settle on, or leave one of them out.",
       );
     }
+    const feePayer = spec.feePayer === undefined ? undefined : await resolve(spec.feePayer, req);
+    if (feePayer === undefined) {
+      throw new TermsError(
+        "paymentRequired: `network` and a whole `asset` are pinned, so nothing is read from " +
+          "/v2/supported — name the `feePayer` that will relay the transfer, or leave one of " +
+          "them out.",
+      );
+    }
     return {
       scheme,
       network,
       asset: assetSymbol(pinned.instrumentId),
       synchronizerId,
+      feePayer,
       instrumentId: pinned.instrumentId,
     };
   }
@@ -298,8 +321,29 @@ async function resolveDeploymentTerms(
       spec.synchronizerId === undefined
         ? advertised.extra.synchronizerId
         : await resolve(spec.synchronizerId, req),
+    // As above, the deployment's own unless the merchant named one.
+    feePayer: await requiredFeePayer(req, spec, advertised.extra.feePayer),
     instrumentId: pinned?.instrumentId ?? advertised.extra.instrumentId,
   };
+}
+
+/**
+ * The relayer to quote: the merchant's if it named one, else the deployment's
+ * own. Absent from both is a refusal — the merchant hears it here, where the
+ * fix is theirs, rather than issuing a 402 the facilitator will refuse after
+ * the payer has signed against it.
+ */
+async function requiredFeePayer(
+  req: Request,
+  spec: CantonRequirementsSpec,
+  advertised: string | undefined,
+): Promise<string> {
+  if (spec.feePayer !== undefined) return resolve(spec.feePayer, req);
+  if (advertised !== undefined) return advertised;
+  throw new TermsError(
+    "paymentRequired: the facilitator advertises no `feePayer` on /v2/supported, so there is " +
+      "no relayer to quote — configure its party, or name the `feePayer` here.",
+  );
 }
 
 /**

@@ -122,6 +122,8 @@ guarantee.
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
+      "synchronizerId": "global-domain::1220be58c2…",
+      "feePayer": "x402-facilitator::1220096…",
       "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
       "executeBeforeSeconds": 120
     },
@@ -223,6 +225,8 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
+      "synchronizerId": "global-domain::1220be58c2…",
+      "feePayer": "x402-facilitator::1220096…",
       "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
       "executeBeforeSeconds": 120
     },
@@ -276,6 +280,8 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
+      "synchronizerId": "global-domain::1220be58c2…",
+      "feePayer": "x402-facilitator::1220096…",
       "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
       "executeBeforeSeconds": 120
     },

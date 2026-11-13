@@ -30,6 +30,8 @@ vi.mock("@chainsafe/x402-core", async (importOriginal) => {
 // Pinning `network` and a whole `asset` discovers nothing, so the
 // synchronizer has to be named too.
 const SYNC = "global-domain::1220be58c29e";
+/** The facilitator party a configured deployment advertises, and merchants quote as `extra.feePayer`. */
+const FACILITATOR = "x402-facilitator::1220beef";
 
 const baseOptions: PaymentRequiredOptions = {
   facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
@@ -39,6 +41,9 @@ const baseOptions: PaymentRequiredOptions = {
     // Fixed resource so the rebuilt policy matches the echoed header deterministically
     // (default is absoluteUrl(req), whose host/port vary per test run).
     resource: "https://f.example/paid",
+    // Pinned network + a whole asset: nothing is discovered, so the terms the
+    // spec requires are named here.
+    feePayer: FACILITATOR,
     accepts: [
       {
         asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
@@ -83,7 +88,8 @@ function makeApp(opts: Partial<PaymentRequiredOptions> = {}): Express {
 const ECHOED_EXTRA = {
   assetTransferMethod: "transfer-factory",
   synchronizerId: SYNC,
-              executeBeforeSeconds: 120,
+  feePayer: FACILITATOR,
+  executeBeforeSeconds: 120,
   instrumentId: { id: "Amulet", admin: "DSO::x" },
 };
 
@@ -110,6 +116,7 @@ function paymentHeader(
     accepted: requirements,
     payload: {
       assetTransferMethod: "transfer-factory",
+      feePayer: FACILITATOR,
     preparedTransaction: "b",
       preparedTxHash: "h",
       signature: "s",
@@ -135,6 +142,7 @@ describe("paymentRequired", () => {
         requirements: {
           network: "canton:x",
           payTo: "merchant::x",
+          feePayer: FACILITATOR,
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
@@ -168,6 +176,7 @@ describe("paymentRequired", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
@@ -223,6 +232,7 @@ describe("paymentRequired", () => {
             asset: "CC",
             extra: {
               assetTransferMethod: "transfer-factory",
+              feePayer: FACILITATOR,
               synchronizerId: SYNC,
               executeBeforeSeconds: 120,
               instrumentId: { id: "Amulet", admin: "DSO::x" },
@@ -251,6 +261,7 @@ describe("paymentRequired", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             { asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
         synchronizerId: SYNC, amount: "500000000" },
@@ -280,6 +291,7 @@ describe("paymentRequired", () => {
         requirements: {
           network: "canton:x",
           payTo: "merchant::x",
+          feePayer: FACILITATOR,
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
@@ -319,6 +331,7 @@ describe("paymentRequired", () => {
           network: "canton:x",
           payTo: "merchant::1220y",
           maxTimeoutSeconds: (req) => (req.path === "/slow" ? 600 : 30),
+          feePayer: FACILITATOR,
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
@@ -455,6 +468,7 @@ describe("paymentRequired", () => {
         requirements: {
           network: "canton:x",
           payTo: "merchant::1220y",
+          feePayer: FACILITATOR,
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
@@ -500,6 +514,7 @@ describe("paymentRequired", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [{ asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
         synchronizerId: SYNC, amount: "500000000" }],
         },
@@ -527,7 +542,8 @@ describe("paymentRequired", () => {
           extra: {
             assetTransferMethod: "transfer-factory",
             synchronizerId: SYNC,
-              executeBeforeSeconds: 120,
+            feePayer: FACILITATOR,
+            executeBeforeSeconds: 120,
             instrumentId: { id: "Amulet", admin: "DSO::x" },
           },
           payTo: "merchant::x",
@@ -776,6 +792,7 @@ describe("paymentRequired", () => {
         paymentHeader({
           extra: {
             assetTransferMethod: "transfer-factory",
+            feePayer: FACILITATOR,
             synchronizerId: SYNC,
               executeBeforeSeconds: 120,
             instrumentId: { id: "Amulet", admin: "DSO::impostor" },
@@ -796,6 +813,7 @@ describe("paymentRequired", () => {
         paymentHeader({
           extra: {
             assetTransferMethod: "transfer-factory",
+            feePayer: FACILITATOR,
             synchronizerId: SYNC,
               executeBeforeSeconds: 120,
             instrumentId: { id: "USDCx", admin: "DSO::x" },
@@ -1171,6 +1189,7 @@ describe("paymentRequired: which quote a payment is for", () => {
   /** A second way to pay, priced separately and in its own instrument. */
   const ALT_EXTRA = {
     assetTransferMethod: "transfer-factory",
+    feePayer: FACILITATOR,
     synchronizerId: SYNC,
               executeBeforeSeconds: 120,
     instrumentId: { id: "USDCx", admin: "ISSUER::x" },
@@ -1182,6 +1201,7 @@ describe("paymentRequired: which quote a payment is for", () => {
       network: "canton:x",
       payTo: "merchant::x",
       resource: "https://f.example/paid",
+      feePayer: FACILITATOR,
       accepts: [
         { asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
         synchronizerId: SYNC, amount: "500000000" },
@@ -1201,6 +1221,7 @@ describe("paymentRequired: which quote a payment is for", () => {
         network: "canton:x",
         payTo: "merchant::shared",
         resource: "https://f.example/paid",
+        feePayer: FACILITATOR,
         accepts: [
           { asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
         synchronizerId: SYNC, amount: "500000000" },
@@ -1232,6 +1253,7 @@ describe("paymentRequired: which quote a payment is for", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [],
         },
       }),
@@ -1360,6 +1382,7 @@ describe("paymentRequired: minting a merchant reference", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
@@ -1463,6 +1486,7 @@ describe("paymentRequired: minting a merchant reference", () => {
         resource: "https://f.example/paid",
         synchronizerId: SYNC,
         memo: booking(booked),
+        feePayer: FACILITATOR,
         accepts: [
           { asset: AMULET, amount: "500000000" },
           { asset: USDCX, amount: "250000" },
@@ -1484,6 +1508,7 @@ describe("paymentRequired: minting a merchant reference", () => {
         payTo: "merchant::x",
         resource: "https://f.example/paid",
         synchronizerId: SYNC,
+        feePayer: FACILITATOR,
         accepts: [
           { asset: AMULET, amount: "500000000", memo: () => book() },
           { asset: USDCX, amount: "250000", memo: () => book() },
@@ -1501,6 +1526,7 @@ describe("paymentRequired: minting a merchant reference", () => {
         resource: "https://f.example/paid",
         synchronizerId: SYNC,
         memo: () => "shared",
+        feePayer: FACILITATOR,
         accepts: [
           { asset: AMULET, amount: "500000000" },
           { asset: USDCX, amount: "250000", memo: () => "mine" },
@@ -1522,6 +1548,7 @@ describe("paymentRequired: minting a merchant reference", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             {
               asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
@@ -1557,6 +1584,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         extra: {
           transferMethods: ["transfer-factory"],
           synchronizerId: SYNC,
+          feePayer: FACILITATOR,
           carriages: ["inline"],
           instruments: [{ admin: DSO, instrumentId: { id: "Amulet", admin: DSO }, symbol: "CC" }],
         },
@@ -1592,8 +1620,9 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-          // Names the instrument, not the whole asset: the registry admin still
-          // comes from /v2/supported, which is what these tests are about.
+          // Names the instrument, not the whole asset, and no feePayer: the
+          // registry admin and the relayer both come from /v2/supported, which
+          // is what these tests are about.
           accepts: [{ amount: "500000000", asset: "Amulet" }],
         },
         ...over,
@@ -1630,6 +1659,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
           synchronizerId: OWN_SYNC,
+          feePayer: FACILITATOR,
           accepts: [{ amount: "500000000", asset: "Amulet" }],
         },
       }),
@@ -1640,6 +1670,79 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     // Everything else still comes from the facilitator.
     expect(quote.network).toBe("canton:devnet");
     expect(quote.extra.instrumentId).toEqual({ id: "Amulet", admin: DSO });
+  });
+
+  // ── extra.feePayer ─────────────────────────────────────────────────────────
+  //
+  // The relayer, advertised on /v2/supported once a party is configured. A
+  // merchant may override it; a quote that can name none fails.
+
+  /** A deployment with no party configured: it advertises no feePayer. */
+  const NO_FEE_PAYER_EXTRA = (() => {
+    const { feePayer: _drop, ...rest } = SUPPORTED.kinds[0].extra as Record<string, unknown>;
+    return rest;
+  })();
+
+  /** SUPPORTED with the facilitator's own party advertised, as a configured one does. */
+  const withFeePayer = (party: string) => ({
+    kinds: [{ ...SUPPORTED.kinds[0], extra: { ...SUPPORTED.kinds[0].extra, feePayer: party } }],
+  });
+
+  it("quotes the feePayer the facilitator advertises", async () => {
+    stubWithSupported(withFeePayer(FACILITATOR));
+    const res = await request(discoveringApp()).get("/paid");
+    expect(res.status).toBe(402);
+    expect(res.body.accepts[0].extra.feePayer).toBe(FACILITATOR);
+  });
+
+  it("refuses to quote at all when the facilitator advertises no feePayer", async () => {
+    // A facilitator with no party configured cannot be quoted against at all.
+    // A merchant error, so it fails the request rather than being skipped as
+    // one way to pay among others.
+    const onReject = vi.fn();
+    stubWithSupported({ kinds: [{ ...SUPPORTED.kinds[0], extra: NO_FEE_PAYER_EXTRA }] });
+    const res = await request(discoveringApp({ onReject })).get("/paid");
+    expect(res.status).toBe(500);
+    const { error } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+    expect(error).toBeInstanceOf(TermsError);
+    expect((error as Error).message).toMatch(/advertises no `feePayer`/);
+  });
+
+  it("keeps the merchant's feePayer over the advertised one", async () => {
+    stubWithSupported(withFeePayer(FACILITATOR));
+    const own = "other-facilitator::1220cafe";
+    expect(own).not.toBe(FACILITATOR);
+    const res = await request(
+      discoveringApp({
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          feePayer: own,
+          accepts: [{ amount: "500000000", asset: "Amulet" }],
+        },
+      }),
+    ).get("/paid");
+    expect(res.status).toBe(402);
+    expect(res.body.accepts[0].extra.feePayer).toBe(own);
+  });
+
+  it("leaves an echoed feePayer to the facilitator, so a rotation still settles", async () => {
+    // The merchant quotes the party in force now; this payer holds a 402 from
+    // before it changed. The facilitator still answers to the old one and
+    // accepts it, which an `equal` rule here would pre-empt — breaking
+    // payments for exactly the window a rotation list exists to cover.
+    const fetchMock = stubFacilitator();
+    const app = makeApp({
+      requirements: { ...(baseOptions.requirements as object), feePayer: FACILITATOR },
+    } as Partial<PaymentRequiredOptions>);
+    const res = await request(app)
+      .get("/paid")
+      .set(
+        "PAYMENT-SIGNATURE",
+        paymentHeader({ extra: { ...ECHOED_EXTRA, feePayer: "x402-facilitator-old::1220aaaa" } }),
+      );
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it("produces a quote a payer would accept as well-formed", async () => {
@@ -1740,6 +1843,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
           network: "canton:mainnet",
+          feePayer: FACILITATOR,
           accepts: [{ amount: "500000000", asset: "Amulet" }],
         },
       }),
@@ -1780,6 +1884,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [{ amount: "250000", asset: "GBPx" }],
         },
       }),
@@ -1811,6 +1916,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             {
               amount: "500000000",
@@ -1923,6 +2029,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         asset: "CC",
         extra: {
           assetTransferMethod: "transfer-factory",
+          feePayer: FACILITATOR,
           synchronizerId: SYNC,
               executeBeforeSeconds: 120,
           instrumentId: { id: "Amulet", admin: "DSO::x" },
@@ -2033,6 +2140,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             { amount: "500000000", asset: "Amulet" },
             { amount: "250000", asset: "Amulet" },
@@ -2053,6 +2161,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             { amount: "500000000", asset: "Amulet" },
             { amount: "250000", asset: { instrumentId: { id: "Amulet", admin: DSO } } },
@@ -2071,6 +2180,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             { amount: "500000000", asset: "Amulet" },
             { amount: "250000", asset: () => "Amulet" },
@@ -2103,6 +2213,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             { amount: "500000000", asset: "Amulet" },
             { amount: "250000", asset: "USDCx" },
@@ -2128,6 +2239,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
           network: "canton:devnet",
+          feePayer: FACILITATOR,
           accepts: [{ amount: "500000000", ...(asset === undefined ? {} : { asset }) }],
         },
       } as unknown as Parameters<typeof paymentRequired>[0]);
@@ -2155,6 +2267,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
             payTo: "merchant::x",
             resource: "https://f.example/paid",
             network: "canton:devnet",
+            feePayer: FACILITATOR,
             accepts: [
               { amount: "500000000", asset: "Amulet" },
               { amount: "250000", asset: () => undefined as unknown as string },
@@ -2189,6 +2302,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
             payTo: "merchant::x",
             resource: "https://f.example/paid",
             network: "canton:devnet",
+            feePayer: FACILITATOR,
             accepts: [
               { amount: "500000000", asset: "Amulet" },
               { amount: "250000", asset: () => ({ instrumentId: { id: "Amulet", admin: DSO } }) },
@@ -2216,6 +2330,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
             payTo: "merchant::x",
             resource: "https://f.example/paid",
             network: "canton:devnet",
+            feePayer: FACILITATOR,
             accepts: [
               { amount: "500000000", asset: "Amulet" },
               // The deployment does not carry this one.
@@ -2248,6 +2363,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
             asset: "CC",
             extra: {
               assetTransferMethod: "transfer-factory",
+              feePayer: FACILITATOR,
               synchronizerId: SYNC,
               executeBeforeSeconds: 120,
               instrumentId: { id: "Amulet", admin: DSO },
@@ -2287,6 +2403,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           requirements: {
             payTo: "merchant::x",
             resource: "https://f.example/paid",
+            feePayer: FACILITATOR,
             accepts: [{ amount: "1", asset: "GBPx" }],
           },
         }),
@@ -2342,6 +2459,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
             payTo: "merchant::x",
             resource: "https://f.example/paid",
             network: "canton:devnet",
+            feePayer: FACILITATOR,
             accepts: [
               { amount: "1", asset: "GBPx" },
               { amount: "2", asset: "JPYx" },
@@ -2382,6 +2500,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           requirements: {
             payTo: "merchant::x",
             resource: "https://f.example/paid",
+            feePayer: FACILITATOR,
             accepts: [
               { amount: "500000000", asset: "Amulet" },
               { amount: "0.10", asset: { instrumentId: { id: "USDCx", admin: "ISSUER::x" } } },
@@ -2415,6 +2534,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           network: "canton:x",
           payTo: "merchant::shared",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             {
               amount: "500000000",
@@ -2455,6 +2575,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             {
               amount: "500000000",
@@ -2495,6 +2616,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             {
               amount: "500000000",
@@ -2534,6 +2656,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
           description: (req) => `Access to ${req.path} for ${req.query.who as string}`,
+          feePayer: FACILITATOR,
           accepts: [{ amount: "1", asset: "Amulet" }],
         },
       }),
@@ -2555,6 +2678,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
+          feePayer: FACILITATOR,
           accepts: [
             { amount: "1", asset: "GBPx" },
             { amount: "2", asset: "JPYx" },
