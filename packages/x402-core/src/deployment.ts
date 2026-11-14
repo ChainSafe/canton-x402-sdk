@@ -76,6 +76,8 @@ export interface CantonDeploymentExtra {
   instrumentId: InstrumentId;
   /** The synchronizer to prepare against. Required of a canton-exact extra. */
   synchronizerId: string;
+  /** The relayer to quote as `extra.feePayer`. Absent when none is advertised. */
+  feePayer?: string;
 }
 
 /** What a merchant needs in order to quote a canton-exact payment. */
@@ -167,6 +169,9 @@ function cantonExtraSelector(
       const extra: CantonDeploymentExtra = {
         instrumentId,
         synchronizerId: advertised.synchronizerId,
+        // Only when advertised, so an absent one stays absent rather than
+        // becoming `feePayer: undefined`.
+        ...(advertised.feePayer ? { feePayer: advertised.feePayer } : {}),
       };
       return {
         // The advertised symbol when there is one, since the deployment knows

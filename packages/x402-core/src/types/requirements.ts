@@ -76,6 +76,12 @@ export const CantonRequirementsExtraSchema = v.looseObject({
    * and the verifier pins the signed transaction to it.
    */
   synchronizerId: nonEmptyString,
+  /**
+   * The relayer that submits the transfer and pays its traffic fee. Required,
+   * as the spec has it — `memo` is the only field of `extra` it marks optional
+   * — and a facilitator refuses a value naming anyone but itself.
+   */
+  feePayer: nonEmptyString,
   instrumentId: InstrumentIdSchema,
   /**
    * Seconds from request time. The client turns it into the transfer's absolute
