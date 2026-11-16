@@ -280,6 +280,31 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   return out;
 }
 
+describe("the transfer's expectedAdmin", () => {
+  it("refuses one that is not the instrument's admin", () => {
+    // `expectedAdmin` is what the on-ledger factory guards on; the instrument's
+    // admin is what the requirements are bound to. A transfer naming different
+    // parties in them says two things about which issuer it is for, and would
+    // aim the exercise at one factory while the quote described another.
+    const blob = encodePreparedTransaction(TRANSFER, { expectedAdmin: "other-dso::1220aaaa" });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  it("refuses a transfer carrying none at all", () => {
+    // Absent is refused rather than read as "any admin will do".
+    const blob = encodePreparedTransaction(TRANSFER, { expectedAdmin: "" });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  it("reads one that agrees, which is what a real transfer carries", () => {
+    // The control: the refusals above are the disagreement, not the field.
+    const blob = encodePreparedTransaction(TRANSFER, {
+      expectedAdmin: TRANSFER.instrumentId.admin,
+    });
+    expect(decodePreparedTransaction(blob)?.instrumentId.admin).toBe(TRANSFER.instrumentId.admin);
+  });
+});
+
 describe("what replaced the walker's wire strictness", () => {
   it("reads a repeated singular field the way the ledger does, not the way a first-match walker would", () => {
     // protobuf keeps the LAST of a repeated singular field, and so does the

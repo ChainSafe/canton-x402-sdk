@@ -22,6 +22,24 @@ input contracts, and the contract it names must be:
 All three refuse as `invalid_exact_canton_malformed_payload` /
 `transfer_mismatch`.
 
+**`expectedAdmin` is held to the instrument's admin.** The choice argument is
+`{ expectedAdmin, transfer }`. The two name different things — `expectedAdmin`
+is the FACTORY's admin, which the Token Standard has the factory validate
+against its own, while `instrumentId.admin` is the registry administering the
+INSTRUMENT — and the standard does not require them equal.
+
+This requires it. `TransferFactoryView.admin` is "the party representing the
+registry app that administers the instruments for which this transfer factory
+can be used", so a well-formed registry has one party in both, and the real
+Canton Coin payment does. It is also the assumption the signatory clause above
+already makes. Stated here because a registry that split the two parties would
+fail both checks together.
+
+What it buys: `expectedAdmin` is what the ledger guards on, so a facilitator
+that pins the admin to the real DSO pins the guarded field with it, and a
+transfer aimed at another issuer's factory is refused at verify rather than at
+execution — which matters most to a caller that verifies without settling.
+
 **The interface, not the template.** `TransferFactory_Transfer` is defined on
 `Splice.Api.Token.TransferInstructionV1:TransferFactory`, which each registry
 implements with its own template — Canton Coin with `ExternalPartyAmuletRules`,

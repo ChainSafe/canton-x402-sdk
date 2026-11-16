@@ -193,10 +193,31 @@ function textMap(value: VendorValue | undefined): Map<string, VendorValue | unde
   return out;
 }
 
-/** Read the TransferFactory_Transfer argument record `{ expectedAdmin, transfer }`. */
+/**
+ * Read the TransferFactory_Transfer argument record `{ expectedAdmin, transfer }`.
+ *
+ * `expectedAdmin` names the FACTORY's admin — the Token Standard has the
+ * factory validate it against its own — while `instrumentId.admin` names the
+ * registry that administers the INSTRUMENT. Different things, and the standard
+ * does not require them equal.
+ *
+ * We require it anyway. `TransferFactoryView.admin` is "the party representing
+ * the registry app that administers the instruments for which this transfer
+ * factory can be used", so for a well-formed registry they are one party, and
+ * the real Canton Coin payment carries the DSO in both. The factory check in
+ * `canton-exact.ts` already rests on the same assumption, demanding the
+ * exercised contract be signed by `instrumentId.admin`. A registry that split
+ * the two parties would fail both checks together, which is the one thing to
+ * look at first if an honest non-Amulet transfer is ever refused here.
+ *
+ * What it buys: `expectedAdmin` is what the ledger guards on, so pinning it to
+ * an admin a facilitator has pinned to the real DSO means a transfer aimed at
+ * another issuer's factory is refused at verify rather than at execution.
+ */
 function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | null {
   const arg = fieldsOf(chosenValue);
   if (!arg) return null;
+  const expectedAdmin = str(pick(arg, "expectedAdmin", 0));
   const transfer = fieldsOf(pick(arg, "transfer", 1));
   if (!transfer) return null;
 
@@ -215,6 +236,7 @@ function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | n
   const memo = meta && str(textMap(pick(meta, "values", 0))?.get(MEMO_KEY));
 
   if (!sender || !receiver || !amount || !id || !admin) return null;
+  if (!expectedAdmin || expectedAdmin !== admin) return null;
   return { sender, receiver, amount, instrumentId: { id, admin }, executeBeforeMicros, memo };
 }
 

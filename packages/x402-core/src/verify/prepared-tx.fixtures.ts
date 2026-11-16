@@ -109,6 +109,12 @@ export interface EncodeOptions {
   positional?: boolean;
   /** Override the choice id (defaults to TransferFactory_Transfer). */
   choiceId?: string;
+  /**
+   * The choice argument's `expectedAdmin`, the field the on-ledger factory
+   * guards on. Defaults to the instrument's admin, as a real transfer carries
+   * it; the decoder holds the two equal. `""` leaves the field out entirely.
+   */
+  expectedAdmin?: string;
   /** Raw bytes appended to a layer, e.g. `{ node: wrap(1, new Uint8Array()) }`. */
   extra?: Partial<Record<EncodeLayer, Uint8Array>>;
   /** The transfer node's id (defaults to "0"). */
@@ -277,9 +283,15 @@ export function encodeChoiceArgument(
     ],
     positional,
   );
+  // `expectedAdmin` defaults to the instrument's admin, which is what a real
+  // transfer carries. Set it to make the two disagree; "" leaves the field out
+  // of the record entirely, which is not the same as an empty party.
+  const expectedAdmin = opts.expectedAdmin ?? transfer.instrumentId.admin;
   return recordValue(
     [
-      { label: "expectedAdmin", value: party(transfer.instrumentId.admin) },
+      ...(expectedAdmin === ""
+        ? []
+        : [{ label: "expectedAdmin", value: party(expectedAdmin) }]),
       { label: "transfer", value: transferRecord },
     ],
     positional,
