@@ -58,6 +58,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@canton-network/core-tx-visualizer": "~1.7.0"
+    "@canton-network/core-tx-visualizer": "^1.16.0"
   }
 }

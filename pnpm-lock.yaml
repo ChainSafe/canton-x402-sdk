@@ -182,8 +182,8 @@ importers:
   packages/x402-core:
     dependencies:
       '@canton-network/core-tx-visualizer':
-        specifier: ~1.7.0
-        version: 1.7.0
+        specifier: ^1.16.0
+        version: 1.16.0
     devDependencies:
       '@noble/ed25519':
         specifier: ^3.0.0
@@ -461,6 +461,9 @@ packages:
   '@canton-network/core-ledger-proto@1.13.0':
     resolution: {integrity: sha512-f7cQlAGO79Iy7QUEmFVWZazwdifIzjkTxq+EqthnsLs1hqI9NvMO31+Z11x+zwrA7NnkwgFLjojxkrNNnoOaGw==}
 
+  '@canton-network/core-ledger-proto@1.16.0':
+    resolution: {integrity: sha512-WxNfy0WdzuoQPe3cw+jXgZ+PYNHXpZZHXfhNecudiYkmiV7MsWSxTGU5guAn8mhEmTF5v7X9CPd2ZjxrCP3G+w==}
+
   '@canton-network/core-provider-dapp@1.14.0':
     resolution: {integrity: sha512-dCgLYMykqiWU+4uWUjwn88VycSJH7OIcjrnW4fcL30mBj+Pb5iCTDvH06QTp7VHGhCiphVoMtxQrOPJ5URrm4w==}
 
@@ -491,14 +494,17 @@ packages:
   '@canton-network/core-token-standard@1.14.0':
     resolution: {integrity: sha512-bai2fKdwmXu1cFJ9505WFRWTc2JniJTi0W0PfUpMTmJiwx72Ub24hqpWsG7n4U4bkCqduZj+GFijs+kwB7Knsg==}
 
+  '@canton-network/core-tx-hashing@1.1.0':
+    resolution: {integrity: sha512-dHBB5NwO9qMTkFd5vw/Bg6qzckLPkrELPjtsZK/f0/MNl0aeIrB6J1xk19It0JGp9+3mKQ8LKfj5GLYxzxi8TA==}
+
   '@canton-network/core-tx-parser@1.14.0':
     resolution: {integrity: sha512-1BYqJsH5MfXdZBlpr0HjJ+r6i/4WVrvxbO3OlBVfOnRulwGo8CSH0sg/uAYVOYvNMPOAK0SN7Km9Iqfu+JNIRg==}
 
   '@canton-network/core-tx-visualizer@1.13.0':
     resolution: {integrity: sha512-vHGnLsfNQhFLthKH9Ifz5dG40L3kBDksTius9VphpQtW3GqlN9jPtEfNPFkYHhMtvD7dCxombmkIxreS5IkvBg==}
 
-  '@canton-network/core-tx-visualizer@1.7.0':
-    resolution: {integrity: sha512-gNVNGXaEIxKPkdUcNZ5RuZrPaVXd3ySPsDFUbKSOxYSskoKq1GVKf0MF6B3j31Zgb8lePI9BpubP+zDYu25ZxA==}
+  '@canton-network/core-tx-visualizer@1.16.0':
+    resolution: {integrity: sha512-7xYtHoliuN+5SUHKf7/kc2QBfuoe47NHQOkIaD2BtgSIwVVySyPmKQUJ/XU3FozubYUQ7SCcWy7o/kO+gFQX0Q==}
 
   '@canton-network/core-types@1.14.0':
     resolution: {integrity: sha512-InvLx8VtxRn4jqCGAqIwQf+0Ts/I+xwdpU1PhBkfZ0PvDMkZ6QtgWnvKB0nMlwtaqDWRklPbIpzlUcPVIPiuZA==}
@@ -3832,6 +3838,11 @@ snapshots:
       '@protobuf-ts/runtime': 2.11.1
       '@protobuf-ts/runtime-rpc': 2.11.1
 
+  '@canton-network/core-ledger-proto@1.16.0':
+    dependencies:
+      '@protobuf-ts/runtime': 2.11.1
+      '@protobuf-ts/runtime-rpc': 2.11.1
+
   '@canton-network/core-provider-dapp@1.14.0':
     dependencies:
       '@canton-network/core-ledger-client-types': 1.14.0
@@ -3943,6 +3954,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@canton-network/core-tx-hashing@1.1.0':
+    dependencies:
+      '@canton-network/core-ledger-proto': 1.16.0
+
   '@canton-network/core-tx-parser@1.14.0':
     dependencies:
       '@canton-network/core-ledger-client-types': 1.14.0
@@ -3965,11 +3980,10 @@ snapshots:
       '@types/node': 25.9.5
       camelcase-keys: 10.0.2
 
-  '@canton-network/core-tx-visualizer@1.7.0':
+  '@canton-network/core-tx-visualizer@1.16.0':
     dependencies:
-      '@canton-network/core-ledger-proto': 1.13.0
-      '@types/node': 25.9.5
-      camelcase-keys: 10.0.2
+      '@canton-network/core-ledger-proto': 1.16.0
+      '@canton-network/core-tx-hashing': 1.1.0
 
   '@canton-network/core-types@1.14.0':
     dependencies:
