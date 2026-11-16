@@ -26,7 +26,18 @@ one is required like the rest.
 A merchant discovering its terms gets it from `GET /v2/supported`'s
 `kinds[].extra.feePayer`, which is where a facilitator advertises its party, so
 it is read from the service that will settle the payment rather than copied
-into config. A merchant may still name its own, as with `synchronizerId`.
+into config.
+
+**The advertised value wins**, unlike `synchronizerId`. The relaying party is
+the facilitator's own fact, not a merchant's choice, so a merchant value that
+differs from it is stale config or a mistake — and nothing catches it: the
+facilitator holds the echoed value against its own parties loosely, by design,
+so a wrong one surfaces as a fee-payer mismatch only after the payer has
+signed. `CantonRequirementsSpec.feePayer` is therefore read only where nothing
+is advertised: `network` pinned alongside a whole `asset`, which skips
+`/v2/supported` entirely, or a facilitator with no party configured yet — it
+advertises one only once there is one. A value there that resolves to undefined
+or empty is refused rather than quoted.
 
 **What breaks.** Quoting now fails, rather than quietly omitting the field,
 when no relayer can be named — a `TermsError`, so it is never skipped as one

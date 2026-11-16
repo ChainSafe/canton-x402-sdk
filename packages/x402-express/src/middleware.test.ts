@@ -116,8 +116,7 @@ function paymentHeader(
     accepted: requirements,
     payload: {
       assetTransferMethod: "transfer-factory",
-      feePayer: FACILITATOR,
-    preparedTransaction: "b",
+      preparedTransaction: "b",
       preparedTxHash: "h",
       signature: "s",
       publicKey: "pk",
@@ -1708,7 +1707,53 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     expect((error as Error).message).toMatch(/advertises no `feePayer`/);
   });
 
-  it("keeps the merchant's feePayer over the advertised one", async () => {
+  it("still reads the merchant's feePayer when nothing is advertised", async () => {
+    // The advertised value winning does not make the field dead: a facilitator
+    // advertises one only once a party is configured, and until then the
+    // merchant's is the only source there is.
+    const own = "other-facilitator::1220cafe";
+    stubWithSupported({ kinds: [{ ...SUPPORTED.kinds[0], extra: NO_FEE_PAYER_EXTRA }] });
+    const res = await request(
+      discoveringApp({
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          feePayer: own,
+          accepts: [{ amount: "500000000", asset: "Amulet" }],
+        },
+      }),
+    ).get("/paid");
+    expect(res.status).toBe(402);
+    expect(res.body.accepts[0].extra.feePayer).toBe(own);
+  });
+
+  it("refuses a merchant feePayer that resolves to nothing, rather than quoting it", async () => {
+    // `Resolvable<string>` holds at compile time only. A resolver reading an
+    // unset env var hands back undefined, which would otherwise reach the
+    // requirements schema as a worse error much later.
+    const onReject = vi.fn();
+    stubWithSupported({ kinds: [{ ...SUPPORTED.kinds[0], extra: NO_FEE_PAYER_EXTRA }] });
+    const res = await request(
+      discoveringApp({
+        onReject,
+        requirements: {
+          payTo: "merchant::x",
+          resource: "https://f.example/paid",
+          feePayer: (() => undefined) as unknown as string,
+          accepts: [{ amount: "500000000", asset: "Amulet" }],
+        },
+      }),
+    ).get("/paid");
+    expect(res.status).toBe(500);
+    const { error } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+    expect(error).toBeInstanceOf(TermsError);
+    expect((error as Error).message).toMatch(/unset or empty/);
+  });
+
+  it("quotes the advertised feePayer over the merchant's", async () => {
+    // The relaying party is the facilitator's own fact. A merchant value that
+    // differs is stale or wrong, and the facilitator compares the echoed one
+    // with `skip`, so nothing would catch it before the payer signed.
     stubWithSupported(withFeePayer(FACILITATOR));
     const own = "other-facilitator::1220cafe";
     expect(own).not.toBe(FACILITATOR);
@@ -1723,7 +1768,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
       }),
     ).get("/paid");
     expect(res.status).toBe(402);
-    expect(res.body.accepts[0].extra.feePayer).toBe(own);
+    expect(res.body.accepts[0].extra.feePayer).toBe(FACILITATOR);
   });
 
   it("leaves an echoed feePayer to the facilitator, so a rotation still settles", async () => {
@@ -2311,6 +2356,67 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         }),
       );
       const res = await request(app).get("/paid");
+      expect(res.status).toBe(500);
+      const { error } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(error).toBeInstanceOf(TermsError);
+      expect((error as Error).message).toMatch(/name the `synchronizerId` to settle on/);
+    });
+  });
+
+  describe("both `network` and a whole `asset` pinned, with no relayer", () => {
+    // Same path as above, the other term. It had no test at all: swapping its
+    // TermsError for a plain Error passed the whole suite.
+    const pinned = (
+      onReject: ReturnType<typeof vi.fn>,
+      feePayer: unknown,
+      synchronizerId: unknown = SYNC,
+    ) => {
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+          onReject,
+          requirements: {
+            payTo: "merchant::x",
+            resource: "https://f.example/paid",
+            network: "canton:devnet",
+            synchronizerId: synchronizerId as string,
+            feePayer: feePayer as string,
+            accepts: [
+              { amount: "500000000", asset: "Amulet" },
+              { amount: "250000", asset: () => ({ instrumentId: { id: "Amulet", admin: DSO } }) },
+            ],
+          },
+        }),
+      );
+      return app;
+    };
+
+    it("is a TermsError when no feePayer is named, and is never skipped", async () => {
+      stubWithSupported();
+      const onReject = vi.fn();
+      const res = await request(pinned(onReject, undefined)).get("/paid");
+      expect(res.status).toBe(500);
+      const { error } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
+      expect(error).toBeInstanceOf(TermsError);
+      expect((error as Error).message).toMatch(/name the `feePayer` that will relay/);
+    });
+
+    it("refuses a feePayer that resolves to the empty string", async () => {
+      // `process.env.X` set but blank. Quoting it answers a 402 nobody can pay.
+      stubWithSupported();
+      const onReject = vi.fn();
+      const res = await request(pinned(onReject, () => "")).get("/paid");
+      expect(res.status).toBe(500);
+      expect(onReject.mock.calls[0][0].error).toBeInstanceOf(TermsError);
+    });
+
+    it("refuses a synchronizerId that resolves to the empty string", async () => {
+      // The term beside it, which had a test for absent but not for blank.
+      stubWithSupported();
+      const onReject = vi.fn();
+      const res = await request(pinned(onReject, FACILITATOR, () => "")).get("/paid");
       expect(res.status).toBe(500);
       const { error } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
       expect(error).toBeInstanceOf(TermsError);

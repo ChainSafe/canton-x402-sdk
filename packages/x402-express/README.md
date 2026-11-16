@@ -214,6 +214,8 @@ For full control, a **builder** `(req) => CantonPaymentRequirements[]` returns t
 
 `network` is the one field discovery can supply on its own, and it is narrowed to the instrument the entry names, so the network quoted is one that settles it. Pin it to skip that. The `/v2/supported` response is cached by `FacilitatorClient` (`supportedTtlMs`, default 5 minutes), so discovery is one round trip per TTL and none at all when `network` and a whole `asset` are both pinned.
 
+`feePayer` — the party that relays your payer's transfer and pays its traffic fee — is read from `/v2/supported` and **wins over anything you name**. It is the facilitator's own fact, so a value of yours that differs is stale config, and nothing catches it until the facilitator refuses the payment after the payer has signed. You only set it where nothing is advertised: a route that pins `network` and a whole `asset`, which skips `/v2/supported` entirely; a facilitator with no party configured yet; or a **builder**, which owns the whole of `extra`. Either way quoting fails rather than issuing a 402 nobody can pay — `extra.feePayer` is required of canton-exact requirements.
+
 If more than one network settles the instrument, or the id the entry names is not one the deployment carries, that is an error rather than a guess — and the refusal lists what it does carry.
 
 A **builder** runs on every request, paid ones included, because a payment has to be held against your terms and only the builder knows them. Keep it side-effect-free, and use `memo` for anything that should happen once per challenge.

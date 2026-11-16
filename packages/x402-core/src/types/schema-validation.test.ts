@@ -101,6 +101,18 @@ describe("schema-first guards + parsers", () => {
     }
   });
 
+  it("requires extra.feePayer, as a non-empty party string", () => {
+    // The spec marks `memo` the only optional field of `extra`, so this one is
+    // required like the rest — and a facilitator refuses a value naming anyone
+    // but itself, which it cannot do with a field that was never sent.
+    const { feePayer: _omitted, ...withoutFeePayer } = requirements.extra;
+    expect(isCantonPaymentRequirements({ ...requirements, extra: withoutFeePayer })).toBe(false);
+    for (const bad of ["", 42, null, true, []]) {
+      const extra = { ...requirements.extra, feePayer: bad };
+      expect(isCantonPaymentRequirements({ ...requirements, extra })).toBe(false);
+    }
+  });
+
   it("reads maxTimeoutSeconds as a duration, not as any number", () => {
     const { maxTimeoutSeconds: _omitted, ...withoutTimeout } = requirements;
     expect(isCantonPaymentRequirements(withoutTimeout)).toBe(false);
