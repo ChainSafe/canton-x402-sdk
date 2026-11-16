@@ -57,6 +57,7 @@ function mockSdk() {
 const EXTRA = {
   assetTransferMethod: "transfer-factory",
   synchronizerId: "global-domain::1220be58c29e",
+  feePayer: "x402-facilitator::1220fee",
   executeBeforeSeconds: 120,
   instrumentId: { id: "Amulet", admin: "DSO::x" },
 } as const;
@@ -176,7 +177,7 @@ describe("CantonX402Payer.authorize", () => {
     expect(payer.supports(makeRequirements({ network: "canton:other" }))).toBe(false);
     // Unsupported asset (no registry configured for it).
     expect(
-      payer.supports(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
+      payer.supports(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", feePayer: "x402-facilitator::1220fee", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).toBe(false);
   });
 
@@ -195,7 +196,7 @@ describe("CantonX402Payer.authorize", () => {
   it("rejects an asset with no configured registry", async () => {
     const { sdk, prepare } = mockSdk();
     await expect(
-      makePayer(sdk).authorize(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
+      makePayer(sdk).authorize(makeRequirements({ asset: "USDCx", extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", feePayer: "x402-facilitator::1220fee", executeBeforeSeconds: 120, instrumentId: { id: "USDCx", admin: "USDC::z" } } })),
     ).rejects.toThrow(/unsupported requirement/);
     expect(prepare).not.toHaveBeenCalled();
   });

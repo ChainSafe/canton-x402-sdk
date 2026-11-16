@@ -294,6 +294,11 @@ export const CantonSupportedExtraSchema = v.looseObject({
   /** How a prepared transaction travels, e.g. `inline`. */
   carriages: v.array(v.pipe(v.string(), v.minLength(1))),
   /**
+   * The relayer a merchant quotes as `extra.feePayer`. Optional here: a
+   * facilitator advertises it only once a party is configured.
+   */
+  feePayer: v.optional(v.pipe(v.string(), v.minLength(1))),
+  /**
    * The instruments this deployment lists. Optional: what an absent, empty or
    * unusable list means is the reader's, not the shape's — see
    * {@link selectCantonDeployments}.
