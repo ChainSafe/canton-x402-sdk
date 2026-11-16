@@ -720,7 +720,20 @@ describe("cantonExactVerifier", () => {
     it("refuses an exercise on a contract the transaction never discloses", async () => {
       // No input_contracts entry: nothing says what was exercised.
       const { payload, requirements } = await buildSignedFixture({
-        factory: { omitInputContract: true },
+        factory: { inputContracts: [] },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        factoryRefusal("factory_unresolved"),
+      );
+    });
+
+    it("refuses an exercise whose id matches no disclosure, though one is present", async () => {
+      // The resolution has to find the contract the exercise NAMES, not just
+      // some contract in the input set. Without the id comparison this passes
+      // on a perfectly good factory sitting under a different id, and the
+      // exercised contract reported is one the transfer never touched.
+      const { payload, requirements } = await buildSignedFixture({
+        factory: { inputContracts: [{ contractId: "00" + "ab".repeat(31) }] },
       });
       expect(await verifier.verify(payload, requirements)).toMatchObject(
         factoryRefusal("factory_unresolved"),
@@ -730,7 +743,7 @@ describe("cantonExactVerifier", () => {
     it("refuses an exercised id disclosed more than once", async () => {
       // Two entries for one id: which one was exercised is not decidable.
       const { payload, requirements } = await buildSignedFixture({
-        factory: { duplicateInputContract: true },
+        factory: { inputContracts: [{}, {}] },
       });
       expect(await verifier.verify(payload, requirements)).toMatchObject(
         factoryRefusal("factory_unresolved"),
@@ -742,7 +755,7 @@ describe("cantonExactVerifier", () => {
       // believing either one over the other would be a guess. Module and
       // entity get a test each, so neither arm can be dropped unnoticed.
       const { payload, requirements } = await buildSignedFixture({
-        factory: { inputTemplateId: { moduleName: "Splice.Wallet" } },
+        factory: { inputContracts: [{ templateId: { moduleName: "Splice.Wallet" } }] },
       });
       expect(await verifier.verify(payload, requirements)).toMatchObject(
         factoryRefusal("factory_unresolved"),
@@ -753,7 +766,7 @@ describe("cantonExactVerifier", () => {
       // Separate from the test above, which changes module AND entity: one
       // fixture moving both leaves either arm free to be dropped.
       const { payload, requirements } = await buildSignedFixture({
-        factory: { inputTemplateId: { entityName: "NotTheSameEntity" } },
+        factory: { inputContracts: [{ templateId: { entityName: "NotTheSameEntity" } }] },
       });
       expect(await verifier.verify(payload, requirements)).toMatchObject(
         factoryRefusal("factory_unresolved"),
@@ -775,7 +788,7 @@ describe("cantonExactVerifier", () => {
       // The package NAME is what an upgrade preserves, so unlike the package
       // id the two sides must agree on it.
       const { payload, requirements } = await buildSignedFixture({
-        factory: { inputPackageName: "not-splice-amulet" },
+        factory: { inputContracts: [{ packageName: "not-splice-amulet" }] },
       });
       expect(await verifier.verify(payload, requirements)).toMatchObject(
         factoryRefusal("factory_unresolved"),
@@ -823,7 +836,7 @@ describe("cantonExactVerifier", () => {
       // What ties the factory to the issuer is `expectedAdmin`, which the
       // ledger holds against the factory's own admin.
       const { payload, requirements } = await buildSignedFixture({
-        factory: { signatories: ["someone-else::1220other"] },
+        factory: { inputContracts: [{ signatories: ["someone-else::1220other"] }] },
       });
       expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
     });
@@ -855,7 +868,7 @@ describe("cantonExactVerifier", () => {
       // Requiring them equal would refuse honest payments for the whole window
       // of a Splice rollout.
       const { payload, requirements } = await buildSignedFixture({
-        factory: { inputTemplateId: { packageId: "a".repeat(64) } },
+        factory: { inputContracts: [{ templateId: { packageId: "a".repeat(64) } }] },
       });
       expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
     });

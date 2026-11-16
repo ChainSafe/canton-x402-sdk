@@ -281,23 +281,24 @@ const TRANSFER_FACTORY_INTERFACE = {
  * The real-factory proof, as far as this layer can take it.
  *
  * The exercise must go through the Token Standard transfer-factory interface,
- * against a contract disclosed among the transaction's own input contracts and
- * carrying the instrument's admin as a signatory.
+ * against a contract the transaction itself discloses — exactly one, agreeing
+ * with the exercise about what it is.
  *
  * WHAT THIS DOES NOT DO — two gaps, both real.
  *
  * The disclosure is PAYER-WRITTEN. `input_contracts` is part of the blob the
- * payer signs, so every field read here is a field the payer chose, including
- * the signatory. What makes the check bite is not this layer: it is the
- * synchronizer, which authenticates a disclosed contract against its contract
- * id at submission, so a fabricated disclosure never settles. The proof is
- * therefore self-attested here and enforced at settlement — a caller that
- * verifies without settling gets no protection from it.
+ * payer signs, so every field read here is a field the payer chose. What makes
+ * the check bite is not this layer: it is the synchronizer, which
+ * authenticates a disclosed contract against its contract id at submission, so
+ * a fabricated disclosure never settles. The proof is therefore self-attested
+ * here and enforced at settlement — a caller that verifies without settling
+ * gets no protection from it.
  *
- * The admin is MERCHANT-QUOTED, and step 14 has already held the transfer's
- * admin equal to it, so both sides of the comparison come from the same
- * merchant. Closing that needs the real DSO party, which this layer has no way
- * to know and no configuration to carry; the facilitator holds it as
+ * The issuer binding is not here either. It runs through `expectedAdmin`,
+ * which the transfer names and which the standard requires the factory to
+ * validate against its own admin — see `readTransfer`. That admin is
+ * MERCHANT-QUOTED, so closing the last gap needs the real DSO party, which
+ * this layer has no way to know; the facilitator holds it as
  * `provider.dsoPartyId` and is where that comparison belongs.
  *
  * What the rule does buy: a payer cannot swap in a contract of their own that

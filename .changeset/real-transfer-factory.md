@@ -1,13 +1,14 @@
 ---
-"@chainsafe/x402-core": minor
+"@chainsafe/x402-core": major
 ---
 
-A canton-exact transfer must now be exercised through a real transfer factory.
-The payer chooses which contract to exercise, and until now nothing looked at
-that choice — a transfer exercised on a contract the payer wrote themselves,
-exposing a choice named `TransferFactory_Transfer` with arguments shaped like
-the real one, passed every check the verifier made. The whole payment reduces
-to "something called transfer happened", so the rule fixes what it happened on.
+**Breaking.** A canton-exact transfer must now be exercised through a real
+transfer factory. The payer chooses which contract to exercise, and until now
+nothing looked at that choice — a transfer exercised on a contract the payer
+wrote themselves, exposing a choice named `TransferFactory_Transfer` with
+arguments shaped like the real one, passed every check the verifier made. The
+whole payment reduces to "something called transfer happened", so the rule
+fixes what it happened on.
 
 The exercised contract id is resolved against the transaction's own disclosed
 input contracts, and the contract it names must be:

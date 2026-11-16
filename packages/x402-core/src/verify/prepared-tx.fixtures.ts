@@ -142,20 +142,29 @@ export interface EncodeOptions {
     contractId?: string;
     /** The exercise's `template_id`. Defaults to the real Canton Coin factory. */
     templateId?: { packageId?: string; moduleName?: string; entityName?: string };
-    /** The input contract's own template, when it must DISAGREE with the exercise's. */
-    inputTemplateId?: { packageId?: string; moduleName?: string; entityName?: string };
-    /** Defaults to the admin the transfer declares — what a real factory carries. */
-    signatories?: readonly string[];
-    /** No `input_contracts` entry at all: the exercised id resolves to nothing. */
-    omitInputContract?: boolean;
-    /** The entry written twice: the id resolves ambiguously. */
-    duplicateInputContract?: boolean;
+    /**
+     * The transaction's `input_contracts`, said outright.
+     *
+     * Defaults to the one disclosure a real transfer carries: the exercised
+     * factory, under the exercise's own template and package name, signed by
+     * the instrument's admin. Pass a list to say exactly what is disclosed —
+     * none at all, two under one id, a decoy ahead of the real one, or a
+     * disclosure that disagrees about the template. Each entry defaults the
+     * same way, so a test names only the field it is about.
+     *
+     * This replaced six booleans. A list of the contracts that exist reads as
+     * the case under test; `omitInputContract: true` did not.
+     */
+    inputContracts?: readonly {
+      contractId?: string;
+      templateId?: { packageId?: string; moduleName?: string; entityName?: string };
+      signatories?: readonly string[];
+      packageName?: string;
+    }[];
     /** The exercise's `interface_id`. Defaults to the Token Standard factory. */
     interfaceId?: { packageId?: string; moduleName?: string; entityName?: string };
     /** No `interface_id`: the choice was exercised on the template directly. */
     omitInterfaceId?: boolean;
-    /** The input contract's `package_name`, when it must DISAGREE. */
-    inputPackageName?: string;
   };
 }
 
@@ -304,6 +313,12 @@ export function encodeChoiceArgument(
  */
 const FACTORY_CID = "00f1e2d3c4b5a6978899aabbccddeeff00112233445566778899aabbccddeeff";
 
+/** The exercised factory's id, so a test can name the contract it expects. */
+export const EXERCISED_CID = FACTORY_CID;
+
+/** A second disclosure's id, for fixtures that need the match not to be first. */
+export const DECOY_CID = "00cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
+
 /**
  * The template a fixture's exercise carries by default. Canton Coin's, because
  * a realistic fixture should look like the common case — but nothing compares
@@ -447,15 +462,20 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
     .string(transfer.synchronizerId ?? "global-domain::1220be58c29e")
     .uint32(tag(5, WIRE_LEN))
     .string("test-transaction");
-  if (factory && !factory.omitInputContract) {
-    const entry = encodeInputContract(
-      factory.contractId ?? FACTORY_CID,
-      encodeIdentifier(factory.inputTemplateId ?? factory.templateId),
-      factory.signatories ?? [transfer.instrumentId.admin],
-      factory.inputPackageName ?? FACTORY_PACKAGE_NAME,
-    );
-    metadata.uint32(tag(7, WIRE_LEN)).bytes(entry);
-    if (factory.duplicateInputContract) metadata.uint32(tag(7, WIRE_LEN)).bytes(entry);
+  if (factory) {
+    // One disclosure by default: the exercised factory, agreeing with the
+    // exercise about what it is and signed by the instrument's admin.
+    const disclosures = factory.inputContracts ?? [{}];
+    for (const d of disclosures) {
+      metadata.uint32(tag(7, WIRE_LEN)).bytes(
+        encodeInputContract(
+          d.contractId ?? factory.contractId ?? FACTORY_CID,
+          encodeIdentifier(d.templateId ?? factory.templateId),
+          d.signatories ?? [transfer.instrumentId.admin],
+          d.packageName ?? FACTORY_PACKAGE_NAME,
+        ),
+      );
+    }
   }
   const metadataBytes = concat(metadata.finish(), extra.metadata);
 
