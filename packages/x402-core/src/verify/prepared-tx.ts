@@ -9,10 +9,20 @@
 // would be a second reading of one blob, and the attacker's win condition is
 // making two readings disagree.
 //
-// Wire-level canonicality is therefore not checked here: non-canonical bytes
-// reach the hasher through the same parse, so they change the hash and fail the
-// signature rather than changing what this reads. What IS checked is the shape
-// of the transaction, which the hash does not constrain.
+// Wire-level canonicality is not checked here, and the hash does not check it
+// either: `hashPreparedTransaction` re-serialises the decoded tree before
+// hashing, so non-canonical bytes hash exactly like their canonical form. That
+// is harmless for the two readings above — both read the same tree — but it
+// means a blob protobuf-java reads DIFFERENTLY still hashes the same here.
+// Canton's own hash then differs and it refuses the signature at execution, so
+// such a payload verifies and fails to settle. Re-serialising the decode and
+// comparing it to the input bytes would catch that earlier — a real prepare
+// vector round-trips exactly — but the vendor package exports only its three
+// functions, not the message type `toBinary` lives on, and its `exports` map
+// has no deep path. It needs an upstream export.
+//
+// What IS checked here is the shape of the transaction, which the hash does
+// not constrain at all.
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -96,10 +106,29 @@ function str(value: VendorValue | undefined): string | undefined {
   return undefined;
 }
 
+/**
+ * A record's fields — refusing one whose labels repeat.
+ *
+ * Two copies of a MESSAGE field do not last-wins like a scalar: protobuf
+ * merges them, and merging concatenates their repeated members. A chosen value
+ * written twice therefore decodes as ONE record carrying both sets of fields,
+ * and reading the first while the signature covers both is exactly the
+ * two-readings-of-one-blob this decoder exists to prevent. A Daml record's
+ * labels are distinct by construction, so refusing a repeat costs nothing
+ * honest.
+ *
+ * Only the labeled form is caught. A fully-positional record doubled the same
+ * way concatenates into indices nothing can tell apart from a wider record —
+ * the ledger should refuse it on arity, but that is its check and not ours.
+ * Canton labels what it enriches, so real payloads take the labeled path.
+ */
 function fieldsOf(value: VendorValue | undefined): readonly VendorField[] | undefined {
   const sum = value?.sum;
   if (sum?.oneofKind !== "record") return undefined;
-  return (sum.record as { fields: VendorField[] }).fields;
+  const fields = (sum.record as { fields: VendorField[] }).fields;
+  const labels = fields.map((f) => f.label).filter((label) => label !== "");
+  if (new Set(labels).size !== labels.length) return undefined;
+  return fields;
 }
 
 /** Daml `Time`, carried as a decimal string (jstype JS_STRING) and widened back to the 64-bit value. */

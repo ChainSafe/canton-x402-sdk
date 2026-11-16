@@ -291,4 +291,24 @@ describe("what replaced the walker's wire strictness", () => {
     });
     expect(decodePreparedTransaction(blob)?.synchronizerId).toBe("other-domain::1220ffff");
   });
+
+  it("refuses a chosen value written twice, which MERGES rather than last-wins", () => {
+    // A scalar written twice keeps the last. A MESSAGE written twice is
+    // merged, and merging concatenates the repeated members — so this decodes
+    // as one record holding `expectedAdmin, transfer, expectedAdmin, transfer`.
+    // Reading the first transfer would bind the requirements to a benign one
+    // while the signature covers a second paying someone else.
+    const other: DecodedTransfer = { ...TRANSFER, receiver: "mallory::1220bad", amount: "999" };
+    const blob = encodePreparedTransaction(TRANSFER, {
+      extra: { exercise: wrap(10, encodeChoiceArgument(other)) },
+    });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  it("still reads a record whose labels are distinct", () => {
+    // The control: the refusal above is the repeat, not the shape.
+    expect(decodePreparedTransaction(encodePreparedTransaction(TRANSFER))?.receiver).toBe(
+      TRANSFER.receiver,
+    );
+  });
 });

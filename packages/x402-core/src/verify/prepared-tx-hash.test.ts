@@ -69,4 +69,22 @@ describe("the hash covers what the decoder reads", () => {
     expect(decodePreparedTransaction(unknown)).toBeNull();
     await expect(computePreparedTransactionHash(unknown)).rejects.toThrow();
   });
+
+  it("does NOT move for bytes that decode to the same tree, so it checks no canonicality", async () => {
+    // The hasher re-serialises the decoded tree before hashing, so a scalar
+    // written twice hashes exactly like the canonical form of the value that
+    // won. Pinned because the file header rests on it: wire-level canonicality
+    // is Canton's check at execution, not something the hash does for us, and
+    // a vendor that stopped re-serialising would make that comment wrong
+    // silently.
+    const canonical = encodePreparedTransaction({ ...TRANSFER, synchronizerId: "d::1220ffff" });
+    const doubled = encodePreparedTransaction(
+      { ...TRANSFER, synchronizerId: "decoy::1220aaaa" },
+      { extra: { prepared: wrap(2, stringField(3, "d::1220ffff")) } },
+    );
+    expect(doubled).not.toBe(canonical);
+    expect(await computePreparedTransactionHash(doubled)).toBe(
+      await computePreparedTransactionHash(canonical),
+    );
+  });
 });

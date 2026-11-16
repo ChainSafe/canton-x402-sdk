@@ -1,5 +1,5 @@
 ---
-"@chainsafe/x402-core": minor
+"@chainsafe/x402-core": major
 ---
 
 **Breaking.** One decoder. The hand-rolled prepared-transaction walker is gone;
@@ -24,12 +24,23 @@ schema does not define is rejected rather than read past. That is the point: the
 hash cannot cover a field it cannot see, so reading past one meant binding the
 requirements to bytes nobody signed. The hasher refuses the same input.
 
-**What is now accepted that was not.** A singular protobuf field written twice,
-or a node carrying two known node types. Protobuf merges those and keeps the
-last, and so does the decode the hash is taken over — so refusing them was the
-walker disagreeing with the ledger rather than catching anything. Eight tests
-pinning those refusals are removed and one is added in their place, pinning
-that a repeated singular field now reads LAST, as the ledger reads it.
+**What is now accepted that was not.** A singular SCALAR field written twice,
+or a node carrying two known node types. Protobuf keeps the last of those, and
+so does the decode the hash is taken over — so refusing them was the walker
+disagreeing with the ledger rather than catching anything. Eight tests pinning
+those refusals are removed and one is added in their place, pinning that a
+repeated singular scalar now reads LAST, as the ledger reads it.
+
+**A repeated MESSAGE field is a different thing, and is refused.** Two copies
+of a message do not last-wins: protobuf merges them, and merging concatenates
+their repeated members. A chosen value written twice therefore decodes as one
+record carrying `expectedAdmin, transfer, expectedAdmin, transfer` — and a
+reader taking the first would bind the requirements to a benign transfer while
+the signature covers a second paying someone else. `fieldsOf` now refuses a
+record whose labels repeat, which a Daml record never does honestly. Only the
+labeled form is caught; a fully-positional record doubled the same way
+concatenates into indices nothing can tell apart, and the ledger's arity check
+is what refuses that.
 
 **What is kept.** Every structural invariant: exactly one root, the transfer is
 that root, no transfer under a rollback, no duplicate or unreachable nodes. And

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { encodePreparedTransaction, encodePreparedTransactionGraph } from "./prepared-tx.fixtures";
+import {
+  encodePreparedTransaction,
+  encodePreparedTransactionGraph,
+  stringField,
+  wrap,
+} from "./prepared-tx.fixtures";
 import {
   guardPreparedTransaction,
   MAX_PREPARED_TRANSACTION_BASE64_LENGTH,
@@ -42,6 +47,37 @@ describe("guardPreparedTransaction", () => {
 
   it("rejects a malformed prepared transaction", () => {
     expect(guardPreparedTransaction("not-base64!!")).toEqual({
+      ok: false,
+      reason: "undecodable",
+    });
+  });
+
+  it("rejects a node id that is not a canonical integer", () => {
+    // Canton parses node ids as integers, so "00" and "0" are one node to it
+    // and two to a string-keyed reader. Refused where a node is DEFINED; the
+    // try/catch here is what turns the decoder's throw into a reason rather
+    // than a 500 out of verify.
+    const preparedTransaction = encodePreparedTransactionGraph(["00"], [{ id: "00", children: [] }]);
+    expect(guardPreparedTransaction(preparedTransaction)).toEqual({
+      ok: false,
+      reason: "non_canonical_node_id",
+    });
+  });
+
+  it("rejects a prepared transaction carrying a field the schema does not define", () => {
+    // The hash cannot cover a field it cannot see, so reading past one would
+    // bind the requirements to bytes nobody signed. `readUnknownField: "throw"`
+    // is what refuses it, and the catch above turns that into `undecodable`.
+    const preparedTransaction = encodePreparedTransaction(
+      {
+        sender: "alice::fingerprint",
+        receiver: "merchant::fingerprint",
+        amount: "1.0",
+        instrumentId: { id: "Amulet", admin: "DSO::fingerprint" },
+      },
+      { extra: { prepared: wrap(15, stringField(1, "unsigned")) } },
+    );
+    expect(guardPreparedTransaction(preparedTransaction)).toEqual({
       ok: false,
       reason: "undecodable",
     });
