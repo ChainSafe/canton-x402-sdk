@@ -16,11 +16,9 @@ input contracts, and the contract it names must be:
   disclosure and the exercise agree on (`factory_unresolved` otherwise —
   including when nothing discloses it);
 - exercised through the Token Standard `TransferFactory` interface
-  (`factory_interface`);
-- signed by the admin the instrument names (`factory_signatory`).
+  (`factory_interface`).
 
-All three refuse as `invalid_exact_canton_malformed_payload` /
-`transfer_mismatch`.
+Both refuse as `invalid_exact_canton_malformed_payload` / `transfer_mismatch`.
 
 **`expectedAdmin` is held to the instrument's admin.** The choice argument is
 `{ expectedAdmin, transfer }`. The two name different things — `expectedAdmin`
@@ -31,9 +29,9 @@ INSTRUMENT — and the standard does not require them equal.
 This requires it. `TransferFactoryView.admin` is "the party representing the
 registry app that administers the instruments for which this transfer factory
 can be used", so a well-formed registry has one party in both, and the real
-Canton Coin payment does. It is also the assumption the signatory clause above
-already makes. Stated here because a registry that split the two parties would
-fail both checks together.
+Canton Coin payment does — and it is what the standard itself asks for: the
+factory MUST validate `expectedAdmin` against its own admin, so holding it to
+the instrument's admin here puts the ledger at the end of the chain.
 
 What it buys: `expectedAdmin` is what the ledger guards on, so a facilitator
 that pins the admin to the real DSO pins the guarded field with it, and a
@@ -54,16 +52,25 @@ contract was created under. Requiring them equal would refuse honest payments
 for the whole window of a Splice rollout. The package NAME is what an upgrade
 preserves, so that is what the two sides must agree on.
 
-**The admin is among the signatories, not the only one.** A registry's factory
-can legitimately carry more than one party — the reference facilitator keeps a
-configured allowlist of registry infrastructure parties for this, noting that a
-bridged token's factory names the bridge operator too.
+**Who signed the factory is NOT checked.** The Token Standard constrains it
+nowhere — `TransferFactory` is an interface and signatories are an
+implementation's own choice — and real MainNet bytes differ: Canton Coin's
+factory is signed by the DSO, while a Utility Registry transfer exercises the
+MERCHANT's own preapproval, signed by the merchant and not the issuer at all.
+An earlier draft required the admin among the signatories and refused every
+registry payment.
+
+What ties the factory to the issuer instead is `expectedAdmin`, which the
+standard requires the factory to validate against its own admin. That link is
+the ledger's to enforce, and holds only because vetted packages implement the
+MUST; it cannot be checked from the bytes, so nothing here tries.
 
 **What this does not establish — two gaps, both real.**
 
 The disclosure is payer-written: `input_contracts` is part of the blob the payer
-signs, so every field this reads is one the payer chose, including the
-signatory. What makes the check bite is not this layer but the synchronizer,
+signs, so every field this reads is one the payer chose — the interface the
+choice was inherited from included. What makes the check bite is not this layer
+but the synchronizer,
 which authenticates a disclosed contract against its contract id at submission,
 so a fabricated disclosure never settles. The proof is self-attested here and
 enforced at settlement — a caller that verifies without settling gets no
@@ -78,7 +85,9 @@ What the rule does buy: a payer cannot swap in a contract of their own that
 merely exposes a same-named choice and have it SETTLE, which before this check
 it could.
 
-`DecodedTransfer` gains `exercisedContract` — the resolved contract id, package
-name, template, signatories and the interface the choice was inherited from, or
+`DecodedTransfer` gains `exercisedContract` — the resolved contract id, the
+disclosure's signatories and the interface the choice was inherited from, or
 `undefined` when the exercise does not resolve to exactly one agreeing
-disclosure.
+disclosure. Verification reads only the interface; the contract id and the
+signatories are there for a caller that can check them against a registry,
+which this layer cannot.

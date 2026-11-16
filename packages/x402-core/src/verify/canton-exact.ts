@@ -315,13 +315,18 @@ function factoryProofFailure(transfer: DecodedTransfer): string | null {
   if (!inherited) return "factory_interface";
   if (inherited.moduleName !== TRANSFER_FACTORY_INTERFACE.moduleName) return "factory_interface";
   if (inherited.entityName !== TRANSFER_FACTORY_INTERFACE.entityName) return "factory_interface";
-  // The admin must be AMONG the signatories, not the only one. A registry's
-  // factory can legitimately carry more than one party — the reference
-  // facilitator keeps a configured allowlist of registry infrastructure
-  // parties for exactly this reason, noting that a bridged token's factory
-  // names the bridge operator too. Demanding a sole signatory would refuse
-  // those honest transfers. An empty list fails this on its own.
-  if (!exercised.signatories.includes(transfer.instrumentId.admin)) return "factory_signatory";
+  // NOT CHECKED: who signed the factory. The Token Standard says nothing about
+  // it — `TransferFactory` is an interface and signatories are an
+  // implementation's own choice — and real bytes bear that out: Canton Coin's
+  // factory is signed by the DSO, but a Utility Registry transfer exercises
+  // the MERCHANT's own preapproval, signed by the merchant and not the issuer
+  // at all. A rule inferred from Canton Coin refused those outright.
+  //
+  // What binds the factory to the issuer is `expectedAdmin`, held to the
+  // instrument's admin where the transfer is read, and which the standard
+  // requires the factory to validate against its own admin. That link is the
+  // ledger's to enforce and holds only because vetted packages implement the
+  // MUST — it cannot be checked from the bytes, so nothing here tries.
   return null;
 }
 

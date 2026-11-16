@@ -813,33 +813,17 @@ describe("cantonExactVerifier", () => {
       );
     });
 
-    it("refuses a factory the instrument's admin did not sign", async () => {
-      // Right interface, right shape, wrong issuer: an interface anyone can
-      // implement, so the signatory is what binds it to this instrument.
+    it("accepts a factory the instrument's admin did not sign", async () => {
+      // Who signs a factory is an implementation's own choice — the Token
+      // Standard constrains it nowhere — and real bytes differ: Canton Coin's
+      // is signed by the DSO, while a Utility Registry transfer exercises the
+      // MERCHANT's own preapproval, signed by the merchant. A rule inferred
+      // from Canton Coin refused every registry payment on MainNet.
+      //
+      // What ties the factory to the issuer is `expectedAdmin`, which the
+      // ledger holds against the factory's own admin.
       const { payload, requirements } = await buildSignedFixture({
-        factory: { signatories: ["mallory::1220mal"] },
-      });
-      expect(await verifier.verify(payload, requirements)).toMatchObject(
-        factoryRefusal("factory_signatory"),
-      );
-    });
-
-    it("refuses a factory with no signatories at all", async () => {
-      const { payload, requirements } = await buildSignedFixture({
-        factory: { signatories: [] },
-      });
-      expect(await verifier.verify(payload, requirements)).toMatchObject(
-        factoryRefusal("factory_signatory"),
-      );
-    });
-
-    it("accepts a factory carrying a registry party beside the admin", async () => {
-      // A registry's factory can name its operator — and a bridged token's its
-      // bridge operator — alongside the admin. The reference facilitator keeps
-      // an allowlist for these, so requiring a sole signatory would refuse
-      // honest transfers.
-      const { payload, requirements } = await buildSignedFixture({
-        factory: { signatories: ["DSO::1220dso", "registry-op::1220op"] },
+        factory: { signatories: ["someone-else::1220other"] },
       });
       expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
     });
