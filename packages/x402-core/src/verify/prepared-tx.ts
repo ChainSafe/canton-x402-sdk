@@ -322,6 +322,7 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
     // them apart and this cannot. Absent is the real case and an empty id
     // matches no quoted synchronizer, so both are read as "none given".
     const synchronizerId = decoded.metadata?.synchronizerId || undefined;
+    const actAs = decoded.metadata?.submitterInfo?.actAs ?? [];
 
     // Canton parses node ids as integers and refuses nodes the roots cannot
     // reach, and the signed hash covers only the tree under the roots. So read
@@ -397,6 +398,21 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
 
     const transfer = transferArg ? readTransfer(transferArg) : null;
     if (!transfer) return null;
+    // THE SUBMITTER IS THE SENDER, and nobody else.
+    //
+    // `Metadata.submitter_info.act_as` names the parties the submission acts
+    // for. It sits in the signing preimage, so the payer chooses it and
+    // commits to it, but nothing in the choice argument constrains it: a
+    // transfer that moves the sender's money can name any party at all as a
+    // co-submitter, a facilitator's own party included. That grants AUTHORITY
+    // rather than describing the transfer, which is why it is not enough to
+    // read the transfer and stop.
+    //
+    // Refused here rather than in the verifier because it is a statement about
+    // the blob alone — two signed fields that have to agree — which is where
+    // `expectedAdmin` is held too. An empty list is refused with them: it is
+    // not "no claim", it is a submission with no proven submitter.
+    if (actAs.length !== 1 || actAs[0] !== transfer.sender) return null;
     return {
       ...transfer,
       ...(synchronizerId === undefined ? {} : { synchronizerId }),

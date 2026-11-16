@@ -115,6 +115,12 @@ export interface EncodeOptions {
    * it; the decoder holds the two equal. `""` leaves the field out entirely.
    */
   expectedAdmin?: string;
+  /**
+   * `Metadata.submitter_info.act_as`. Defaults to the sender alone, which is
+   * what every real capture carries; set it to name other parties, or `[]` to
+   * emit none.
+   */
+  actAs?: readonly string[];
   /** Raw bytes appended to a layer, e.g. `{ node: wrap(1, new Uint8Array()) }`. */
   extra?: Partial<Record<EncodeLayer, Uint8Array>>;
   /** The transfer node's id (defaults to "0"). */
@@ -446,12 +452,13 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
 
   damlTxn.uint32(tag(4, WIRE_LEN)).bytes(nodeSeed);
 
-  const submitterInfo = Writer.create()
-    .uint32(tag(1, WIRE_LEN))
-    .string(transfer.sender)
-    .uint32(tag(2, WIRE_LEN))
-    .string("test-command")
-    .finish();
+  // `act_as` defaults to the sender alone, as a real submission carries it.
+  // `actAs: []` emits none; a list emits exactly those parties.
+  const submitter = Writer.create();
+  for (const party of opts.actAs ?? [transfer.sender]) {
+    submitter.uint32(tag(1, WIRE_LEN)).string(party);
+  }
+  const submitterInfo = submitter.uint32(tag(2, WIRE_LEN)).string("test-command").finish();
 
   const metadata = Writer.create()
     .uint32(tag(2, WIRE_LEN))
