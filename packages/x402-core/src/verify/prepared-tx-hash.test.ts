@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { HashingSchemeVersion } from "../types/payment";
 import { computePreparedTransactionHash } from "./prepared-tx-hash";
+import { decodePreparedTransaction } from "./prepared-tx";
+import { encodePreparedTransaction, stringField, wrap } from "./prepared-tx.fixtures";
+import type { DecodedTransfer } from "./prepared-tx";
 
 // Prepared transaction and hash returned by a real Canton Ledger API prepare
 // call. This vector is also used by @canton-network/core-tx-visualizer v1.7.0.
@@ -26,5 +29,62 @@ describe("computePreparedTransactionHash", () => {
     await expect(
       computePreparedTransactionHash(LEDGER_PREPARED_TRANSACTION, HashingSchemeVersion.V3),
     ).rejects.toThrow("unsupported Canton hashing scheme");
+  });
+});
+
+// The decoder reads the transaction off the SAME parse the signing hash is
+// taken over — `hashPreparedTransaction` decodes, re-serialises and re-parses,
+// and hashes that. Three rules of the scheme are checked against what the
+// decode shows (input contracts, templates, declared holdings), and they mean
+// nothing unless the signature covers it.
+//
+// That property is the vendor's to keep, not ours: it held on 1.16.0 and did
+// NOT hold on 1.7.0, where an unreachable node was visible to the decode and
+// absent from the hash preimage. So it is pinned here rather than assumed, and
+// a vendor release that split the two paths would fail this file rather than
+// quietly weaken three security rules.
+describe("the hash covers what the decoder reads", () => {
+  const TRANSFER: DecodedTransfer = {
+    synchronizerId: "global-domain::1220be58c29e",
+    sender: "alice::1220beef",
+    receiver: "merchant::1220dead",
+    amount: "0.01",
+    instrumentId: { id: "Amulet", admin: "DSO::1220dso" },
+  };
+
+  it("moves the hash when a field the decoder reports changes", async () => {
+    const a = encodePreparedTransaction(TRANSFER);
+    const b = encodePreparedTransaction({ ...TRANSFER, receiver: "someone-else::1220dead" });
+    expect(decodePreparedTransaction(a)?.receiver).not.toBe(decodePreparedTransaction(b)?.receiver);
+    expect(await computePreparedTransactionHash(a)).not.toBe(await computePreparedTransactionHash(b));
+  });
+
+  it("refuses at the hash whatever the decoder refuses, for an unknown field", async () => {
+    // An unknown field is the case that matters: the hash cannot cover a field
+    // it does not know, so a decoder that read past one would be reading bytes
+    // nobody signed. Both sides must refuse the same input.
+    const unknown = encodePreparedTransaction(TRANSFER, {
+      extra: { prepared: wrap(15, stringField(1, "unsigned")) },
+    });
+    expect(decodePreparedTransaction(unknown)).toBeNull();
+    await expect(computePreparedTransactionHash(unknown)).rejects.toThrow();
+  });
+
+  it("does NOT move for bytes that decode to the same tree, so it checks no canonicality", async () => {
+    // The hasher re-serialises the decoded tree before hashing, so a scalar
+    // written twice hashes exactly like the canonical form of the value that
+    // won. Pinned because the file header rests on it: wire-level canonicality
+    // is Canton's check at execution, not something the hash does for us, and
+    // a vendor that stopped re-serialising would make that comment wrong
+    // silently.
+    const canonical = encodePreparedTransaction({ ...TRANSFER, synchronizerId: "d::1220ffff" });
+    const doubled = encodePreparedTransaction(
+      { ...TRANSFER, synchronizerId: "decoy::1220aaaa" },
+      { extra: { prepared: wrap(2, stringField(3, "d::1220ffff")) } },
+    );
+    expect(doubled).not.toBe(canonical);
+    expect(await computePreparedTransactionHash(doubled)).toBe(
+      await computePreparedTransactionHash(canonical),
+    );
   });
 });
