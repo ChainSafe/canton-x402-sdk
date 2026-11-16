@@ -88,11 +88,22 @@ export interface CantonRequirementsSpec extends BaseRequirementsSpec {
   asset: Resolvable<string | AssetSpec>;
   /**
    * The synchronizer to settle on, as the LOGICAL id
-   * `global-domain::1220…`. Read from `GET /v2/supported` when discovery runs,
-   * so it is only needed where nothing is discovered — `network` pinned
-   * alongside a whole `AssetSpec`.
+   * `global-domain::1220…`. Read from `GET /v2/supported`, which WINS where
+   * discovery runs — where a deployment submits is its own fact, and a
+   * transfer prepared against any other synchronizer cannot settle there.
+   * This is read only where nothing is discovered: `network` pinned alongside
+   * a whole `AssetSpec`.
    */
   synchronizerId?: Resolvable<string>;
+  /**
+   * The relayer to quote as `extra.feePayer`. Read from `GET /v2/supported`,
+   * which WINS where it is advertised — the relaying party is the
+   * facilitator's own fact, not a merchant's choice. This is read only where
+   * nothing is advertised: `network` pinned alongside a whole `AssetSpec`,
+   * which skips discovery, or a facilitator with no party configured yet.
+   * Required: quoting fails if neither can supply one.
+   */
+  feePayer?: Resolvable<string>;
   /**
    * Seconds of life the payer gives the transfer it signs. Default 120. Unlike
    * `maxTimeoutSeconds` this one reaches the ledger, as the transfer's
@@ -140,6 +151,11 @@ const EXTRA_RULES: Record<keyof typeof CantonRequirementsExtraSchema.entries, Ru
   // another and have the verifier pin the transfer to that instead; the
   // verifier holds the signed transaction to whatever reaches it.
   synchronizerId: { compare: "equal", reason: "policy_synchronizer" },
+  // Not `equal`: that asks "is this what I quoted?", and a 402 issued before a
+  // party rotation echoes the old one — which the facilitator still answers to
+  // and would accept. Nothing is lost by leaving it, since a payer can only
+  // name a party the facilitator answers to.
+  feePayer: { compare: "skip", why: "the facilitator's own; it judges the value against the parties it answers to" },
   // Echo fidelity only. The payer folds this into the transfer's absolute
   // `executeBefore`, and the verifier checks that deadline is still ahead of
   // now — with no upper bound, so a transfer signed far further out than the
@@ -208,6 +224,7 @@ export const cantonExact: SchemeAdapter<
       extra: {
         assetTransferMethod: ASSET_TRANSFER_METHOD,
         synchronizerId: terms.synchronizerId,
+        feePayer: terms.feePayer,
         instrumentId: terms.instrumentId,
         executeBeforeSeconds:
           spec.executeBeforeSeconds === undefined
@@ -229,6 +246,25 @@ export const cantonExact: SchemeAdapter<
 };
 
 /**
+ * Resolve a merchant-supplied term that must end up a non-empty string.
+ *
+ * `Resolvable<string>` holds at compile time only: a resolver reading an unset
+ * or blank env var hands back undefined or "" at runtime, and either would be
+ * quoted into a 402 that cannot be paid — refused much later by the
+ * requirements schema, under a worse name. Checked in one place because the
+ * same `!== undefined` test was wrong at every site that spelled it out.
+ */
+async function requiredTerm(
+  value: Resolvable<string> | undefined,
+  req: Request,
+  message: string,
+): Promise<string> {
+  const resolved = value === undefined ? undefined : await resolve(value, req);
+  if (typeof resolved !== "string" || resolved.length === 0) throw new TermsError(message);
+  return resolved;
+}
+
+/**
  * The scheme, network and instrument to quote.
  *
  * Anything the merchant pinned is used as given. Anything it left out comes
@@ -247,6 +283,7 @@ async function resolveDeploymentTerms(
   network: string;
   asset: string;
   synchronizerId: string;
+  feePayer: string;
   instrumentId: AssetSpec["instrumentId"];
 }> {
   const scheme = await resolve(spec.scheme ?? cantonExact.id, req);
@@ -258,22 +295,29 @@ async function resolveDeploymentTerms(
   const instrument = instrumentIdOf(asset);
   const pinned = typeof asset === "string" ? undefined : asset;
 
-  // Both pinned: nothing to discover — so the synchronizer has to come from
-  // the merchant, since there is no `/v2/supported` answer to read it from.
+  // Both pinned: nothing to discover — so the synchronizer and the relayer
+  // have to come from the merchant, since there is no `/v2/supported` answer
+  // to read either from.
   if (network !== undefined && pinned !== undefined) {
-    const synchronizerId =
-      spec.synchronizerId === undefined ? undefined : await resolve(spec.synchronizerId, req);
-    if (synchronizerId === undefined) {
-      throw new TermsError(
-        "paymentRequired: `network` and a whole `asset` are pinned, so nothing is read from " +
-          "/v2/supported — name the `synchronizerId` to settle on, or leave one of them out.",
-      );
-    }
+    const synchronizerId = await requiredTerm(
+      spec.synchronizerId,
+      req,
+      "paymentRequired: `network` and a whole `asset` are pinned, so nothing is read from " +
+        "/v2/supported — name the `synchronizerId` to settle on, or leave one of them out.",
+    );
+    const feePayer = await requiredTerm(
+      spec.feePayer,
+      req,
+      "paymentRequired: `network` and a whole `asset` are pinned, so nothing is read from " +
+        "/v2/supported — name the `feePayer` that will relay the transfer, or leave one of " +
+        "them out.",
+    );
     return {
       scheme,
       network,
       asset: assetSymbol(pinned.instrumentId),
       synchronizerId,
+      feePayer,
       instrumentId: pinned.instrumentId,
     };
   }
@@ -294,12 +338,47 @@ async function resolveDeploymentTerms(
     network: network ?? advertised.network,
     asset: pinned ? assetSymbol(pinned.instrumentId) : advertised.asset,
     // The deployment's own, unless the merchant named one.
-    synchronizerId:
-      spec.synchronizerId === undefined
-        ? advertised.extra.synchronizerId
-        : await resolve(spec.synchronizerId, req),
+    // Both of these are the facilitator's own facts, so its answer wins over
+    // anything the merchant named. The supported schema requires a
+    // synchronizer, so discovery always has one; `feePayer` it may omit.
+    synchronizerId: advertised.extra.synchronizerId,
+    feePayer: await requiredFeePayer(req, spec, advertised.extra.feePayer),
     instrumentId: pinned?.instrumentId ?? advertised.extra.instrumentId,
   };
+}
+
+/**
+ * The relayer to quote: the deployment's own, and the merchant's only where
+ * nothing is advertised.
+ *
+ * The advertised value WINS. `feePayer` names the party that relays and pays
+ * the traffic fee, which is the facilitator's own fact — a merchant cannot
+ * know it better than the facilitator does, so a different value is stale
+ * config or a mistake. Nothing catches it either: the facilitator compares the
+ * echoed value against its parties with `skip`, by design, so a wrong one
+ * surfaces as a fee-payer mismatch after the payer has signed.
+ *
+ * The merchant's is still read when discovery runs but the facilitator
+ * advertises no party — it advertises one only once a party is configured. The
+ * fully-pinned path never reaches here; it resolves both its terms itself.
+ *
+ * Absent from both is a refusal — the merchant hears it here, where the fix is
+ * theirs, rather than issuing a 402 the facilitator will refuse later.
+ */
+async function requiredFeePayer(
+  req: Request,
+  spec: CantonRequirementsSpec,
+  advertised: string | undefined,
+): Promise<string> {
+  // Schema-guaranteed non-empty where present, so it needs no check of its own.
+  if (advertised !== undefined) return advertised;
+  return requiredTerm(
+    spec.feePayer,
+    req,
+    "paymentRequired: no relayer to quote — the facilitator advertises no `feePayer` on " +
+      "/v2/supported, and this deployment's own `feePayer` is unset or empty. Configure the " +
+      "facilitator's party, or name a `feePayer` here.",
+  );
 }
 
 /**

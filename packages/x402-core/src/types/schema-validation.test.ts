@@ -31,7 +31,7 @@ const requirements: CantonPaymentRequirements = {
   network: "canton:devnet",
   amount: "100000000",
   asset: "CC",
-  extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
+  extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", feePayer: "x402-facilitator::1220fee", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" } },
   payTo: "merchant::1220dead",
   maxTimeoutSeconds: 60,
 };
@@ -69,7 +69,7 @@ describe("schema-first guards + parsers", () => {
 
   it("rejects wrong field types", () => {
     expect(isCantonPaymentInner({ ...inner, signature: 42 })).toBe(false);
-    expect(isCantonPaymentRequirements({ ...requirements, extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", executeBeforeSeconds: 120, instrumentId: { id: "Amulet" } } })).toBe(false);
+    expect(isCantonPaymentRequirements({ ...requirements, extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", feePayer: "x402-facilitator::1220fee", executeBeforeSeconds: 120, instrumentId: { id: "Amulet" } } })).toBe(false);
   });
 
   it("rejects an empty string in any required field", () => {
@@ -98,6 +98,18 @@ describe("schema-first guards + parsers", () => {
     expect(isCantonPaymentInner(withoutMethod)).toBe(false);
     for (const method of ["", "TRANSFER-FACTORY", "transfer-preapproval", "eip3009"]) {
       expect(isCantonPaymentInner({ ...inner, assetTransferMethod: method })).toBe(false);
+    }
+  });
+
+  it("requires extra.feePayer, as a non-empty party string", () => {
+    // The spec marks `memo` the only optional field of `extra`, so this one is
+    // required like the rest — and a facilitator refuses a value naming anyone
+    // but itself, which it cannot do with a field that was never sent.
+    const { feePayer: _omitted, ...withoutFeePayer } = requirements.extra;
+    expect(isCantonPaymentRequirements({ ...requirements, extra: withoutFeePayer })).toBe(false);
+    for (const bad of ["", 42, null, true, []]) {
+      const extra = { ...requirements.extra, feePayer: bad };
+      expect(isCantonPaymentRequirements({ ...requirements, extra })).toBe(false);
     }
   });
 

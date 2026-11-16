@@ -37,6 +37,7 @@ None required. There is no request body.
       "extra": {
         "transferMethods": ["transfer-factory"],
         "synchronizerId": "global-domain::1220be58c2…",
+        "feePayer": "x402-facilitator::1220096…",
         "carriages": ["inline"],
         "instruments": [
           {
@@ -66,6 +67,7 @@ None required. There is no request body.
 | `network`                  | A network name: `canton:mainnet`, `canton:testnet`, `canton:devnet` or `canton:localnet`. It does not carry the synchronizer id — read it from here rather than deriving it.              |
 | `extra.instruments[]`      | What the deployment settles, one entry per instrument: `instrumentId` as `{ id, admin }`, the registry `admin` party, and a display `symbol`. `admin` is the party the facilitator checks a payment's holding against, so configure from here rather than by hand. `paymentRequired()` reads the `admin` for you when a way to pay names its `asset` by id. |
 | `extra.synchronizerId`     | The synchronizer the deployment submits to — the id a payer prepares its transfer against. |
+| `extra.feePayer`           | The party that relays a payer-signed transfer and pays its traffic fee. Copy into `paymentRequirements.extra.feePayer` — a facilitator refuses a payment naming anyone but itself. Absent until a deployment has a party configured. `paymentRequired()` reads it for you and prefers it over a `feePayer` in your own config, falling back to yours only while none is advertised — and refusing to quote at all if neither can supply one. |
 | `extra.transferMethods[]`  | The asset transfer methods it speaks; `transfer-factory` for canton-exact. |
 | `extra.carriages[]`        | How a prepared transaction travels. `inline` means it is carried in the `PAYMENT-SIGNATURE` header itself. |
 | `extra.asset.instrumentId` | **Superseded by `extra.instruments[]`**, which says the same thing and can say it for more than one instrument. Still sent for merchants reading it; prefer `instruments`. |
@@ -122,6 +124,8 @@ guarantee.
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
+      "synchronizerId": "global-domain::1220be58c2…",
+      "feePayer": "x402-facilitator::1220096…",
       "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
       "executeBeforeSeconds": 120
     },
@@ -223,6 +227,8 @@ curl -sS -X POST "$FACILITATOR_URL/v2/verify" \
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
+      "synchronizerId": "global-domain::1220be58c2…",
+      "feePayer": "x402-facilitator::1220096…",
       "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
       "executeBeforeSeconds": 120
     },
@@ -276,6 +282,8 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
     "asset": "CC",
     "extra": {
       "assetTransferMethod": "transfer-factory",
+      "synchronizerId": "global-domain::1220be58c2…",
+      "feePayer": "x402-facilitator::1220096…",
       "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
       "executeBeforeSeconds": 120
     },
