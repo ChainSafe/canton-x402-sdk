@@ -28,7 +28,18 @@ A merchant discovering its terms gets it from `GET /v2/supported`'s
 it is read from the service that will settle the payment rather than copied
 into config.
 
-**The advertised value wins**, unlike `synchronizerId`. The relaying party is
+**The advertised value wins** — and `synchronizerId` now works the same way.
+Where discovery runs, both come from `/v2/supported` and a value named in
+`CantonRequirementsSpec` is not read. Neither had shipped: `synchronizerId`
+merged in #116 but its changeset is still pending, and that changeset already
+described the behaviour this way ("only a merchant that pins both `network`
+and a whole `asset` discovers nothing, and that one must name
+`synchronizerId`") — the discovery-path override was never promised. A
+transfer prepared against a synchronizer the deployment does not submit to
+cannot settle there, so a merchant value that differs was only ever a slower
+failure.
+
+The relaying party is
 the facilitator's own fact, not a merchant's choice, so a merchant value that
 differs from it is stale config or a mistake — and nothing catches it: the
 facilitator holds the echoed value against its own parties loosely, by design,

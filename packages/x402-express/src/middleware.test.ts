@@ -1643,12 +1643,12 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     expect(quote.extra.instrumentId).toEqual({ id: "Amulet", admin: DSO });
   });
 
-  it("keeps the merchant's synchronizerId even though discovery advertises one", async () => {
-    // Discovery still supplies the network, symbol and instrument here. The
-    // synchronizer is the one field the merchant can overrule, so SUPPORTED
-    // has to advertise a DIFFERENT one for the override to be visible at all:
-    // against a fixture that agreed, taking the advertised value always would
-    // pass just as well.
+  it("quotes the advertised synchronizerId over the merchant's", async () => {
+    // Where a deployment submits is its own fact: a transfer prepared against
+    // any other synchronizer cannot settle there, so a merchant value that
+    // differs is stale config that would fail at submission. SUPPORTED has to
+    // advertise a DIFFERENT one for the precedence to be visible at all:
+    // against a fixture that agreed, either rule would pass.
     stubWithSupported();
     const OWN_SYNC = "merchant-domain::1220dead";
     expect(OWN_SYNC).not.toBe(SYNC);
@@ -1665,7 +1665,7 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     ).get("/paid");
     expect(res.status).toBe(402);
     const [quote] = res.body.accepts;
-    expect(quote.extra.synchronizerId).toBe(OWN_SYNC);
+    expect(quote.extra.synchronizerId).toBe(SYNC);
     // Everything else still comes from the facilitator.
     expect(quote.network).toBe("canton:devnet");
     expect(quote.extra.instrumentId).toEqual({ id: "Amulet", admin: DSO });
@@ -1673,8 +1673,9 @@ describe("paymentRequired: configuring from /v2/supported", () => {
 
   // ── extra.feePayer ─────────────────────────────────────────────────────────
   //
-  // The relayer, advertised on /v2/supported once a party is configured. A
-  // merchant may override it; a quote that can name none fails.
+  // The relayer, advertised on /v2/supported once a party is configured. The
+  // advertised value wins; a merchant's is read only while none is
+  // advertised, and a quote that can name none fails.
 
   /** A deployment with no party configured: it advertises no feePayer. */
   const NO_FEE_PAYER_EXTRA = (() => {

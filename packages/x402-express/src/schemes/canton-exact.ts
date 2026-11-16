@@ -88,11 +88,11 @@ export interface CantonRequirementsSpec extends BaseRequirementsSpec {
   asset: Resolvable<string | AssetSpec>;
   /**
    * The synchronizer to settle on, as the LOGICAL id
-   * `global-domain::1220…`. Read from `GET /v2/supported` when discovery runs,
-   * so it is only NEEDED where nothing is discovered — `network` pinned
-   * alongside a whole `AssetSpec` — but naming it overrides the advertised
-   * one. That is the opposite of `feePayer` below, which the facilitator's
-   * answer always wins.
+   * `global-domain::1220…`. Read from `GET /v2/supported`, which WINS where
+   * discovery runs — where a deployment submits is its own fact, and a
+   * transfer prepared against any other synchronizer cannot settle there.
+   * This is read only where nothing is discovered: `network` pinned alongside
+   * a whole `AssetSpec`.
    */
   synchronizerId?: Resolvable<string>;
   /**
@@ -338,11 +338,10 @@ async function resolveDeploymentTerms(
     network: network ?? advertised.network,
     asset: pinned ? assetSymbol(pinned.instrumentId) : advertised.asset,
     // The deployment's own, unless the merchant named one.
-    synchronizerId:
-      spec.synchronizerId === undefined
-        ? advertised.extra.synchronizerId
-        : await resolve(spec.synchronizerId, req),
-    // NOT as above: the advertised party wins over the merchant's.
+    // Both of these are the facilitator's own facts, so its answer wins over
+    // anything the merchant named. The supported schema requires a
+    // synchronizer, so discovery always has one; `feePayer` it may omit.
+    synchronizerId: advertised.extra.synchronizerId,
     feePayer: await requiredFeePayer(req, spec, advertised.extra.feePayer),
     instrumentId: pinned?.instrumentId ?? advertised.extra.instrumentId,
   };
