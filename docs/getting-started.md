@@ -54,14 +54,16 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
 4. **Know what your facilitator settles (you do not have to configure it)**
 
    `GET $FACILITATOR_URL/v2/supported` says what a deployment settles: the
-   `network` id, and in `kinds[].extra` the synchronizer it submits to and the
-   instruments it validates, each with the registry party that admins it.
+   `network` id, and in `kinds[].extra` the synchronizer it submits to, the
+   party that relays your payments (`feePayer`), and the instruments it
+   validates, each with the registry party that admins it.
 
    The middleware reads this for you. Name the instrument by id — `asset:
    "Amulet"` — and leave `network` out, and the rest comes from the facilitator:
-   the network it settles, and the registry party your payments are validated
-   against, read from the service doing the validating rather than copied into
-   your `.env` to go stale when a deployment moves. It is fetched once and
+   the network it settles, the party that relays your payments, and the
+   registry party they are validated against — read from the service doing the
+   validating rather than copied into your `.env` to go stale when a deployment
+   moves. It is fetched once and
    cached (see `supportedTtlMs` on `FacilitatorClient`), not per request.
 
    `asset` itself is required on every way to pay: `amount` is atomic units of

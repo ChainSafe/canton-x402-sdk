@@ -21,29 +21,23 @@ import express from "express";
 import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "@chainsafe/x402-express";
 import {
-  amuletAsset,
   ledgerToAtomic,
   WIRE_DECIMALS,
-  DEVNET_DSO_PARTY,
   DEVNET_NETWORK,
   LOCALNET_NETWORK,
-  MAINNET_DSO_PARTY,
   MAINNET_NETWORK,
 } from "@chainsafe/x402-core";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const NETWORK = (process.env.NETWORK ?? "localnet").toLowerCase();
 
-/** Network id + DSO party default from the chosen network. */
-function networkDefaults(): { networkId: string; dso?: string } {
-  if (NETWORK === "devnet") return { networkId: DEVNET_NETWORK, dso: DEVNET_DSO_PARTY };
-  if (NETWORK === "mainnet") return { networkId: MAINNET_NETWORK, dso: MAINNET_DSO_PARTY };
-  // LocalNet allocates its DSO at runtime, so that one still has to be passed.
-  return { networkId: LOCALNET_NETWORK };
+/** The registered network id for the chosen network. */
+function defaultNetworkId(): string {
+  if (NETWORK === "devnet") return DEVNET_NETWORK;
+  if (NETWORK === "mainnet") return MAINNET_NETWORK;
+  return LOCALNET_NETWORK;
 }
-const def = networkDefaults();
-const NETWORK_ID = process.env.NETWORK_ID?.trim() || def.networkId;
-const DSO_PARTY = process.env.DSO_PARTY?.trim() || def.dso;
+const NETWORK_ID = process.env.NETWORK_ID?.trim() || defaultNetworkId();
 const BUREAU_PARTY = process.env.BUREAU_PARTY;
 // Priced in CC, because that is what a human sets. The wire is atomic units,
 // so this app converts before quoting.
@@ -52,15 +46,17 @@ const PORT = Number(process.env.BUREAU_PORT ?? 4001);
 const FACILITATOR_URL = process.env.FACILITATOR_URL;
 const FACILITATOR_API_KEY = process.env.FACILITATOR_API_KEY;
 
-// NETWORK_ID always has a default now, so it is not checked here.
-if (!DSO_PARTY || !BUREAU_PARTY || !FACILITATOR_URL) {
+if (!BUREAU_PARTY || !FACILITATOR_URL) {
   throw new Error(
-    "credit-bureau: set DSO_PARTY, BUREAU_PARTY and FACILITATOR_URL " +
-      "(see examples/mortgage/.env.example).",
+    "credit-bureau: set BUREAU_PARTY and FACILITATOR_URL (see examples/mortgage/.env.example).",
   );
 }
 
-const ASSET = amuletAsset(DSO_PARTY);
+// Canton Coin, named by its instrument id. The middleware reads the rest from
+// the facilitator's GET /v2/supported: the registry admin (the DSO party) and
+// the synchronizer to settle on. So the bureau keeps no copy of either, and a
+// DevNet reset, which rotates both, needs no change here.
+const ASSET = "Amulet";
 const PRICE_ATOMIC = ledgerToAtomic(PRICE_CC, WIRE_DECIMALS);
 if (PRICE_ATOMIC === null) {
   throw new Error(`credit-bureau: PRICE_CC "${PRICE_CC}" is not a decimal amount (≤10 places).`);

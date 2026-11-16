@@ -10,8 +10,11 @@ import type { CantonPaymentRequirements } from "./index";
 // requirements — so this test pins byte-for-byte parity. Regenerate ONLY if the facilitator's
 // algorithm intentionally changes (and update the facilitator in lockstep).
 //
-// Last regenerated when `extra.synchronizerId` was added (#76). The hash covers every value in the object, so a new field
-// moves it even though the algorithm is untouched. `maxTimeoutSeconds` is the
+// Last regenerated when `extra.feePayer` was added. The hash covers every value
+// in the object, so a new field moves it even though the algorithm is
+// untouched. Both values below were taken by running this fixture through the
+// facilitator's own canonicalize.ts as well as this package's canonicalJson:
+// the two strings came back byte-identical, and sha256 of each agreed. `maxTimeoutSeconds` is the
 // first NUMBER in this vector, so it is also what pins number formatting
 // across the two canonicalizers.
 const REQUIREMENTS: CantonPaymentRequirements = {
@@ -22,6 +25,7 @@ const REQUIREMENTS: CantonPaymentRequirements = {
   extra: {
     assetTransferMethod: "transfer-factory",
     synchronizerId: "global-domain::1220be58c29e",
+    feePayer: "x402-facilitator::1220fee",
     executeBeforeSeconds: 120,
     instrumentId: { id: "Amulet", admin: "DSO::1220be58c29e" },
   },
@@ -32,12 +36,13 @@ const REQUIREMENTS: CantonPaymentRequirements = {
 const GOLDEN_CANONICAL =
   '{"amount":"100000000","asset":"CC",' +
   '"extra":{"assetTransferMethod":"transfer-factory","executeBeforeSeconds":120,' +
+  '"feePayer":"x402-facilitator::1220fee",' +
   '"instrumentId":{"admin":"DSO::1220be58c29e","id":"Amulet"},' +
   '"synchronizerId":"global-domain::1220be58c29e"},' +
   '"maxTimeoutSeconds":60,"network":"canton:devnet",' +
   '"payTo":"merchant::1220dead","scheme":"exact"}';
 
-const GOLDEN_HASH = "d49b82dc50e5d6a80742d88a6f9f4972c7e7eb6bd50869cdda1c080d1e749e5c";
+const GOLDEN_HASH = "e1bec5042870aa713bf8737fee7fc2e452abf91c01e24545fbb1b47e688f003b";
 
 describe("requirements hashing — facilitator parity", () => {
   it("canonicalizes to the golden string (keys sorted, nested sorted)", () => {

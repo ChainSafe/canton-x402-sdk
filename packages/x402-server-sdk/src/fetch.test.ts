@@ -17,7 +17,7 @@ const requirements = {
   network: "canton:x",
   amount: "500000000",
   asset: "CC",
-  extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
+  extra: { assetTransferMethod: "transfer-factory", synchronizerId: "global-domain::1220be58c29e", feePayer: "x402-facilitator::1220fee", executeBeforeSeconds: 120, instrumentId: { id: "Amulet", admin: "DSO::x" } },
   payTo: "merchant::x",
   maxTimeoutSeconds: 60,
 } as CantonPaymentRequirements;

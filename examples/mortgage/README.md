@@ -75,7 +75,9 @@ curl -XPOST localhost:4002/apply -H 'content-type: application/json' \
 > synchronizer/DSO, onboards a funded payer external party + a receivable bureau party via
 > the validator admin API (unsafe self-signed auth), and writes the `.env`. It does not
 > write `NETWORK_ID` — the network id is the fixed name `canton:localnet`, which both apps
-> default to; only the DSO party is per-instance. On **DevNet** you
+> default to; only the DSO party is per-instance, and only the backend reads it. The bureau
+> quotes Canton Coin by its instrument id (`"Amulet"`) and reads the registry admin and the
+> synchronizer from the facilitator's `/v2/supported`. On **DevNet** you
 > instead bring your own funded party (its exported key + participant URL + OAuth) and copy
 > `.env.example` → `.env` by hand.
 
