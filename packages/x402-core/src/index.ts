@@ -9,8 +9,6 @@ export {
   CantonPaymentInnerSchema,
   CantonPaymentPayloadSchema,
   CantonPaymentRequiredResponseSchema,
-  CantonPaymentRequirementsSchema,
-  CantonRequirementsExtraSchema,
   CantonSupportedExtraSchema,
   HashingSchemeVersion,
   InstrumentIdSchema,
@@ -42,11 +40,6 @@ export {
   isX402PaymentRequiredResponse,
   isX402PaymentRequirements,
   isX402Request,
-  parseCantonPaymentInner,
-  parseCantonPaymentPayload,
-  parseCantonPaymentRequirements,
-  parseCantonVerifyRequest,
-  parseX402Request,
 } from "./types";
 export type {
   AssetSpec,
@@ -56,6 +49,7 @@ export type {
   CantonPaymentRequiredResponse,
   CantonPaymentRequirements,
   CantonRequirementsExtra,
+  CantonRequirementsExtraKey,
   CantonSupportedExtra,
   InstrumentId,
   NetworkId,

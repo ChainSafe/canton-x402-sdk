@@ -4,16 +4,20 @@ import { ValiError } from "valibot";
 import {
   isCantonPaymentPayload,
   isCantonPaymentInner,
-  parseCantonPaymentInner,
   isCantonPaymentRequirements,
   isX402PaymentRequirements,
-  parseCantonPaymentRequirements,
   isCantonVerifyRequest,
   isX402Request,
   isCantonPaymentRequiredResponse,
   SettleResponseSchema,
   VerifyResponseSchema,
 } from "../index";
+import {
+  parseCantonPaymentInner,
+} from "./payment";
+import {
+  parseCantonPaymentRequirements,
+} from "./requirements";
 import type { CantonPaymentInner } from "./payment";
 import type { CantonPaymentRequirements } from "./requirements";
 

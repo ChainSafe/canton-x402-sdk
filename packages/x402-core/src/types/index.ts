@@ -43,20 +43,18 @@ export type {
 } from "./common";
 export {
   CantonPaymentRequiredResponseSchema,
-  CantonPaymentRequirementsSchema,
-  CantonRequirementsExtraSchema,
   X402PaymentRequiredResponseEnvelopeSchema,
   X402PaymentRequirementsEnvelopeSchema,
   isCantonPaymentRequiredResponse,
   isCantonPaymentRequirements,
   isX402PaymentRequiredResponse,
   isX402PaymentRequirements,
-  parseCantonPaymentRequirements,
 } from "./requirements";
 export type {
   CantonPaymentRequiredResponse,
   CantonPaymentRequirements,
   CantonRequirementsExtra,
+  CantonRequirementsExtraKey,
   X402PaymentRequiredResponse,
   X402PaymentRequirements,
 } from "./requirements";
@@ -68,8 +66,6 @@ export {
   isCantonPaymentInner,
   isCantonPaymentPayload,
   isX402PaymentPayload,
-  parseCantonPaymentInner,
-  parseCantonPaymentPayload,
 } from "./payment";
 export type {
   CantonPaymentInner,
@@ -94,8 +90,6 @@ export {
   cantonSupportedExtra,
   isCantonVerifyRequest,
   isX402Request,
-  parseCantonVerifyRequest,
-  parseX402Request,
 } from "./facilitator";
 export type {
   CantonExactExtensionReason,
