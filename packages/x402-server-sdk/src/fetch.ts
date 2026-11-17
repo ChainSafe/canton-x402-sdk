@@ -1,10 +1,17 @@
 import {
   decodePaymentRequiredHeader,
+  decodePaymentResponseHeader,
   encodePaymentHeader,
+  isSettlementPending,
   type CantonPaymentRequirements,
   type ResourceInfo,
 } from "@chainsafe/x402-core";
 import type { X402Payer } from "./payer.js";
+
+/** How many times a payment whose settlement is pending is sent again. */
+const PENDING_RESENDS = 3;
+/** How long to wait before each of those resends. */
+const PENDING_RESEND_DELAY_MS = 2_000;
 
 /** A `fetch`-compatible function. */
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -37,6 +44,11 @@ export interface X402FetchOptions {
  * the first payer that `supports()` it (e.g. a Canton payer + an EVM payer). Depends
  * only on the {@link X402Payer} contract, so it's scheme-agnostic.
  *
+ * A paid request answered `settlement_pending` (a 402 whose `PAYMENT-RESPONSE`
+ * says the transfer was relayed but its outcome is not known yet) is sent again
+ * with the **same** payment, up to 3 times, 2 seconds apart, and the last answer
+ * is returned. It never signs a second payment: the first may still land.
+ *
  * Works for any HTTP method. The paid request is **retried**, so a request body must
  * be re-readable (a value like a string / JSON / `Buffer` / `URLSearchParams`, not a
  * `ReadableStream`, and don't pass a `Request` object whose body the first call consumes).
@@ -66,8 +78,54 @@ export function createX402Fetch(payers: X402Payer | X402Payer[], opts: X402Fetch
     });
     const headers = new Headers(init?.headers);
     headers.set("PAYMENT-SIGNATURE", encodePaymentHeader(payload));
-    return doFetch(input, { ...init, headers });
+    let paid = await doFetch(input, { ...init, headers });
+    // Resend the same payment, never a new one: whatever a resend gets back, a
+    // fresh challenge included, the first transfer may still commit.
+    for (let i = 0; i < PENDING_RESENDS && isPendingAnswer(paid); i++) {
+      await delay(PENDING_RESEND_DELAY_MS, init?.signal);
+      try {
+        paid = await doFetch(input, { ...init, headers });
+      } catch (err) {
+        // A resend that fails says nothing new: keep the pending answer, which
+        // names the transfer, rather than a network error the caller could
+        // only retry from scratch, signing again. An abort is the caller's.
+        if (init?.signal?.aborted) throw err;
+        return paid;
+      }
+    }
+    return paid;
   };
+}
+
+/** True for a 402 whose `PAYMENT-RESPONSE` says the settlement is pending. */
+function isPendingAnswer(res: Response): boolean {
+  if (res.status !== 402) return false;
+  const header = res.headers.get("PAYMENT-RESPONSE");
+  if (!header) return false;
+  try {
+    return isSettlementPending(decodePaymentResponseHeader(header));
+  } catch {
+    return false;
+  }
+}
+
+/** Wait `ms`, or reject with the signal's reason once it aborts. */
+function delay(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /** For each requirement in the server's order, the first payer that supports it. */

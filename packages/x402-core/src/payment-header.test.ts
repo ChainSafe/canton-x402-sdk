@@ -4,9 +4,11 @@ import {
   decodePaymentHeader,
   encodePaymentRequiredHeader,
   decodePaymentRequiredHeader,
+  encodePaymentResponseHeader,
+  decodePaymentResponseHeader,
   MAX_PAYMENT_DEPTH,
 } from "./payment-header";
-import { isCantonPaymentRequiredResponse } from "./index";
+import { isCantonPaymentRequiredResponse, isSettlementPending, type SettleResponse } from "./index";
 import type { CantonPaymentPayload, CantonPaymentRequirements, CantonPaymentRequiredResponse } from "./index";
 
 const requirements: CantonPaymentRequirements = {
@@ -230,5 +232,94 @@ describe("decodePaymentRequiredHeader", () => {
     for (let i = 0; i < MAX_PAYMENT_DEPTH + 2; i++) deep = { deep };
     const bad = btoa(JSON.stringify({ ...offer, extensions: deep }));
     expect(() => decodePaymentRequiredHeader(bad)).toThrow(/nests deeper than/);
+  });
+});
+
+describe("PAYMENT-RESPONSE codec", () => {
+  const b64 = (value: unknown) => btoa(JSON.stringify(value));
+  const pending: SettleResponse = {
+    success: false,
+    errorReason: "settlement_pending",
+    transaction: "ab".repeat(32),
+    network: "canton:devnet",
+    payer: "alice::1220beef",
+  };
+
+  it("round-trips a success and a pending answer", () => {
+    const success: SettleResponse = {
+      success: true,
+      network: "canton:devnet",
+      transaction: "1220update",
+      payer: "alice::1220beef",
+    };
+    expect(decodePaymentResponseHeader(encodePaymentResponseHeader(success))).toEqual(success);
+    expect(decodePaymentResponseHeader(encodePaymentResponseHeader(pending))).toEqual(pending);
+  });
+
+  it("reads a reason this SDK does not know, so a newer facilitator's answer still decodes", () => {
+    expect(
+      decodePaymentResponseHeader(b64({ success: false, errorReason: "some_future_code" })),
+    ).toEqual({
+      success: false,
+      errorReason: "some_future_code",
+    });
+  });
+
+  it("refuses what is not a settle answer", () => {
+    expect(() => decodePaymentResponseHeader("%%%")).toThrow(/base64/);
+    expect(() => decodePaymentResponseHeader(btoa("{nope"))).toThrow(/JSON/);
+    for (const bad of [
+      null,
+      [],
+      { errorReason: "settlement_pending" },
+      { success: "false", errorReason: "x" },
+      { success: false },
+      { success: false, errorReason: "settlement_pending", transaction: 42 },
+      { success: true },
+      { success: true, transaction: "t" },
+      { success: true, transaction: "t", network: 1 },
+    ]) {
+      expect(() => decodePaymentResponseHeader(b64(bad)), JSON.stringify(bad)).toThrow(
+        /not a settle answer/,
+      );
+    }
+  });
+
+  it("refuses nesting past MAX_PAYMENT_DEPTH", () => {
+    let deep: unknown = "x";
+    for (let i = 0; i < MAX_PAYMENT_DEPTH + 1; i++) deep = { deep };
+    expect(() =>
+      decodePaymentResponseHeader(b64({ success: false, errorReason: "x", extensions: deep })),
+    ).toThrow(/nests deeper/);
+  });
+});
+
+describe("isSettlementPending", () => {
+  it("is true for a settlement_pending answer that names its transaction", () => {
+    expect(
+      isSettlementPending({ success: false, errorReason: "settlement_pending", transaction: "ab" }),
+    ).toBe(true);
+  });
+
+  it("is false for one that names none, and for any other answer", () => {
+    expect(isSettlementPending({ success: false, errorReason: "settlement_pending" })).toBe(false);
+    expect(
+      isSettlementPending({ success: false, errorReason: "settlement_pending", transaction: "" }),
+    ).toBe(false);
+    expect(
+      isSettlementPending({
+        success: false,
+        errorReason: "invalid_exact_canton_execute_failed",
+        transaction: "ab",
+      }),
+    ).toBe(false);
+    expect(
+      isSettlementPending({
+        success: true,
+        network: "canton:devnet",
+        transaction: "ab",
+        payer: "alice::1220beef",
+      }),
+    ).toBe(false);
   });
 });

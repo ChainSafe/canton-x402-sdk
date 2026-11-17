@@ -10,6 +10,7 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import {
   decodePaymentHeader,
+  isSettlementPending,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
   type SettleResponse,
@@ -27,7 +28,7 @@ import {
 } from "./options.js";
 import { buildQuotes, type Offer } from "./quotes.js";
 import { assertAcceptedQuote, rulesFor } from "./policy.js";
-import { PaymentRejection, respondToFailure } from "./response.js";
+import { PaymentRejection, SettlementPending, respondToFailure } from "./response.js";
 
 /**
  * Express middleware that gates a route behind an x402 payment.
@@ -192,6 +193,21 @@ export function paymentRequired<
       let settleResponse: SettleResponse | undefined;
       if (settle) {
         settleResponse = await facilitator.settle(payload, accepted);
+        // Pending is not a failure: the transfer was relayed and may still
+        // commit. Ask once more, and if it is still unknown, answer so without
+        // serving and without a fresh challenge, which would have the payer
+        // sign a second transfer while the first may land.
+        if (isSettlementPending(settleResponse)) {
+          const first = settleResponse;
+          try {
+            settleResponse = await facilitator.settle(payload, accepted);
+          } catch {
+            // Still unknown. A 502 here would send the caller back to the
+            // start, where it is challenged and signs again.
+            settleResponse = first;
+          }
+          if (isSettlementPending(settleResponse)) throw new SettlementPending(settleResponse);
+        }
         if (!settleResponse.success) {
           throw new PaymentRejection(
             settleResponse.errorReason ?? "settle_failed",

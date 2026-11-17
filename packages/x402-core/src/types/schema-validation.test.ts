@@ -316,6 +316,18 @@ describe("reason codes", () => {
   const verifies = (invalidReason: string) => v.is(VerifyResponseSchema, { isValid: false, invalidReason });
   const settles = (errorReason: string) => v.is(SettleResponseSchema, { success: false, errorReason });
 
+  it("keeps a settle failure's transaction, network and payer, so a pending answer names its transfer", () => {
+    const pending = {
+      success: false,
+      errorReason: "settlement_pending",
+      transaction: "ab".repeat(32),
+      network: "canton:devnet",
+      payer: "alice::1220beef",
+    };
+    expect(v.parse(SettleResponseSchema, pending)).toEqual(pending);
+    expect(v.is(SettleResponseSchema, { ...pending, transaction: 42 })).toBe(false);
+  });
+
   it("takes every code in the scheme spec's table, on verify and on settle", () => {
     for (const code of schemeTable) {
       expect(verifies(code), code).toBe(true);

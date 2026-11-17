@@ -32,9 +32,10 @@ export interface FacilitatorClientOptions {
 /**
  * A facilitator call that did not yield a domain response: a `4xx`/`5xx` (bad
  * request, unauthorized, rate-limited, internal error) or a transport/network
- * failure. An *evaluated-but-invalid* payment is NOT this — the facilitator
- * returns `200` with `{isValid:false}` / `{success:false}` for those, so they
- * come back as normal `VerifyResponse` / `SettleResponse` values.
+ * failure. An evaluated outcome sent with `200` is NOT this: `{isValid:false}`
+ * and `{success:false}`, `settlement_pending` included, come back as normal
+ * `VerifyResponse` / `SettleResponse` values. A facilitator that answers a
+ * failed settle with a `4xx` surfaces here, with its answer as `body`.
  */
 export class FacilitatorError extends Error {
   constructor(
@@ -97,8 +98,10 @@ export class FacilitatorClient {
 
   /**
    * POST /v2/settle — execute the prepared transfer on-ledger. Resolves with the
-   * outcome (`success` true or false); throws {@link FacilitatorError} only on a
-   * protocol/transport error.
+   * outcome the facilitator answers with `2xx`: a success, a failure, or
+   * `settlement_pending` (relayed, outcome not known yet; `transaction` names
+   * it). Throws {@link FacilitatorError} on any other status or a transport
+   * error.
    */
   settle(
     payload: X402PaymentPayload<unknown>,
