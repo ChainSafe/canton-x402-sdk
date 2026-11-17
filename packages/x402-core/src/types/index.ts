@@ -3,7 +3,7 @@
 //
 // v2 (canton-exact) only; legacy v1 shapes are intentionally not carried over.
 // Organized by domain: common (shared kernel) · requirements · payment ·
-// facilitator (verify/settle/supported) · payment-object.
+// facilitator (verify/settle/supported).
 //
 // Multi-scheme generics: the chain-agnostic bases carry the scheme seams
 // via defaulted type params, and the canton-exact types are thin aliases —
@@ -29,4 +29,3 @@ export * from "./common";
 export * from "./requirements";
 export * from "./payment";
 export * from "./facilitator";
-export * from "./payment-object";

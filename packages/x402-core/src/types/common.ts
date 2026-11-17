@@ -58,18 +58,6 @@ export const AssetSpecSchema = v.object({
 });
 export type AssetSpec = v.InferOutput<typeof AssetSpecSchema>;
 
-/**
- * A contract disclosed alongside a prepared transaction (Canton Ledger API
- * `DisclosedContract`).
- */
-export const DisclosedContractSchema = v.object({
-  templateId: v.string(),
-  contractId: v.string(),
-  /** Base64 `createdEventBlob` from the ledger. */
-  createdEventBlob: v.string(),
-  synchronizerId: v.string(),
-});
-export type DisclosedContract = v.InferOutput<typeof DisclosedContractSchema>;
 
 /**
  * x402 v2 `ResourceInfo`: what is being paid for. A 402's `PaymentRequired`
