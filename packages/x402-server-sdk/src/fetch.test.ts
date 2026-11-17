@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   encodePaymentHeader,
   encodePaymentRequiredHeader,
@@ -194,12 +194,11 @@ describe("createX402Fetch", () => {
 });
 
 describe("createX402Fetch, when the settlement is pending", () => {
-  afterEach(() => vi.useRealTimers());
-
-  const offer = { x402Version: 2 as const, resource: RESOURCE, accepts: [requirements] };
-  const challenge = () => new Response(JSON.stringify(offer), { status: 402 });
-  const pending = () =>
-    new Response(JSON.stringify({ x402Version: 2, error: "settlement_pending" }), {
+  it("returns the pending answer as it is, and does not sign again", async () => {
+    // A pending 402 carries the settle answer in PAYMENT-RESPONSE and no
+    // challenge, so there is nothing to pay: the first transfer may still land.
+    const payer = makePayer();
+    const pending = new Response(JSON.stringify({ x402Version: 2, error: "settlement_pending" }), {
       status: 402,
       headers: {
         "PAYMENT-RESPONSE": encodePaymentResponseHeader({
@@ -210,110 +209,17 @@ describe("createX402Fetch, when the settlement is pending", () => {
         }),
       },
     });
-  const ok = () => new Response(JSON.stringify({ ok: true }), { status: 200 });
-
-  /** The unpaid call is challenged; each paid call gets the next scripted answer. */
-  function scripted(...paidAnswers: Array<() => Response>) {
-    const signatures: string[] = [];
-    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-      const signature = new Headers(init?.headers).get("PAYMENT-SIGNATURE");
-      if (!signature) return challenge();
-      signatures.push(signature);
-      return paidAnswers[Math.min(signatures.length - 1, paidAnswers.length - 1)]();
-    });
-    return { fetchMock: fetchMock as unknown as FetchLike, signatures };
-  }
-
-  /** Run a call to completion, letting fake timers through every wait. */
-  async function run(promise: Promise<Response>): Promise<Response> {
-    let done = false;
-    void promise.finally(() => (done = true));
-    while (!done) await vi.advanceTimersByTimeAsync(2_000);
-    return promise;
-  }
-
-  it("resends the SAME payment until it settles, signing once", async () => {
-    vi.useFakeTimers();
-    const payer = makePayer();
-    const { fetchMock, signatures } = scripted(pending, pending, ok);
-    const res = await run(createX402Fetch(payer, { fetch: fetchMock })(RESOURCE.url));
-    expect(res.status).toBe(200);
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
+      new Headers(init?.headers).has("PAYMENT-SIGNATURE")
+        ? pending
+        : new Response(
+            JSON.stringify({ x402Version: 2, resource: RESOURCE, accepts: [requirements] }),
+            { status: 402 },
+          ),
+    ) as unknown as FetchLike;
+    const res = await createX402Fetch(payer, { fetch: fetchMock })(RESOURCE.url);
+    expect(res).toBe(pending);
     expect(payer.authorize).toHaveBeenCalledOnce();
-    expect(signatures).toHaveLength(3);
-    expect(new Set(signatures)).toEqual(new Set([encodePaymentHeader(payload)]));
-  });
-
-  it("gives up after 3 resends and returns the last answer, without signing again", async () => {
-    vi.useFakeTimers();
-    const payer = makePayer();
-    const { fetchMock, signatures } = scripted(pending);
-    const res = await run(createX402Fetch(payer, { fetch: fetchMock })(RESOURCE.url));
-    expect(res.status).toBe(402);
-    expect(res.headers.get("PAYMENT-RESPONSE")).toBeTruthy();
-    expect(signatures).toHaveLength(4);
-    expect(payer.authorize).toHaveBeenCalledOnce();
-  });
-
-  it("waits 2 seconds before each resend", async () => {
-    vi.useFakeTimers();
-    const { fetchMock, signatures } = scripted(pending, pending, ok);
-    const call = createX402Fetch(makePayer(), { fetch: fetchMock })(RESOURCE.url);
-    await vi.advanceTimersByTimeAsync(1_999);
-    expect(signatures).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(signatures).toHaveLength(2);
-    await vi.advanceTimersByTimeAsync(1_999);
-    expect(signatures).toHaveLength(2);
-    await vi.advanceTimersByTimeAsync(1);
-    expect((await call).status).toBe(200);
-    expect(signatures).toHaveLength(3);
-  });
-
-  it("a resend that fails keeps the pending answer, rather than a network error", async () => {
-    vi.useFakeTimers();
-    const payer = makePayer();
-    let paidCalls = 0;
-    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-      if (!new Headers(init?.headers).get("PAYMENT-SIGNATURE")) return challenge();
-      if (++paidCalls === 1) return pending();
-      throw new TypeError("fetch failed");
-    }) as unknown as FetchLike;
-    const res = await run(createX402Fetch(payer, { fetch: fetchMock })(RESOURCE.url));
-    expect(res.status).toBe(402);
-    expect(res.headers.get("PAYMENT-RESPONSE")).toBeTruthy();
-    expect(paidCalls).toBe(2);
-    expect(payer.authorize).toHaveBeenCalledOnce();
-  });
-
-  it("a fresh challenge after a pending answer is returned, not paid again", async () => {
-    vi.useFakeTimers();
-    const payer = makePayer();
-    const { fetchMock, signatures } = scripted(pending, challenge);
-    const res = await run(createX402Fetch(payer, { fetch: fetchMock })(RESOURCE.url));
-    expect(res.status).toBe(402);
-    expect(res.headers.get("PAYMENT-RESPONSE")).toBeNull();
-    expect(signatures).toHaveLength(2);
-    expect(payer.authorize).toHaveBeenCalledOnce();
-  });
-
-  it("a 402 after paying that is not pending is returned at once", async () => {
-    const { fetchMock, signatures } = scripted(challenge);
-    const res = await createX402Fetch(makePayer(), { fetch: fetchMock })(RESOURCE.url);
-    expect(res.status).toBe(402);
-    expect(signatures).toHaveLength(1);
-  });
-
-  it("stops waiting when the caller aborts", async () => {
-    vi.useFakeTimers();
-    const controller = new AbortController();
-    const { fetchMock, signatures } = scripted(pending);
-    const call = createX402Fetch(makePayer(), { fetch: fetchMock })(RESOURCE.url, {
-      signal: controller.signal,
-    });
-    const settled = call.catch((e) => e);
-    await vi.advanceTimersByTimeAsync(500);
-    controller.abort(new Error("caller gave up"));
-    expect(await settled).toEqual(new Error("caller gave up"));
-    expect(signatures).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

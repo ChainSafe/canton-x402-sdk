@@ -1,7 +1,6 @@
 ---
 "@chainsafe/x402-core": minor
 "@chainsafe/x402-express": minor
-"@chainsafe/x402-server-sdk": minor
 "@chainsafe/x402-client": patch
 ---
 
@@ -15,11 +14,9 @@ still commit, so the payer must not be asked to pay again
   recognises one, and `encodePaymentResponseHeader` /
   `decodePaymentResponseHeader` carry a settle answer in the `PAYMENT-RESPONSE`
   header.
-- **express.** On a pending answer the middleware settles once more. If the
-  outcome is still unknown, it answers 402 with the facilitator's answer in
-  `PAYMENT-RESPONSE`, without serving the request and without a fresh
-  challenge, and does not call `onReject`.
-- **server-sdk.** `createX402Fetch` resends the same payment on a pending
-  answer, up to 3 times, 2 seconds apart, and never signs a second one.
+- **express.** On a pending answer the middleware answers 402 with the
+  facilitator's answer in `PAYMENT-RESPONSE`, without serving the request,
+  without a fresh challenge, and without calling `onReject`. It does not settle
+  again: that waits for a facilitator that can look a pending submission up.
 - **client.** `FacilitatorClient` returns a settle failure sent with 200,
   pending included, as a value; a failure sent with a 4xx still throws.

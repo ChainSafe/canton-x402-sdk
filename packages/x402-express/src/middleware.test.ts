@@ -2814,12 +2814,8 @@ describe("a settlement whose outcome is not known yet (settlement_pending)", () 
     network: "canton:x",
     payer: "alice::x",
   };
-  const SETTLED = { success: true, network: "canton:x", transaction: "upd-1", payer: "alice::x" };
 
-  /**
-   * A facilitator whose settle answers come from a script, one per call: a body
-   * answered with 200, or "throw" for a 503, which the client throws on.
-   */
+  /** A facilitator whose settle answers come from a script, one per call, each answered with 200. */
   function scriptedSettle(...answers: unknown[]) {
     let settles = 0;
     vi.stubGlobal(
@@ -2828,7 +2824,7 @@ describe("a settlement whose outcome is not known yet (settlement_pending)", () 
         if (url.includes("/v2/verify")) return json({ isValid: true, payer: "alice::x" });
         if (url.includes("/v2/settle")) {
           const answer = answers[Math.min(settles++, answers.length - 1)];
-          return answer === "throw" ? new Response("down", { status: 503 }) : json(answer);
+          return json(answer);
         }
         return new Response("no route", { status: 404 });
       }),
@@ -2869,27 +2865,17 @@ describe("a settlement whose outcome is not known yet (settlement_pending)", () 
     return { app, served, onReject };
   }
 
-  it("asks once more, and serves when the second answer is a success", async () => {
-    const facilitator = scriptedSettle(PENDING, SETTLED);
-    const { app, served } = pendingApp([]);
-    const res = await request(app)
-      .get("/paid")
-      .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-0" } }));
-    expect(res.status).toBe(200);
-    expect(facilitator.settles()).toBe(2);
-    expect(served).toHaveBeenCalledOnce();
-    expect(res.headers["x-payment-response"]).toBe("upd-1");
-  });
-
-  it("still pending after the second answer: 402 with PAYMENT-RESPONSE, no challenge, not served", async () => {
-    const facilitator = scriptedSettle(PENDING, PENDING);
+  it("a pending answer: 402 with PAYMENT-RESPONSE, no challenge, not served, settled once", async () => {
+    const facilitator = scriptedSettle(PENDING);
     const booked: string[] = [];
     const { app, served, onReject } = pendingApp(booked);
     const res = await request(app)
       .get("/paid")
       .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-0" } }));
     expect(res.status).toBe(402);
-    expect(facilitator.settles()).toBe(2);
+    // Not settled again: a facilitator that cannot look the submission up
+    // refuses the same payload as a replay.
+    expect(facilitator.settles()).toBe(1);
     expect(decodePaymentResponseHeader(res.headers["payment-response"])).toEqual(PENDING);
     // Nothing that invites a second payment: no challenge in the header or the
     // body, and no reference minted for one.
@@ -2901,30 +2887,6 @@ describe("a settlement whose outcome is not known yet (settlement_pending)", () 
     // Not a rejection: the payment may still land, so no undo is owed.
     await new Promise((r) => setImmediate(r));
     expect(onReject).not.toHaveBeenCalled();
-  });
-
-  it("a second answer that throws keeps the first, pending, rather than a 502", async () => {
-    scriptedSettle(PENDING, "throw");
-    const { app, served } = pendingApp([]);
-    const res = await request(app)
-      .get("/paid")
-      .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-0" } }));
-    expect(res.status).toBe(402);
-    expect(decodePaymentResponseHeader(res.headers["payment-response"])).toEqual(PENDING);
-    expect(served).not.toHaveBeenCalled();
-  });
-
-  it("a second answer that is a failure is refused as any failure is, with a fresh challenge", async () => {
-    scriptedSettle(PENDING, { success: false, errorReason: "invalid_exact_canton_execute_failed" });
-    const booked: string[] = [];
-    const { app } = pendingApp(booked);
-    const res = await request(app)
-      .get("/paid")
-      .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-0" } }));
-    expect(res.status).toBe(402);
-    expect(res.body.error).toBe("invalid_exact_canton_execute_failed");
-    expect(res.headers["payment-required"]).toBeDefined();
-    expect(booked).toHaveLength(1);
   });
 
   it("a pending answer that names no transaction is a plain failure, not retried", async () => {

@@ -194,20 +194,12 @@ export function paymentRequired<
       if (settle) {
         settleResponse = await facilitator.settle(payload, accepted);
         // Pending is not a failure: the transfer was relayed and may still
-        // commit. Ask once more, and if it is still unknown, answer so without
-        // serving and without a fresh challenge, which would have the payer
-        // sign a second transfer while the first may land.
-        if (isSettlementPending(settleResponse)) {
-          const first = settleResponse;
-          try {
-            settleResponse = await facilitator.settle(payload, accepted);
-          } catch {
-            // Still unknown. A 502 here would send the caller back to the
-            // start, where it is challenged and signs again.
-            settleResponse = first;
-          }
-          if (isSettlementPending(settleResponse)) throw new SettlementPending(settleResponse);
-        }
+        // commit. Answer so without serving and without a fresh challenge,
+        // which would have the payer sign a second transfer while the first
+        // may land. Settling again is left to a facilitator that can look a
+        // pending submission up; one that cannot refuses the same payload as a
+        // replay, which would read as a failure here.
+        if (isSettlementPending(settleResponse)) throw new SettlementPending(settleResponse);
         if (!settleResponse.success) {
           throw new PaymentRejection(
             settleResponse.errorReason ?? "settle_failed",
