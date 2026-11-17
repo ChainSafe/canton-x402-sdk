@@ -7,6 +7,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  type CantonPaymentRequirements,
   type X402PaymentRequirements,
 } from "@chainsafe/x402-core";
 
