@@ -31,9 +31,11 @@ createVerifierRegistry
 decodePayloadTransfer
 decodePaymentHeader
 decodePaymentRequiredHeader
+decodePaymentResponseHeader
 decodePreparedTransaction
 encodePaymentHeader
 encodePaymentRequiredHeader
+encodePaymentResponseHeader
 fingerprintForPublicKey
 gunzipPreparedTransaction
 gzipPreparedTransaction
@@ -43,6 +45,7 @@ isCantonPaymentPayload
 isCantonPaymentRequiredResponse
 isCantonPaymentRequirements
 isCantonVerifyRequest
+isSettlementPending
 isValidAmount
 isValidLedgerAmount
 isX402PaymentPayload

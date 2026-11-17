@@ -71,6 +71,7 @@ export {
   VerifyResponseSchema,
   cantonSupportedExtra,
   isCantonVerifyRequest,
+  isSettlementPending,
   isX402Request,
 } from "./facilitator";
 export type {

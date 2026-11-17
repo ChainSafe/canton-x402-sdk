@@ -3,8 +3,8 @@
 "@chainsafe/x402-express": major
 ---
 
-**Breaking. The published API surface is now a deliberate list: 139 names down
-to 105.**
+**Breaking. The published API surface is now a deliberate list: 142 names down
+to 108.**
 
 Until now the surface was a side effect of which files happened to be
 `export *`-ed, so roughly half of what the package published had never been
@@ -62,3 +62,11 @@ signature and `keyof` on it collapses to `string`; the set of keys was previousl
 obtainable only by reading `.entries` off the schema object.
 `@chainsafe/x402-express` uses it for its rule-table drift check and ships in the
 same release.
+
+### Kept
+
+**`encodePaymentResponseHeader`, `decodePaymentResponseHeader` and
+`isSettlementPending`** arrived after this list was drawn. All three are
+published: `@chainsafe/x402-express` writes the `PAYMENT-RESPONSE` header with
+the encoder, so a caller has to be able to read it back, and the guard is how a
+caller tells a pending settlement from a failed one.

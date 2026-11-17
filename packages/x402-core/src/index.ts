@@ -18,6 +18,7 @@ export {
   isCantonPaymentRequiredResponse,
   isCantonPaymentRequirements,
   isCantonVerifyRequest,
+  isSettlementPending,
   isX402PaymentPayload,
   isX402PaymentRequiredResponse,
   isX402PaymentRequirements,
@@ -107,8 +108,10 @@ export {
 export {
   decodePaymentHeader,
   decodePaymentRequiredHeader,
+  decodePaymentResponseHeader,
   encodePaymentHeader,
   encodePaymentRequiredHeader,
+  encodePaymentResponseHeader,
 } from "./payment-header";
 export {
   DeploymentSelectionError,
