@@ -48,6 +48,17 @@ async function buildSignedFixture(
     factory?: EncodeOptions["factory"];
     /** Emit these labels blank, which puts the record in declaration order. */
     blankLabels?: EncodeOptions["blankLabels"];
+    /**
+     * The delivery consequence. Omitted means the real one; `null` emits none,
+     * which is the transfer that would leave a pending instruction.
+     */
+    delivery?: EncodeOptions["delivery"] | null;
+    /** A second consequence node beside the delivery. */
+    second?: EncodeOptions["second"];
+    /** Create nodes the transfer leaves behind. */
+    creates?: EncodeOptions["creates"];
+    /** The instrument quoted. Defaults to Canton Coin, which selects the preapproval arm. */
+    instrumentId?: { id: string; admin: string };
   } = {},
 ) {
   const executeBeforeSeconds = overrides.executeBeforeSeconds ?? 120;
@@ -67,7 +78,7 @@ async function buildSignedFixture(
       assetTransferMethod: "transfer-factory",
       synchronizerId: "global-domain::1220be58c29e",
       feePayer: "x402-facilitator::1220fee", executeBeforeSeconds,
-      instrumentId: { id: "Amulet", admin: "DSO::1220dso" },
+      instrumentId: overrides.instrumentId ?? { id: "Amulet", admin: "DSO::1220dso" },
       ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
     },
     payTo: "merchant::1220merch",
@@ -92,6 +103,9 @@ async function buildSignedFixture(
     {
       factory: overrides.factory ?? {},
       ...(overrides.blankLabels === undefined ? {} : { blankLabels: overrides.blankLabels }),
+      ...(overrides.delivery === null ? {} : { delivery: overrides.delivery ?? {} }),
+      ...(overrides.second === undefined ? {} : { second: overrides.second }),
+      ...(overrides.creates === undefined ? {} : { creates: overrides.creates }),
     },
   );
   const preparedTransaction = gzipped(protobuf);
@@ -159,7 +173,7 @@ async function reDeadline(
       ...(executeBeforeMicros === undefined ? {} : { executeBeforeMicros }),
     },
     // A real payer exercises the admin-signed factory; the check needs it.
-    { factory: {} },
+    { factory: {}, delivery: {} },
   );
   const preparedTxHash = await computePreparedTransactionHash(protobuf, HashingSchemeVersion.V2);
   return {
@@ -289,7 +303,7 @@ describe("cantonExactVerifier", () => {
         instrumentId: requirements.extra.instrumentId,
       },
       // A real payer exercises the admin-signed factory; the check needs it.
-      { factory: {} },
+      { factory: {}, delivery: {} },
     );
     const preparedTxHash = await computePreparedTransactionHash(protobuf, HashingSchemeVersion.V2);
     const p = {
@@ -730,10 +744,471 @@ describe("cantonExactVerifier", () => {
     expect(await verifier.verify(p, requirements)).toEqual({ isValid: true, payer });
   });
 
+  // A signed TransferFactory_Transfer either delivers to the receiver now or
+  // leaves a pending instruction the payer can withdraw. Only the consequences
+  // say which, and relaying the second commits the payer's funds without
+  // paying the merchant.
+  describe("the delivery consequence", () => {
+    const refusal = (detail: string) => ({
+      isValid: false,
+      invalidReason: "invalid_exact_canton_preapproval_missing",
+      extensions: { reason: "transfer_mismatch", detail },
+    });
+
+    it("refuses a transfer that delivers nothing", async () => {
+      const { payload, requirements } = await buildSignedFixture({ delivery: null });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(refusal("no_direct_delivery"));
+    });
+
+    it("refuses a consequence that is not a delivery choice", async () => {
+      // The pending path exercises something else and creates an instruction.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { choiceId: "AllocationFactory_TransferInternal" },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(refusal("no_direct_delivery"));
+    });
+
+    it("refuses a delivery choice whose template module alone is wrong", async () => {
+      // Module and entity get a test each, so neither arm can be dropped.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { moduleName: "Splice.Wallet" },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(refusal("no_direct_delivery"));
+    });
+
+    it("refuses a delivery choice whose template entity alone is wrong", async () => {
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { entityName: "Impostor" },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(refusal("no_direct_delivery"));
+    });
+
+    it("refuses two deliveries, since binding either leaves the other unchecked", async () => {
+      const { payload, requirements } = await buildSignedFixture({ delivery: { duplicate: true } });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(refusal("delivery_ambiguous"));
+    });
+
+    it("refuses a delivery whose preapproval the transaction never discloses", async () => {
+      // A bare contract id says nothing about whose preapproval it is.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { omitDisclosure: true },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(refusal("delivery_unresolved"));
+    });
+
+    it("refuses a preapproval belonging to someone else", async () => {
+      // THE point of the binding: a live preapproval for another receiver
+      // grants this merchant nothing.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { receiver: "someone-else::1220other" },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(refusal("delivery_receiver"));
+    });
+
+    it("refuses a preapproval under another issuer", async () => {
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { dso: "other-dso::1220other" },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(refusal("delivery_admin"));
+    });
+
+    it("refuses a disclosure carrying an extra signatory", async () => {
+      // Not a stock preapproval: a relay that appends a party is presenting
+      // something else.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: {
+          signatories: ["DSO::1220dso", "merchant::1220merch", "app-provider::1220prov", "extra::1220x"],
+        },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(refusal("delivery_signatories"));
+    });
+
+    it("refuses a disclosure missing one of the trio", async () => {
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { signatories: ["DSO::1220dso", "merchant::1220merch", "stranger::1220s"] },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(refusal("delivery_signatories"));
+    });
+
+    it("accepts a merchant that provides its own preapproval", async () => {
+      // A merchant running its own validator is its own provider, so the
+      // disclosure carries two signatories, not three. That is a stock
+      // preapproval the ledger delivers through — the reference facilitator
+      // says so explicitly — and counting to three would make such a merchant
+      // permanently unpayable.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: {
+          provider: "merchant::1220merch",
+          signatories: ["DSO::1220dso", "merchant::1220merch"],
+        },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
+    });
+
+    it("refuses a preapproval where one party fills all three roles", async () => {
+      // No issuer distinct from the receiver: the degenerate case the
+      // reference facilitator also refuses. The instrument's admin has to be
+      // that party too, or the admin binding refuses it first and this would
+      // pass for the wrong reason.
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: { id: "Amulet", admin: "merchant::1220merch" },
+        delivery: {
+          dso: "merchant::1220merch",
+          provider: "merchant::1220merch",
+          signatories: ["merchant::1220merch"],
+        },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_signatories"),
+      );
+    });
+
+    it("refuses a delivery that sits under a rollback", async () => {
+      // A rolled-back consequence happened to nobody, so it delivers nothing —
+      // the decoder must not report it and the rule must not count it.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { rolledBack: true },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("no_direct_delivery"),
+      );
+    });
+
+    it("accepts Canton Coin's preapproval delivery, bound to this merchant", async () => {
+      // What the captured LocalNet payment carries.
+      const { payload, requirements } = await buildSignedFixture();
+      expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
+    });
+
+    const registryDelivery = {
+      choiceId: "TransferRule_DirectTransfer",
+      moduleName: "Utility.Registry.V0.Rule.Transfer",
+      entityName: "TransferRule",
+    };
+
+    it("accepts a registry token's own direct transfer", async () => {
+      // Reached only because the instrument is NOT Canton Coin.
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: registryDelivery,
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
+    });
+
+    it("refuses a Canton Coin payment carrying a registry delivery beside it", async () => {
+      // THE OTHER ARM IS NOT LOOKED AT. The instrument picks an arm, that arm
+      // finds its one node and binds it, and the filter for the other arm never
+      // runs — so a second delivery of the other shape rides along, moving
+      // whatever it likes to whoever it likes, read by nothing.
+      const { payload, requirements } = await buildSignedFixture({
+        second: {
+          ...registryDelivery,
+          delivers: { receiver: "mallory::1220bad", amount: "999.0" },
+        },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_unchecked"),
+      );
+    });
+
+    it("refuses a registry payment carrying a preapproval send beside it", async () => {
+      // The same hole from the other side, so neither arm is pinned by the
+      // other's test.
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: registryDelivery,
+        second: {
+          choiceId: "TransferPreapproval_SendV2",
+          moduleName: "Splice.AmuletRules",
+          entityName: "TransferPreapproval",
+          delivers: { receiver: "mallory::1220bad", amount: "999.0" },
+        },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_unchecked"),
+      );
+    });
+
+    it.fails("KNOWN GAP: a consequence of neither arm still rides along unchecked", async () => {
+      // The cross-arm guard closes a second node of the OTHER delivery arm. It
+      // does not close a node that is no delivery at all — an arbitrary choice
+      // on an arbitrary template is matched by neither filter, so neither arm
+      // looks at it. Closing this needs a whole-tree allowlist, which has to
+      // tolerate the Archive every honest capture carries.
+      const { payload, requirements } = await buildSignedFixture({
+        second: {
+          choiceId: "Drain_Everything",
+          moduleName: "Evil.Module",
+          entityName: "Evil",
+          delivers: { receiver: "mallory::1220bad", amount: "999.0" },
+        },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: false });
+    });
+
+    it("refuses a dust send against a correctly bound preapproval", async () => {
+      // Binding the preapproval says WHO gets paid, not HOW MUCH. Every other
+      // check here passes for this tree: the preapproval is the merchant's, its
+      // signatories are right, the root says the quoted amount. Only the send's
+      // own amount is a fraction of it.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { sendAmount: "0.0000000001" },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_amount"),
+      );
+    });
+
+    it("reads the send's amount as a decimal, so spelling alone does not refuse", async () => {
+      // The control for the check above. `atomicToLedger` TRIMS trailing zeros,
+      // so the root carries "0.01"; the send spells the same amount padded, as
+      // every real capture does ("0.0100000000"). One amount on-ledger, and
+      // refusing over spelling would refuse honest bytes — so this must still
+      // accept, which is what tells the amount check apart from a string
+      // compare. Written the other way round first, it compared "0.01" with
+      // "0.01" and proved nothing.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { sendAmount: "0.0100000000" },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
+    });
+
+    it("refuses the legacy TransferPreapproval_Send", async () => {
+      // Found, not ignored: it is in the locator set, so the answer names the
+      // legacy choice rather than reporting no delivery at all. Its argument
+      // layout is unmeasured, so its amount cannot be bound.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { choiceId: "TransferPreapproval_Send" },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_legacy_send"),
+      );
+    });
+
+    it("still reads a preapproval whose disclosure has ONE blank label", async () => {
+      // The engine binds a record by label only when EVERY field carries one;
+      // one blank label puts the whole disclosure in declaration order. Reading
+      // `some` instead sent this down the label path, where the blanked field
+      // matched nothing and an honest preapproval was refused as unresolved.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { blankDisclosureLabels: ["dso"] },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
+    });
+
+    it("refuses a disclosure whose label contradicts the position it sits in", async () => {
+      // Declaration order binds once any label is blank, so a label naming a
+      // different field than the one declared at its index is a contradiction.
+      // This is the reader that decides WHOSE preapproval the delivery spends.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: {
+          blankDisclosureLabels: ["dso"],
+          // Not another field's name: that collides, and the repeated-label
+          // guard would refuse the blob before argField was ever consulted.
+          relabelDisclosure: { receiver: "recipient" },
+        },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_unresolved"),
+      );
+    });
+
+    it("refuses a registry delivery that is anchored to nothing", async () => {
+      // THE DECOY. A bare node named TransferRule_DirectTransfer, exercising no
+      // disclosed contract, carrying a copy of the root's own transfer record,
+      // used to turn a tree this rule exists to refuse into a valid payment:
+      // the arm read what the node CLAIMED it moved and never where it came
+      // from. The preapproval arm has always required its contract to resolve.
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: { ...registryDelivery, omitDisclosure: true },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_unresolved"),
+      );
+    });
+
+    it("refuses a registry delivery whose rule the instrument's issuer did not sign", async () => {
+      // Anchored, but to someone else's contract. The rule being exercised has
+      // to belong to the issuer the quote names, or the anchor proves only that
+      // SOME contract was disclosed.
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: {
+          ...registryDelivery,
+          signatories: ["someone-else::1220other", "bridge-operator::1220bridge"],
+        },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_admin"),
+      );
+    });
+
+    it("does NOT let a registry marker stand in for Canton Coin's delivery", async () => {
+      // The arm is chosen by the instrument, never by what the tree contains.
+      // Choosing it from the nodes would let a payer pick the weaker rule by
+      // writing the node that selects it — one string, whole rule gone.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: registryDelivery,
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("no_direct_delivery"),
+      );
+    });
+
+    const usdx = { id: "USDX", admin: "usdx-issuer::1220issuer" };
+
+    it("refuses a registry delivery that pays someone else", async () => {
+      // The leg that actually pays must move what the signed root said it
+      // would. The reference facilitator reports catching real bytes this way.
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: { ...registryDelivery, delivers: { receiver: "mallory::1220bad" } },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_receiver"),
+      );
+    });
+
+    it("refuses a registry delivery for a smaller amount than the root", async () => {
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: { ...registryDelivery, delivers: { amount: "0.0000000001" } },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(refusal("delivery_amount"));
+    });
+
+    it("reads the amount as a decimal, so spelling alone does not refuse", async () => {
+      // The root carries "0.0100000000"; "0.01" is the same amount written
+      // short, and the ledger would move exactly as much.
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: { ...registryDelivery, delivers: { amount: "0.01" } },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
+    });
+
+    it("refuses a registry delivery from another sender", async () => {
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: { ...registryDelivery, delivers: { sender: "someone::1220else" } },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(refusal("delivery_sender"));
+    });
+
+    it("refuses a registry delivery that carries no transfer record", async () => {
+      // Nothing to hold to the root: the node names the choice and says
+      // nothing about what it moves.
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: { ...registryDelivery, omitDelivers: true },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_unresolved"),
+      );
+    });
+
+    it("refuses a registry delivery under another issuer", async () => {
+      // Id and admin get a test each, so neither arm can be dropped unnoticed.
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: {
+          ...registryDelivery,
+          delivers: { instrumentId: { id: usdx.id, admin: "other-issuer::1220other" } },
+        },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_instrument"),
+      );
+    });
+
+    it("refuses a registry delivery of another instrument", async () => {
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: {
+          ...registryDelivery,
+          delivers: { instrumentId: { id: "OTHER", admin: usdx.admin } },
+        },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_instrument"),
+      );
+    });
+
+    it("refuses a registry token delivering twice", async () => {
+      // One transfer pays once.
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: { ...registryDelivery, duplicate: true },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_ambiguous"),
+      );
+    });
+
+    it("refuses a registry token with no delivery at all", async () => {
+      const { payload, requirements } = await buildSignedFixture({
+        instrumentId: usdx,
+        delivery: null,
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("no_direct_delivery"),
+      );
+    });
+  });
+
   // The transfer choice must be exercised through a real transfer factory. The
   // payer picks the contract, so a forged one is the attack: these fix what
   // "real" means. Each fixture is re-signed, so the refusal is this rule's and
   // not a stale signature.
+  describe("what the transfer leaves behind", () => {
+    const malformed = (detail: string) => ({
+      isValid: false,
+      invalidReason: "invalid_exact_canton_malformed_payload",
+      extensions: { reason: "transfer_mismatch", detail },
+    });
+
+    it("refuses a contract the sender signs that the issuer did not", async () => {
+      // THE FORGED CREATE. The quoted payment is delivered honestly; this rides
+      // beside it. A contract the sender signs carries the sender's authority
+      // into whatever choices it offers, exercised later by whoever controls
+      // them — long after this payment looked fine. The reference facilitator
+      // reports measuring exactly this against its captured payments.
+      // The payer is a fingerprint of the fixture's key, so learn it first
+      // rather than hardcoding a party that would never match the sender and
+      // leave the rule skipped.
+      const { payer } = await buildSignedFixture({});
+      const { payload, requirements } = await buildSignedFixture({
+        creates: [{ signatories: [payer, "mallory::1220bad"] }],
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        malformed("create_unissued"),
+      );
+    });
+
+    it("accepts a contract the sender signs WITH the issuer, as every real one is", async () => {
+      // The control. `Amulet [DSO, owner]` is the payer's change on every real
+      // Canton Coin capture; refusing it would refuse every honest payment.
+      const { payer } = await buildSignedFixture({});
+      const withChange = await buildSignedFixture({
+        creates: [{ signatories: ["DSO::1220dso", payer] }],
+      });
+      expect(await verifier.verify(withChange.payload, withChange.requirements)).toMatchObject({
+        isValid: true,
+      });
+    });
+
+    it("leaves a create the sender does NOT sign alone", async () => {
+      // The merchant's own holding and the featured-app marker are created
+      // without the sender on them. They grant nothing of the payer's, so the
+      // rule does not reach them — which is what keeps it off honest traffic.
+      const { payload, requirements } = await buildSignedFixture({
+        creates: [{ signatories: ["merchant::1220merch", "someone::1220else"] }],
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
+    });
+  });
+
   describe("the exercised factory contract", () => {
     const factoryRefusal = (detail: string) => ({
       isValid: false,

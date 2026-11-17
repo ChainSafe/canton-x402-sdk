@@ -67,6 +67,8 @@ interface Field {
 }
 
 /** A Daml `Value` holding a record. `positional` omits labels (order-only). */
+const PREAPPROVAL_SEND_IDS = new Set(["TransferPreapproval_Send", "TransferPreapproval_SendV2"]);
+
 function recordValue(
   fields: Field[],
   positional: boolean,
@@ -116,6 +118,77 @@ export interface EncodeOptions {
   positional?: boolean;
   /** Override the choice id (defaults to TransferFactory_Transfer). */
   choiceId?: string;
+  /**
+   * The delivery consequence the transfer's choice produces — what says it
+   * pays the receiver now rather than leaving a pending instruction.
+   *
+   * OFF by default, as `factory` is, so every fixture written before the rule
+   * keeps the shape it had and the decoder's own tests stay about the transfer.
+   * `{}` emits Canton Coin's `TransferPreapproval_SendV2`, which is what a real
+   * transfer carries; an object names another registry's choice instead.
+   */
+  /**
+   * A SECOND, independent consequence node beside `delivery` — its own node id,
+   * its own disclosed contract. Same shape as `delivery`.
+   *
+   * The builder could only ever emit one delivery (or the same one twice), so
+   * a tree carrying one node of each ARM could not be expressed at all, which
+   * is why that whole class went untested.
+   */
+  second?: EncodeOptions["delivery"];
+  /**
+   * CREATE nodes the transfer leaves behind, as children of the root. A real
+   * one makes several — the merchant's holding, the payer's change — and a
+   * forged one signed by the sender alone is the shape this exists to build.
+   */
+  creates?: readonly {
+    signatories: readonly string[];
+    moduleName?: string;
+    entityName?: string;
+  }[];
+  delivery?: {
+    choiceId?: string;
+    moduleName?: string;
+    entityName?: string;
+    nodeId?: string;
+    /** The preapproval's `receiver`. Defaults to the transfer's receiver. */
+    receiver?: string;
+    /** The preapproval's `dso`. Defaults to the instrument's admin. */
+    dso?: string;
+    /** The preapproval's `provider`. Defaults to a third party. */
+    provider?: string;
+    /** Signatories of the disclosure. Defaults to the {dso, receiver, provider} trio. */
+    signatories?: readonly string[];
+    /** Disclose no input contract for the delivery, so it resolves to nothing. */
+    omitDisclosure?: boolean;
+    /**
+     * Labels to emit blank on the DISCLOSURE's own record (not the choice
+     * argument). One blank label puts the whole record in declaration order,
+     * which is how a label-keyed reader and the engine come apart.
+     */
+    blankDisclosureLabels?: readonly string[];
+    /** Rewrite a label on the disclosure's record, e.g. `{ receiver: "dso" }`. */
+    relabelDisclosure?: Readonly<Record<string, string>>;
+    /**
+     * What a preapproval send's OWN `amount` says it moves. Defaults to the
+     * root's, as an honest one does. A send carries `{context, inputs, amount,
+     * sender}` — not a transfer record — which is the shape every real capture
+     * carries and the one this fixture emits for a send choice.
+     */
+    sendAmount?: string;
+    /** A second send node, so the delivery is ambiguous. */
+    duplicate?: boolean;
+    /** Put the delivery under a rollback node: it happened to nobody. */
+    rolledBack?: boolean;
+    /**
+     * What the delivery's own `transfer` record says it moves. Defaults to the
+     * root's, as an honest one does; override a field to make the leg that
+     * pays disagree with the leg that was signed.
+     */
+    delivers?: { sender?: string; receiver?: string; amount?: string; instrumentId?: { id: string; admin: string } };
+    /** Emit a chosen value that carries no `transfer` record at all. */
+    omitDelivers?: boolean;
+  };
   /**
    * The choice argument's `expectedAdmin`, the field the on-ledger factory
    * guards on. Defaults to the instrument's admin, as a real transfer carries
@@ -427,6 +500,10 @@ function encodeInputContract(
   templateId: Uint8Array,
   signatories: readonly string[],
   packageName: string,
+  /** The disclosure's own record. Defaults to the factory's one-field `{dso}`. */
+  argument?: readonly { label: string; value: Uint8Array }[],
+  /** Labels to emit blank, which puts the disclosure in declaration order. */
+  blankArgLabels?: ReadonlySet<string>,
 ): Uint8Array {
   const create = Writer.create()
     .uint32(tag(1, WIRE_LEN))
@@ -441,7 +518,13 @@ function encodeInputContract(
   // the fixture carries the same shape.
   create
     .uint32(tag(5, WIRE_LEN))
-    .bytes(recordValue([{ label: "dso", value: party(signatories[0] ?? "") }], false));
+    .bytes(
+      recordValue(
+        [...(argument ?? [{ label: "dso", value: party(signatories[0] ?? "") }])],
+        false,
+        blankArgLabels,
+      ),
+    );
   for (const signatory of signatories) create.uint32(tag(6, WIRE_LEN)).string(signatory);
   return wrap(1, create.finish());
 }
@@ -480,15 +563,190 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
   const exerciseBytes = exercise.finish();
 
   const nodeId = opts.nodeId ?? "0";
-  const v1Node = concat(wrap(3, concat(exerciseBytes, extra.exercise)), extra.node);
+  // The delivery consequence, as a child exercise of the transfer. A real
+  // transfer carries one; omitting it is the fixture for one that does not,
+  // which the verifier refuses.
+  const delivery = opts.delivery;
+  // Node ids are canonical integers, so the child is the parent's successor —
+  // `${nodeId}1` would spell "01" and be refused as non-canonical.
+  const nextNodeId = Number.isInteger(Number(nodeId)) ? String(Number(nodeId) + 1) : "1";
+  const deliveryNodeId = delivery === undefined ? undefined : (delivery.nodeId ?? nextNodeId);
+  // The preapproval the delivery spends: disclosed as an input contract, as a
+  // real one is, so the verifier can bind it to the merchant.
+  const PREAPPROVAL_CID = "00aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899";
+  const preReceiver = delivery?.receiver ?? transfer.receiver;
+  const preDso = delivery?.dso ?? transfer.instrumentId.admin;
+  const preProvider = delivery?.provider ?? "app-provider::1220prov";
+  const preSignatories = delivery?.signatories ?? [preDso, preReceiver, preProvider];
+  const deliveryTemplate = encodeIdentifier({
+    moduleName: delivery?.moduleName ?? "Splice.AmuletRules",
+    entityName: delivery?.entityName ?? "TransferPreapproval",
+  });
+  const consequenceExercise = (
+    d: EncodeOptions["delivery"],
+    cid: string,
+    template: Uint8Array,
+  ): Uint8Array =>
+    wrap(
+      3,
+      Writer.create()
+        .uint32(tag(1, WIRE_LEN))
+        .string("2.1")
+        .uint32(tag(2, WIRE_LEN))
+        .string(cid)
+        .uint32(tag(3, WIRE_LEN))
+        .string(FACTORY_PACKAGE_NAME)
+        .uint32(tag(4, WIRE_LEN))
+        .bytes(template)
+        .uint32(tag(9, WIRE_LEN))
+        .string(d?.choiceId ?? "TransferPreapproval_SendV2")
+        // `chosen_value` is not optional to the hasher — an exercise without
+        // one is "value is missing". A registry's delivery choice takes the
+        // whole Transfer record, and the verifier holds it to the root's, so
+        // the fixture carries that shape by default.
+        .uint32(tag(10, WIRE_LEN))
+        .bytes(
+          d?.omitDelivers === true
+            ? recordValue([{ label: "note", value: text("no transfer here") }], false)
+            : // A preapproval send's argument is `{context, inputs, amount,
+              // sender}` — confirmed on all three real Canton Coin captures,
+              // where `amount` sits at declaration index 2 and equals the
+              // root's. It is NOT transfer-shaped, so `delivers` is absent for
+              // it; the fixture emitting a transfer record here would have
+              // tested a shape the ledger never produces.
+              PREAPPROVAL_SEND_IDS.has(d?.choiceId ?? "TransferPreapproval_SendV2")
+              ? recordValue(
+                  [
+                    { label: "context", value: recordValue([], false) },
+                    { label: "inputs", value: emptyList },
+                    { label: "amount", value: numeric(d?.sendAmount ?? transfer.amount) },
+                    { label: "sender", value: party(transfer.sender) },
+                  ],
+                  false,
+                )
+              : recordValue(
+            [
+              {
+                label: "transfer",
+                value: recordValue(
+                  [
+                    { label: "sender", value: party(d?.delivers?.sender ?? transfer.sender) },
+                    { label: "receiver", value: party(d?.delivers?.receiver ?? transfer.receiver) },
+                    { label: "amount", value: numeric(d?.delivers?.amount ?? transfer.amount) },
+                    {
+                      label: "instrumentId",
+                      // Declaration order {admin, id}, as the root record uses
+                      // and as real bytes carry it.
+                      value: recordValue(
+                        [
+                          {
+                            label: "admin",
+                            value: party(
+                              d?.delivers?.instrumentId?.admin ?? transfer.instrumentId.admin,
+                            ),
+                          },
+                          { label: "id", value: text(d?.delivers?.instrumentId?.id ?? transfer.instrumentId.id) },
+                        ],
+                        false,
+                      ),
+                    },
+                  ],
+                  false,
+                ),
+              },
+            ],
+            false,
+          ),
+        )
+        .finish(),
+    );
+  const deliveryNodeIds =
+    deliveryNodeId === undefined
+      ? []
+      : delivery?.duplicate
+        ? [deliveryNodeId, String(Number(deliveryNodeId) + 1)]
+        : [deliveryNodeId];
+  // A rolled-back delivery is reached through a Rollback node, so the walk
+  // sees it as rolled back and must not report it as a consequence.
+  const rollbackNodeId = delivery?.rolledBack === true ? String(Number(nextNodeId) + 10) : undefined;
+  // The second consequence sits two past the first, so it never collides with
+  // `duplicate`'s successor id.
+  const second = opts.second;
+  const SECOND_CID = "00ddeeff00112233445566778899aabbccddeeff00112233445566778899aabb";
+  const secondNodeId = second === undefined ? undefined : String(Number(nextNodeId) + 2);
+  const secondTemplate = encodeIdentifier({
+    moduleName: second?.moduleName ?? "Splice.AmuletRules",
+    entityName: second?.entityName ?? "TransferPreapproval",
+  });
+  const deliveryNodes = [
+    ...deliveryNodeIds.map((id) => encodeNode(id, consequenceExercise(delivery, PREAPPROVAL_CID, deliveryTemplate))),
+    ...(secondNodeId === undefined
+      ? []
+      : [encodeNode(secondNodeId, consequenceExercise(second, SECOND_CID, secondTemplate))]),
+    ...(rollbackNodeId === undefined
+      ? []
+      : [
+          encodeNode(
+            rollbackNodeId,
+            wrap(4, deliveryNodeIds.reduce((w, id) => w.uint32(tag(1, WIRE_LEN)).string(id), Writer.create()).finish()),
+          ),
+        ]),
+  ];
+  // Create nodes: wire field 1 of a node body, as an exercise is field 3.
+  const createSpecs = opts.creates ?? [];
+  const createNodeIds = createSpecs.map((_, i) => String(Number(nextNodeId) + 20 + i));
+  const createNodes = createSpecs.map((c, i) =>
+    encodeNode(
+      createNodeIds[i],
+      wrap(
+        1,
+        ((): Uint8Array => {
+          const w = Writer.create()
+            .uint32(tag(1, WIRE_LEN))
+            .string("2.1")
+            .uint32(tag(2, WIRE_LEN))
+            // HEX only: the hasher reads a contract id with `hexToBytes`, so a
+            // readable placeholder makes the fixture unhashable.
+            .string(`00cafe${String(i).padStart(2, "0")}${"ab".repeat(28)}`)
+            .uint32(tag(3, WIRE_LEN))
+            .string(FACTORY_PACKAGE_NAME);
+          w.uint32(tag(4, WIRE_LEN)).bytes(
+            encodeIdentifier({
+              moduleName: c.moduleName ?? "Splice.Amulet",
+              entityName: c.entityName ?? "Amulet",
+            }),
+          );
+          // `argument` is not optional to the hasher.
+          w.uint32(tag(5, WIRE_LEN)).bytes(
+            recordValue([{ label: "owner", value: party(transfer.sender) }], false),
+          );
+          for (const sig of c.signatories) w.uint32(tag(6, WIRE_LEN)).string(sig);
+          return w.finish();
+        })(),
+      ),
+    ),
+  );
+  const childIds = [
+    ...(rollbackNodeId === undefined ? deliveryNodeIds : [rollbackNodeId]),
+    ...(secondNodeId === undefined ? [] : [secondNodeId]),
+    ...createNodeIds,
+  ];
+  const exerciseWithChild = childIds.reduce(
+    (acc, id) => concat(acc, Writer.create().uint32(tag(12, WIRE_LEN)).string(id).finish()),
+    exerciseBytes,
+  );
+  const v1Node = concat(wrap(3, concat(exerciseWithChild, extra.exercise)), extra.node);
   const damlNode = concat(encodeNode(nodeId, v1Node), extra.damlNode);
 
-  const nodeSeed = Writer.create()
-    .uint32(tag(1, 0))
-    .int32(0)
-    .uint32(tag(2, WIRE_LEN))
-    .bytes(new Uint8Array(32).fill(1))
-    .finish();
+  // One seed per EXERCISE node: the hasher refuses a tree where an exercise
+  // has none, and the delivery consequence is an exercise too.
+  const seedFor = (id: string, fill: number): Uint8Array =>
+    Writer.create()
+      .uint32(tag(1, 0))
+      .int32(Number(id))
+      .uint32(tag(2, WIRE_LEN))
+      .bytes(new Uint8Array(32).fill(fill))
+      .finish();
 
   const damlTxn = Writer.create()
     .uint32(tag(1, WIRE_LEN))
@@ -498,11 +756,23 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
     damlTxn.uint32(tag(2, WIRE_LEN)).string(root);
   }
 
-  for (const node of [damlNode, ...(opts.nodes ?? [])]) {
+  for (const node of [damlNode, ...deliveryNodes, ...createNodes, ...(opts.nodes ?? [])]) {
     damlTxn.uint32(tag(3, WIRE_LEN)).bytes(node);
   }
 
-  damlTxn.uint32(tag(4, WIRE_LEN)).bytes(nodeSeed);
+  for (const seed of [
+    seedFor(nodeId, 1),
+    ...deliveryNodeIds.map((id, i) => seedFor(id, 2 + i)),
+    // The second consequence is an exercise too, and the hasher refuses a tree
+    // where one has no seed — without this the blob is rejected before any
+    // check runs, and a test would pass for the wrong reason.
+    ...(secondNodeId === undefined ? [] : [seedFor(secondNodeId, 9)]),
+    // A CREATE needs a seed too — the hasher refuses "create node N has no
+    // seed" exactly as it does for an exercise.
+    ...createNodeIds.map((id, i) => seedFor(id, 20 + i)),
+  ]) {
+    damlTxn.uint32(tag(4, WIRE_LEN)).bytes(seed);
+  }
 
   // `act_as` defaults to the sender alone, as a real submission carries it.
   // `actAs: []` emits none; a list emits exactly those parties.
@@ -535,6 +805,37 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
         ),
       );
     }
+  }
+  // The preapproval the delivery spends, disclosed as a real one is: its
+  // record names the trio, and the verifier reads the receiver out of it.
+  if (delivery !== undefined && !delivery.omitDisclosure) {
+    metadata.uint32(tag(7, WIRE_LEN)).bytes(
+      encodeInputContract(
+        PREAPPROVAL_CID,
+        deliveryTemplate,
+        preSignatories,
+        FACTORY_PACKAGE_NAME,
+        [
+          { label: delivery.relabelDisclosure?.dso ?? "dso", value: party(preDso) },
+          { label: delivery.relabelDisclosure?.receiver ?? "receiver", value: party(preReceiver) },
+          { label: delivery.relabelDisclosure?.provider ?? "provider", value: party(preProvider) },
+        ],
+        new Set(delivery.blankDisclosureLabels ?? []),
+      ),
+    );
+  }
+  if (second !== undefined && !second.omitDisclosure) {
+    metadata.uint32(tag(7, WIRE_LEN)).bytes(
+      encodeInputContract(SECOND_CID, secondTemplate, second.signatories ?? [
+        second.dso ?? transfer.instrumentId.admin,
+        second.receiver ?? transfer.receiver,
+        second.provider ?? "app-provider::1220prov",
+      ], FACTORY_PACKAGE_NAME, [
+        { label: "dso", value: party(second.dso ?? transfer.instrumentId.admin) },
+        { label: "receiver", value: party(second.receiver ?? transfer.receiver) },
+        { label: "provider", value: party(second.provider ?? "app-provider::1220prov") },
+      ]),
+    );
   }
   const metadataBytes = concat(metadata.finish(), extra.metadata);
 

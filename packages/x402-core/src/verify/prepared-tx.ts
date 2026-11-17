@@ -95,6 +95,89 @@ export interface DecodedTransfer {
      */
     interfaceId?: { packageId: string; moduleName: string; entityName: string };
   };
+  /**
+   * Every OTHER exercise in the transaction — the consequences the transfer's
+   * own choice produced, in the order the tree lists them.
+   *
+   * What a transfer does is not said by its arguments alone. The same signed
+   * `TransferFactory_Transfer` either delivers to the receiver in one step or
+   * creates a pending instruction the payer can later withdraw, and which of
+   * those happened is visible only here. A caller reading this decides; the
+   * decoder names no choice, so a registry's own delivery choice needs no
+   * change down here.
+   *
+   * Excludes the root transfer itself, and anything under a rollback — a
+   * rolled-back consequence happened to nobody.
+   *
+   * Absent when the transfer produced none, as the other optional members are.
+   * A reader treats absent and empty alike: either way nothing was delivered
+   * that this can see.
+   */
+  consequences?: readonly {
+    choiceId: string;
+    templateId: { packageId: string; moduleName: string; entityName: string };
+    /** A consuming exercise archives its contract; a holding spent says so. */
+    consuming: boolean;
+    /**
+     * The disclosed contract this consequence exercises, resolved the same way
+     * the root's is — present only when the id names exactly one input contract
+     * that agrees with the exercise about what it is.
+     *
+     * `argument` is the disclosure's own record, scalar leaves only, in
+     * declaration order with whatever labels it carried. A reader names the
+     * fields it wants; the decoder names none, so a registry whose contract
+     * holds different fields needs no change here.
+     */
+    target?: {
+      contractId: string;
+      signatories: readonly string[];
+      argument: readonly { label: string; value?: string }[];
+    };
+    /**
+     * The transfer this consequence carries in its own choice argument, when
+     * it carries one.
+     *
+     * A registry's delivery choice takes the whole `Transfer` record as its
+     * argument, so what it moves is readable here and can be held to what the
+     * root said it would move. Absent when the argument is not shaped that
+     * way, which is most consequences.
+     */
+    delivers?: Pick<DecodedTransfer, "sender" | "receiver" | "amount" | "instrumentId">;
+    /**
+     * The consequence's OWN choice argument, scalar leaves only, in declaration
+     * order with whatever labels it carried.
+     *
+     * Not to be confused with `target.argument`, which is the DISCLOSED
+     * CONTRACT's record. This is what the choice was called with. Canton Coin's
+     * `TransferPreapproval_SendV2` carries its amount here and nowhere else —
+     * its argument is `{context, inputs, amount, sender}`, which is not
+     * transfer-shaped, so `delivers` is absent for it and a reader with only
+     * `delivers` could not tell a dust send from an honest one.
+     *
+     * The decoder names no field; a reader names the ones it wants.
+     */
+    chosenArgument?: readonly { label: string; value?: string }[];
+  }[];
+  /**
+   * Every CREATE the transaction makes, in the order the tree lists them.
+   *
+   * The consequences say which choices ran; these say what they left behind.
+   * The money a transfer moves lands in creates — on Canton Coin, one `Amulet`
+   * for the merchant and one for the payer's change — so a reader that sees
+   * only exercises never sees the payment itself.
+   *
+   * They matter because a contract the SENDER signs carries the sender's
+   * authority into whatever choices it offers. The reference implementation
+   * reports measuring this: a create signed by the sender alone, bolted onto
+   * the captured Canton Coin and USDCx payments, passed every other check.
+   *
+   * Excludes anything under a rollback, as `consequences` does.
+   */
+  creates?: readonly {
+    contractId: string;
+    templateId: { packageId: string; moduleName: string; entityName: string };
+    signatories: readonly string[];
+  }[];
 }
 
 /**
@@ -121,6 +204,8 @@ type VendorCreate = {
   packageName: string;
   templateId?: VendorIdentifier;
   signatories: string[];
+  /** Loose: the vendor's own `Value` union does not narrow to {@link VendorValue}. */
+  argument?: unknown;
 };
 type VendorInputContract = { contract: { oneofKind?: string; v1?: VendorCreate } };
 
@@ -169,6 +254,22 @@ function partyOf(value: VendorValue | undefined): string | undefined {
 function textOf(value: VendorValue | undefined): string | undefined {
   const sum = value?.sum;
   return sum?.oneofKind === "text" ? (sum.text as string) : undefined;
+}
+
+/**
+ * Any scalar leaf as a string, for ENUMERATING a record whose shape we do not
+ * know. There is no declared type to read it at, so permissiveness is the point
+ * here — unlike `partyOf`/`textOf`/`numericOf`, which exist because reading a
+ * DECLARED field permissively let a party stand in for a text. Do not reach for
+ * this one where the field's type is known.
+ */
+function anyScalar(value: VendorValue | undefined): string | undefined {
+  const sum = value?.sum;
+  if (!sum) return undefined;
+  if (sum.oneofKind === "party") return sum.party as string;
+  if (sum.oneofKind === "text") return sum.text as string;
+  if (sum.oneofKind === "numeric") return sum.numeric as string;
+  return undefined;
 }
 
 function numericOf(value: VendorValue | undefined): string | undefined {
@@ -245,6 +346,38 @@ function textMap(value: VendorValue | undefined): Map<string, VendorValue | unde
  * an admin a facilitator has pinned to the real DSO means a transfer aimed at
  * another issuer's factory is refused at verify rather than at execution.
  */
+/**
+ * The money-carrying fields of a Token Standard `Transfer` record.
+ *
+ * Shared, because the same record appears twice in one transaction: once as
+ * the root choice's argument, and again inside a registry's delivery
+ * consequence. Reading both with one function is what lets the two be compared
+ * without a second idea of what a transfer is.
+ */
+function readTransferRecord(
+  transfer: readonly VendorField[],
+): Pick<DecodedTransfer, "sender" | "receiver" | "amount" | "instrumentId"> | null {
+  const sender = partyOf(pick(transfer, "sender", 0));
+  const receiver = partyOf(pick(transfer, "receiver", 1));
+  const amount = numericOf(pick(transfer, "amount", 2));
+  const instr = fieldsOf(pick(transfer, "instrumentId", 3));
+  const id = instr && textOf(pick(instr, "id", 1));
+  const admin = instr && partyOf(pick(instr, "admin", 0));
+  if (!sender || !receiver || !amount || !id || !admin) return null;
+  return { sender, receiver, amount, instrumentId: { id, admin } };
+}
+
+/** The `transfer` record a registry's delivery consequence carries, if it does. */
+function readDelivered(
+  chosenValue: VendorValue | undefined,
+): NonNullable<DecodedTransfer["consequences"]>[number]["delivers"] {
+  const arg = fieldsOf(chosenValue);
+  if (!arg) return undefined;
+  const transfer = fieldsOf(pick(arg, "transfer", 0));
+  if (!transfer) return undefined;
+  return readTransferRecord(transfer) ?? undefined;
+}
+
 function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | null {
   const arg = fieldsOf(chosenValue);
   if (!arg) return null;
@@ -252,12 +385,12 @@ function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | n
   const transfer = fieldsOf(pick(arg, "transfer", 1));
   if (!transfer) return null;
 
-  const sender = partyOf(pick(transfer, "sender", 0));
-  const receiver = partyOf(pick(transfer, "receiver", 1));
-  const amount = numericOf(pick(transfer, "amount", 2));
-  const instr = fieldsOf(pick(transfer, "instrumentId", 3));
-  const id = instr && textOf(pick(instr, "id", 1));
-  const admin = instr && partyOf(pick(instr, "admin", 0));
+  const money = readTransferRecord(transfer);
+  const sender = money?.sender;
+  const receiver = money?.receiver;
+  const amount = money?.amount;
+  const id = money?.instrumentId.id;
+  const admin = money?.instrumentId.admin;
   // Declaration order after the four above: requestedAt, executeBefore,
   // inputHoldingCids, meta.
   const executeBeforeMicros = micros(pick(transfer, "executeBefore", 5));
@@ -288,6 +421,28 @@ function sameTemplate(a: VendorIdentifier | undefined, b: VendorIdentifier | und
 }
 
 /**
+ * A record's leaves as strings, in declaration order with the labels it
+ * carried.
+ *
+ * Only party, text and numeric read as a value. A record, a list, a timestamp
+ * — anything {@link str} does not render — reads as a field with no value,
+ * which keeps its position so a reader matching by index still lines up, but
+ * does NOT distinguish "not a scalar" from "a scalar of a kind not rendered".
+ * A reader that needs one of those has to decode it itself.
+ *
+ * The decoder names no field, so what a given contract means by them is the
+ * reader's.
+ */
+function scalarFields(value: VendorValue | undefined): readonly { label: string; value?: string }[] {
+  const fields = fieldsOf(value);
+  if (!fields) return [];
+  return fields.map((f) => {
+    const leaf = anyScalar(f.value);
+    return leaf === undefined ? { label: f.label } : { label: f.label, value: leaf };
+  });
+}
+
+/**
  * The contract an exercise targets, found among the transaction's input
  * contracts — every contract it uses but does not create, carried with its
  * template and signatories and covered by the payer's signature.
@@ -302,10 +457,17 @@ function sameTemplate(a: VendorIdentifier | undefined, b: VendorIdentifier | und
  * different things about one contract is not one to read further. They need not
  * agree on the package id; see `sameTemplate`.
  */
-function resolveExercised(
-  exercise: { contractId?: string; packageName?: string; templateId?: VendorIdentifier; interfaceId?: VendorIdentifier },
+/**
+ * The disclosed contract an exercise targets, whichever exercise it is.
+ *
+ * Shared by the root transfer and its consequences: the same question — which
+ * input contract is this, and do the two agree about what it is — and the same
+ * refusals, so a consequence cannot be bound on looser terms than the factory.
+ */
+function resolveTarget(
+  exercise: { contractId?: string; packageName?: string; templateId?: VendorIdentifier },
   inputContracts: readonly VendorInputContract[],
-): DecodedTransfer["exercisedContract"] | undefined {
+): { create: VendorCreate } | undefined {
   const contractId = exercise.contractId;
   if (!contractId) return undefined;
   const matches = inputContracts.filter(
@@ -315,9 +477,18 @@ function resolveExercised(
   const create = matches[0].contract.v1;
   if (!create?.templateId || !sameTemplate(create.templateId, exercise.templateId)) return undefined;
   if (create.packageName !== exercise.packageName) return undefined;
+  return { create };
+}
+
+function resolveExercised(
+  exercise: { contractId?: string; packageName?: string; templateId?: VendorIdentifier; interfaceId?: VendorIdentifier },
+  inputContracts: readonly VendorInputContract[],
+): DecodedTransfer["exercisedContract"] | undefined {
+  const resolved = resolveTarget(exercise, inputContracts);
+  if (!resolved) return undefined;
   return {
-    contractId: create.contractId,
-    signatories: create.signatories,
+    contractId: resolved.create.contractId,
+    signatories: resolved.create.signatories,
     ...(exercise.interfaceId === undefined ? {} : { interfaceId: exercise.interfaceId }),
   };
 }
@@ -388,6 +559,8 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
 
     let transferArg: VendorValue | undefined; // the root TransferFactory_Transfer's chosen_value
     let exercised: DecodedTransfer["exercisedContract"];
+    const consequences: NonNullable<DecodedTransfer["consequences"]>[number][] = [];
+    const creates: NonNullable<DecodedTransfer["creates"]>[number][] = [];
     for (let next = stack.pop(); next; next = stack.pop()) {
       const node = nodes.get(next.nodeId);
       if (!node) throw new Error(`node ${next.nodeId} is missing`);
@@ -395,6 +568,25 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
       if (!body) continue;
       if (body.kind === "rollback") {
         reach((body.body as { children: string[] }).children, true);
+        continue;
+      }
+      if (body.kind === "create") {
+        // A rolled-back create left nothing behind, as a rolled-back
+        // consequence happened to nobody.
+        if (!next.rolledBack) {
+          const made = body.body as {
+            contractId?: string;
+            templateId?: VendorIdentifier;
+            signatories?: string[];
+          };
+          if (made.templateId) {
+            creates.push({
+              contractId: made.contractId ?? "",
+              templateId: made.templateId,
+              signatories: made.signatories ?? [],
+            });
+          }
+        }
         continue;
       }
       if (body.kind !== "exercise") continue;
@@ -407,9 +599,34 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
         packageName?: string;
         templateId?: VendorIdentifier;
         interfaceId?: VendorIdentifier;
+        consuming?: boolean;
       };
       reach(exercise.children, next.rolledBack);
-      if (exercise.choiceId !== TRANSFER_CHOICE) continue;
+      if (exercise.choiceId !== TRANSFER_CHOICE) {
+        // A rolled-back consequence happened to nobody, so it is not reported
+        // as one; the node still has to be reachable, which `reach` above did.
+        if (!next.rolledBack && exercise.templateId) {
+          const resolved = resolveTarget(exercise, decoded.metadata?.inputContracts ?? []);
+          const delivered = readDelivered(exercise.chosenValue);
+          consequences.push({
+            choiceId: exercise.choiceId,
+            templateId: exercise.templateId,
+            consuming: exercise.consuming === true,
+            ...(delivered === undefined ? {} : { delivers: delivered }),
+            chosenArgument: scalarFields(exercise.chosenValue),
+            ...(resolved === undefined
+              ? {}
+              : {
+                  target: {
+                    contractId: resolved.create.contractId,
+                    signatories: resolved.create.signatories,
+                    argument: scalarFields(resolved.create.argument as VendorValue | undefined),
+                  },
+                }),
+          });
+        }
+        continue;
+      }
       // A transfer under a rollback node moves nothing.
       if (next.rolledBack) throw new Error("transfer under a rollback node");
       // The transfer IS the root, so there is exactly one of it. Canton runs
@@ -448,6 +665,8 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
       ...transfer,
       ...(synchronizerId === undefined ? {} : { synchronizerId }),
       ...(exercised === undefined ? {} : { exercisedContract: exercised }),
+      ...(consequences.length === 0 ? {} : { consequences }),
+      ...(creates.length === 0 ? {} : { creates }),
     };
   } catch {
     return null;
