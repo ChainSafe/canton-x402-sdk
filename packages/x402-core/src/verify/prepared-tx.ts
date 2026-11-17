@@ -459,6 +459,146 @@ function bodyOf(node: VendorNode): { kind: string; body: Record<string, unknown>
 }
 
 /**
+ * The tree under the roots: what the transfer exercised, and what its choice
+ * produced.
+ *
+ * THROWS rather than returning a reason, and that is load-bearing. Every
+ * refusal in here reaches a caller only through `decodePreparedTransaction`'s
+ * own `catch`, which turns the lot into `null` — the single answer its callers
+ * handle, and `decodePayloadTransfer` calls it with no guard in front. So this
+ * must be called from INSIDE that try. Thirty-one tests fail if it is not.
+ */
+function walkNodes(
+  txn: NonNullable<Vendor["transaction"]>,
+  inputContracts: readonly VendorInputContract[],
+): {
+  transferArg: VendorValue | undefined;
+  exercised: DecodedTransfer["exercisedContract"];
+  consequences: NonNullable<DecodedTransfer["consequences"]>[number][];
+  creates: NonNullable<DecodedTransfer["creates"]>[number][];
+} {
+  // Canton parses node ids as integers and refuses nodes the roots cannot
+  // reach, and the signed hash covers only the tree under the roots. So read
+  // exactly that tree, with ids spelled the one way Canton reads them.
+  const nodes = new Map<string, VendorNode>();
+  for (const node of txn.nodes) {
+    const nodeId = canonicalNodeId(node.nodeId);
+    if (nodes.has(nodeId)) throw new Error(`node ${nodeId} is repeated`);
+    nodes.set(nodeId, node);
+  }
+
+  const reached = new Set<string>();
+  const stack: { nodeId: string; rolledBack: boolean }[] = [];
+  const reach = (ids: readonly string[], rolledBack: boolean): void => {
+    // Pushed in reverse so nodes are visited in the order the tree lists them.
+    for (const nodeId of [...ids].reverse()) {
+      if (reached.has(nodeId)) throw new Error(`node ${nodeId} is referenced twice`);
+      reached.add(nodeId);
+      stack.push({ nodeId, rolledBack });
+    }
+  };
+  // ONE ROOT, AND IT IS THE TRANSFER. A payment is a single command, so its
+  // transaction is a single tree whose root is the transfer being paid for.
+  // Allowing the transfer to sit beside or beneath anything else would let a
+  // payer attach legs the facilitator relays, and pays the traffic fee for,
+  // without ever having verified them. Consequences of the transfer — the
+  // children its own choice produces — are not that, and still decode.
+  if (txn.roots.length !== 1) {
+    throw new Error(`transaction declares ${txn.roots.length} roots, expected 1`);
+  }
+  reach(txn.roots, false);
+
+  let transferArg: VendorValue | undefined; // the root TransferFactory_Transfer's chosen_value
+  let exercised: DecodedTransfer["exercisedContract"];
+  const consequences: NonNullable<DecodedTransfer["consequences"]>[number][] = [];
+  const creates: NonNullable<DecodedTransfer["creates"]>[number][] = [];
+  for (let next = stack.pop(); next; next = stack.pop()) {
+    const node = nodes.get(next.nodeId);
+    if (!node) throw new Error(`node ${next.nodeId} is missing`);
+    const body = bodyOf(node);
+    if (!body) continue;
+    if (body.kind === "rollback") {
+      reach((body.body as { children: string[] }).children, true);
+      continue;
+    }
+    if (body.kind === "create") {
+      // A rolled-back create left nothing behind, as a rolled-back
+      // consequence happened to nobody.
+      if (!next.rolledBack) {
+        const made = body.body as {
+          contractId?: string;
+          templateId?: VendorIdentifier;
+          signatories?: string[];
+        };
+        if (made.templateId) {
+          creates.push({
+            contractId: made.contractId ?? "",
+            templateId: made.templateId,
+            signatories: made.signatories ?? [],
+          });
+        }
+      }
+      continue;
+    }
+    if (body.kind !== "exercise") continue;
+
+    const exercise = body.body as {
+      choiceId: string;
+      chosenValue?: VendorValue;
+      children: string[];
+      contractId?: string;
+      packageName?: string;
+      templateId?: VendorIdentifier;
+      interfaceId?: VendorIdentifier;
+      consuming?: boolean;
+    };
+    reach(exercise.children, next.rolledBack);
+    if (exercise.choiceId !== TRANSFER_CHOICE) {
+      // A rolled-back consequence happened to nobody, so it is not reported
+      // as one; the node still has to be reachable, which `reach` above did.
+      if (!next.rolledBack && exercise.templateId) {
+        const resolved = resolveTarget(exercise, inputContracts);
+        const delivered = readDelivered(exercise.chosenValue);
+        consequences.push({
+          choiceId: exercise.choiceId,
+          templateId: exercise.templateId,
+          consuming: exercise.consuming === true,
+          ...(delivered === undefined ? {} : { delivers: delivered }),
+          chosenArgument: scalarFields(exercise.chosenValue),
+          ...(resolved === undefined
+            ? {}
+            : {
+                target: {
+                  contractId: resolved.create.contractId,
+                  signatories: resolved.create.signatories,
+                  argument: scalarFields(resolved.create.argument as VendorValue | undefined),
+                },
+              }),
+        });
+      }
+      continue;
+    }
+    // A transfer under a rollback node moves nothing.
+    if (next.rolledBack) throw new Error("transfer under a rollback node");
+    // The transfer IS the root, so there is exactly one of it. Canton runs
+    // every transfer in the tree; reporting one of several would describe a
+    // payment the caller never made, binding the requirements to one leg and
+    // letting the rest through unchecked.
+    // Against the raw root reference, as the walker compared it: ids are
+    // canonicalised where a node is DEFINED, so a non-canonical reference
+    // resolves to no node and is refused as missing rather than here.
+    if (next.nodeId !== txn.roots[0]) {
+      throw new Error("the transfer is not the transaction's root");
+    }
+    transferArg = exercise.chosenValue;
+    exercised = resolveExercised(exercise, inputContracts);
+  }
+  if (reached.size !== nodes.size) throw new Error("a node is not reachable from the roots");
+
+  return { transferArg, exercised, consequences, creates };
+}
+
+/**
  * Decode the `preparedTransaction` blob (base64) into the transfer it authorizes,
  * or `null` if it can't be decoded or contains no `TransferFactory_Transfer`
  * exercise. Never throws — an undecodable blob is treated as "no proof of a
@@ -482,123 +622,10 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
     const synchronizerId = decoded.metadata?.synchronizerId || undefined;
     const actAs = decoded.metadata?.submitterInfo?.actAs ?? [];
 
-    // Canton parses node ids as integers and refuses nodes the roots cannot
-    // reach, and the signed hash covers only the tree under the roots. So read
-    // exactly that tree, with ids spelled the one way Canton reads them.
-    const nodes = new Map<string, VendorNode>();
-    for (const node of txn.nodes) {
-      const nodeId = canonicalNodeId(node.nodeId);
-      if (nodes.has(nodeId)) throw new Error(`node ${nodeId} is repeated`);
-      nodes.set(nodeId, node);
-    }
-
-    const reached = new Set<string>();
-    const stack: { nodeId: string; rolledBack: boolean }[] = [];
-    const reach = (ids: readonly string[], rolledBack: boolean): void => {
-      // Pushed in reverse so nodes are visited in the order the tree lists them.
-      for (const nodeId of [...ids].reverse()) {
-        if (reached.has(nodeId)) throw new Error(`node ${nodeId} is referenced twice`);
-        reached.add(nodeId);
-        stack.push({ nodeId, rolledBack });
-      }
-    };
-    // ONE ROOT, AND IT IS THE TRANSFER. A payment is a single command, so its
-    // transaction is a single tree whose root is the transfer being paid for.
-    // Allowing the transfer to sit beside or beneath anything else would let a
-    // payer attach legs the facilitator relays, and pays the traffic fee for,
-    // without ever having verified them. Consequences of the transfer — the
-    // children its own choice produces — are not that, and still decode.
-    if (txn.roots.length !== 1) {
-      throw new Error(`transaction declares ${txn.roots.length} roots, expected 1`);
-    }
-    reach(txn.roots, false);
-
-    let transferArg: VendorValue | undefined; // the root TransferFactory_Transfer's chosen_value
-    let exercised: DecodedTransfer["exercisedContract"];
-    const consequences: NonNullable<DecodedTransfer["consequences"]>[number][] = [];
-    const creates: NonNullable<DecodedTransfer["creates"]>[number][] = [];
-    for (let next = stack.pop(); next; next = stack.pop()) {
-      const node = nodes.get(next.nodeId);
-      if (!node) throw new Error(`node ${next.nodeId} is missing`);
-      const body = bodyOf(node);
-      if (!body) continue;
-      if (body.kind === "rollback") {
-        reach((body.body as { children: string[] }).children, true);
-        continue;
-      }
-      if (body.kind === "create") {
-        // A rolled-back create left nothing behind, as a rolled-back
-        // consequence happened to nobody.
-        if (!next.rolledBack) {
-          const made = body.body as {
-            contractId?: string;
-            templateId?: VendorIdentifier;
-            signatories?: string[];
-          };
-          if (made.templateId) {
-            creates.push({
-              contractId: made.contractId ?? "",
-              templateId: made.templateId,
-              signatories: made.signatories ?? [],
-            });
-          }
-        }
-        continue;
-      }
-      if (body.kind !== "exercise") continue;
-
-      const exercise = body.body as {
-        choiceId: string;
-        chosenValue?: VendorValue;
-        children: string[];
-        contractId?: string;
-        packageName?: string;
-        templateId?: VendorIdentifier;
-        interfaceId?: VendorIdentifier;
-        consuming?: boolean;
-      };
-      reach(exercise.children, next.rolledBack);
-      if (exercise.choiceId !== TRANSFER_CHOICE) {
-        // A rolled-back consequence happened to nobody, so it is not reported
-        // as one; the node still has to be reachable, which `reach` above did.
-        if (!next.rolledBack && exercise.templateId) {
-          const resolved = resolveTarget(exercise, decoded.metadata?.inputContracts ?? []);
-          const delivered = readDelivered(exercise.chosenValue);
-          consequences.push({
-            choiceId: exercise.choiceId,
-            templateId: exercise.templateId,
-            consuming: exercise.consuming === true,
-            ...(delivered === undefined ? {} : { delivers: delivered }),
-            chosenArgument: scalarFields(exercise.chosenValue),
-            ...(resolved === undefined
-              ? {}
-              : {
-                  target: {
-                    contractId: resolved.create.contractId,
-                    signatories: resolved.create.signatories,
-                    argument: scalarFields(resolved.create.argument as VendorValue | undefined),
-                  },
-                }),
-          });
-        }
-        continue;
-      }
-      // A transfer under a rollback node moves nothing.
-      if (next.rolledBack) throw new Error("transfer under a rollback node");
-      // The transfer IS the root, so there is exactly one of it. Canton runs
-      // every transfer in the tree; reporting one of several would describe a
-      // payment the caller never made, binding the requirements to one leg and
-      // letting the rest through unchecked.
-      // Against the raw root reference, as the walker compared it: ids are
-      // canonicalised where a node is DEFINED, so a non-canonical reference
-      // resolves to no node and is refused as missing rather than here.
-      if (next.nodeId !== txn.roots[0]) {
-        throw new Error("the transfer is not the transaction's root");
-      }
-      transferArg = exercise.chosenValue;
-      exercised = resolveExercised(exercise, decoded.metadata?.inputContracts ?? []);
-    }
-    if (reached.size !== nodes.size) throw new Error("a node is not reachable from the roots");
+    const { transferArg, exercised, consequences, creates } = walkNodes(
+      txn,
+      decoded.metadata?.inputContracts ?? [],
+    );
 
     const transfer = transferArg ? readTransfer(transferArg) : null;
     if (!transfer) return null;
