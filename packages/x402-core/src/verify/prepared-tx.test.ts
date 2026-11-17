@@ -333,6 +333,37 @@ describe("the transfer's expectedAdmin", () => {
   });
 });
 
+describe("the transaction's submitter", () => {
+  // `Metadata.submitter_info.act_as` names the parties the submission acts
+  // for. It is signed, so the payer commits to it, but nothing in the choice
+  // argument constrains it — and it grants authority rather than describing
+  // the transfer, so a transfer that moves the sender's money could name any
+  // party at all as a co-submitter.
+  it("refuses a submission acting as anyone besides the sender", () => {
+    const blob = encodePreparedTransaction(TRANSFER, {
+      actAs: [TRANSFER.sender, "x402-facilitator::1220fee"],
+    });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  it("refuses a submission acting as someone else entirely", () => {
+    const blob = encodePreparedTransaction(TRANSFER, { actAs: ["mallory::1220bad"] });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  it("refuses a submission acting as nobody", () => {
+    // An empty list is not "no claim" — it is a submission with no proven
+    // submitter, which the reference facilitator also refuses explicitly.
+    expect(decodePreparedTransaction(encodePreparedTransaction(TRANSFER, { actAs: [] }))).toBeNull();
+  });
+
+  it("reads a submission acting as the sender alone, as every real one does", () => {
+    // The control: all five real MainNet transfer captures carry exactly this.
+    const blob = encodePreparedTransaction(TRANSFER, { actAs: [TRANSFER.sender] });
+    expect(decodePreparedTransaction(blob)?.sender).toBe(TRANSFER.sender);
+  });
+});
+
 describe("what replaced the walker's wire strictness", () => {
   it("reads a repeated singular field the way the ledger does, not the way a first-match walker would", () => {
     // protobuf keeps the LAST of a repeated singular field, and so does the
