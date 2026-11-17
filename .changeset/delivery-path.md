@@ -2,112 +2,57 @@
 "@chainsafe/x402-core": major
 ---
 
-**Breaking.** A canton-exact transfer must DELIVER, the delivery must be the
-merchant's, and nothing else in the tree may move value or take the payer's
-authority.
+**Breaking. A payment to a party with no `TransferPreapproval` is now refused.**
 
-The same signed `TransferFactory_Transfer` does one of two things: it pays the
-receiver in one step, or it creates a pending `TransferInstruction` the payer
-can later withdraw. Which one happened is not in the choice's arguments — only
-the transaction's consequence nodes say. Relaying a pending one settles into a
-half-done state: the payer's funds committed, the merchant unpaid.
+If your `payTo` party has no preapproval, Canton Coin does not pay it directly:
+the Token Standard turns the transfer into an offer the party must accept
+before the funds are its own. Until now those payments verified. They are now
+refused with `invalid_exact_canton_preapproval_missing` and
+`extensions.detail: "no_direct_delivery"`.
 
-`DecodedTransfer` gains `consequences` (every exercise below the root, with its
-choice, template, whether it consumes, the disclosed contract it targets, the
-transfer it names in its own argument, and that argument's scalar leaves) and
-`creates` (every contract the transaction makes). Nothing under a rollback is
-reported; a rolled-back node happened to nobody.
+**What to do:** make sure every `payTo` party holds a live `TransferPreapproval`
+before upgrading. A merchant running its own validator already has one; a party
+that only ever received offers does not.
 
-### What each arm requires
+**Why:** a payment that lands in an offer is not a payment. The merchant has
+released the resource, the funds sit where the payer can still withdraw them,
+and nothing in the signed transfer's arguments says which of the two happened —
+only the transaction's consequence nodes do. This is the case the rule exists
+for, and it is the one that costs a merchant real money.
 
-**Canton Coin:** exactly one `TransferPreapproval_SendV2` on
-`Splice.AmuletRules:TransferPreapproval`, its contract disclosed by this
-transaction, that disclosure's `receiver` equal to `payTo` and `dso` equal to
-the instrument's admin, its signatories exactly the parties the record names,
-and the send's **own amount** equal to the root's.
+### What else is checked
 
-**A registry token:** exactly one `TransferRule_DirectTransfer`, **anchored to
-a disclosed contract the instrument's admin signed**, whose `transfer` record
-carries the root's sender, receiver, amount and instrument.
+The delivery node must now also be what it claims. Both arms require the
+exercised contract to be disclosed by the transaction and, for a registry
+token, signed by the instrument's admin — otherwise a payer could append a node
+that merely *names* a delivery choice and carry a pending tree past the check
+above. The Canton Coin send's own amount is held to the root's, so a dust send
+against a correctly bound preapproval no longer passes. A tree carrying a
+delivery node of the other arm is refused. The legacy
+`TransferPreapproval_Send` is refused, since its argument layout is unmeasured
+and its amount therefore cannot be bound.
 
-Amounts compare as decimals, so `0.01` and `0.0100000000` are one amount.
+Separately, a contract the **sender** signs must be co-signed by the
+instrument's admin. Such a contract carries the payer's authority into whatever
+choices it offers, exercised later by whoever controls them. Only sender-signed
+creates are constrained; every create in every real capture satisfies it.
 
-### The registry arm was defeatable by a node that cost nothing to type
+`DecodedTransfer` gains `consequences` (every exercise below the root, with the
+disclosed contract it targets, the transfer it names in its own argument, and
+that argument's scalar leaves) and `creates` (every contract the transaction
+makes). Nothing under a rollback is reported.
 
-It read what a node CLAIMED it delivered and never where the node came from. A
-genuine pending two-step tree — correctly refused — plus one bare node named
-`TransferRule_DirectTransfer`, exercising nothing, carrying a copy of the
-root's own transfer record, returned `isValid: true`. That is the only case
-here where the answer flips from refuse to accept, and the only one where a
-merchant releases goods for money that is parked where the payer can withdraw
-it. The Canton Coin arm always required its contract; the registry arm now does
-too.
+### Severity of the rest
 
-### The arm not chosen still has to be empty
+Apart from the preapproval case above, these refusals are **verify-passes /
+settle-fails**: the forged tree does not execute. Measured, not assumed — a real
+prepared transaction, tampered and re-signed with the payer's own key, was
+rejected on submission in both shapes tried, against Splice 0.6.0 / Canton 3.4
+LocalNet, with an untampered control committing. They matter to a caller that
+verifies without settling, which is the Express default: it serves a resource on
+`isValid: true` and never learns the payment could not land.
 
-Each arm found its own node, bound it, and returned, never looking at the
-other's filter — so a second delivery of the other shape rode along beside a
-correctly bound one, moving whatever it liked to whoever it liked. Both
-directions verified. Each arm now refuses a tree carrying the other's node.
-
-### The arm is chosen by the instrument, never by the tree
-
-Picking it from what the transaction contains lets a payer select the weaker
-rule by writing the node that selects it.
-
-### Signatories are compared as a set, not counted to three
-
-A merchant running its own validator is its own provider, so a stock
-preapproval carries two signatories; counting would make such a merchant
-permanently unpayable. Only the degenerate case, one party in all three roles,
-is refused.
-
-### A contract the sender signs must be co-signed by the issuer
-
-Creates were invisible — the decoder skipped every non-exercise node, so the
-`Amulet` that is the merchant's payment and the one that is the payer's change
-were both unread. A contract the SENDER signs carries the payer's authority
-into whatever choices it offers, exercised later by whoever controls them. Only
-sender-signed creates are constrained, and only to co-signature by the
-instrument's admin — every create in every real capture satisfies it, 13 of 13.
-
-### The legacy `TransferPreapproval_Send` is refused
-
-It stays in the locator set so the node is found and answered precisely rather
-than reported as no delivery at all, but its argument layout is unmeasured, so
-binding its amount would mean reading a position nobody checked.
-
-### One reader for a record's fields, not two
-
-An earlier draft of this work carried its own copy of the rule for reading a
-Daml record field, and the copy drifted: it chose label-mode when ANY field
-carried a label, where the engine chooses it only when EVERY field does — in
-the reader that decides whose preapproval a delivery spends, so a disclosure
-with one blank label was read by name while the ledger read it by position.
-
-Both call sites now share one internal `recordField`, so there is a single
-place for that rule to be right or wrong. The unification is load-bearing
-rather than cosmetic: one mutation of it fails tests in both the decoder and
-the verifier suites, where before each copy had to be mutated separately and
-either could rot alone.
-
-### Severity, measured rather than argued
-
-Every refusal here except the registry anchor is a **verify-passes /
-settle-fails** case: the forged tree does not execute. That was an inference
-until it was run — a real prepared transaction, tampered and re-signed with the
-payer's own key, was rejected on submission in both shapes tried (an extra
-consequence node, and a create with its issuer stripped), against Splice 0.6.0
-/ Canton 3.4 LocalNet. So these checks protect the caller that verifies without
-settling — the Express default, which serves a resource on `isValid: true` and
-never learns the payment could not land. The registry anchor is the exception:
-that tree settles perfectly well and simply does not pay the merchant.
-
-**Not closed:** a consequence of neither arm. See `deliveryFailure`'s note —
-left to the ledger, which was measured refusing it, rather than shipping a
-fail-closed allowlist that would refuse honest payments on the next Splice
-release.
-
-Read from the signed bytes rather than probed against the ledger: these are the
-exact bytes to be relayed, so there is no resolve-then-settle window, and a
-retried settle whose holdings an earlier one consumed still answers the same.
+**Not closed:** a consequence of neither arm. Closing it needs a whole-tree
+allowlist, which is fail-closed and version-coupled — the day Splice adds a
+consequence to the transfer body, every caller refuses honest payments. It is
+left to the ledger, which was measured refusing that shape.

@@ -71,8 +71,11 @@ facilitator's alone, since only it holds the state involved:
 ## What settlement does
 
 Funds are real Splice **Amulet** (Canton Coin), transferred through the Token
-Standard's `TransferFactory` in one atomic Canton transaction. When your party
-has a `TransferPreapproval`, that transfer is direct, so nothing is escrowed or
-locked up; without one, the Token Standard makes it an offer that completes
-only once you accept it. What is recorded is the signed transfer's amount, not
+Standard's `TransferFactory` in one atomic Canton transaction. Your party must hold a live
+`TransferPreapproval`: with one the transfer is direct, so nothing is escrowed
+or locked up. Without one the Token Standard would make it an offer that
+completes only once you accept it — which is not a payment the facilitator can
+stand behind, since the resource is already served while the funds sit where
+the payer can withdraw them. Such a payment is refused at verify, with
+`invalid_exact_canton_preapproval_missing`. What is recorded is the signed transfer's amount, not
 the quoted floor, so an overpayment is not understated.
