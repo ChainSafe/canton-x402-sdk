@@ -25,7 +25,95 @@
 // Still pending (markers inline): reason-union open-vs-closed; branded DecimalString;
 // per-scheme `CantonNetworkId` narrowing (needs a TNetwork seam).
 
-export * from "./common";
-export * from "./requirements";
-export * from "./payment";
-export * from "./facilitator";
+export {
+  ASSET_TRANSFER_METHOD,
+  AssetSpecSchema,
+  InstrumentIdSchema,
+  PaymentExtensionsSchema,
+  ResourceInfoSchema,
+} from "./common";
+export type {
+  AssetSpec,
+  InstrumentId,
+  NetworkId,
+  PaymentExtensions,
+  ResourceInfo,
+  Scheme,
+  X402Version,
+} from "./common";
+export {
+  CantonPaymentRequiredResponseSchema,
+  CantonPaymentRequirementsSchema,
+  CantonRequirementsExtraSchema,
+  X402PaymentRequiredResponseEnvelopeSchema,
+  X402PaymentRequirementsEnvelopeSchema,
+  isCantonPaymentRequiredResponse,
+  isCantonPaymentRequirements,
+  isX402PaymentRequiredResponse,
+  isX402PaymentRequirements,
+  parseCantonPaymentRequirements,
+} from "./requirements";
+export type {
+  CantonPaymentRequiredResponse,
+  CantonPaymentRequirements,
+  CantonRequirementsExtra,
+  X402PaymentRequiredResponse,
+  X402PaymentRequirements,
+} from "./requirements";
+export {
+  CantonPaymentInnerSchema,
+  CantonPaymentPayloadSchema,
+  HashingSchemeVersion,
+  X402PaymentEnvelopeSchema,
+  isCantonPaymentInner,
+  isCantonPaymentPayload,
+  isX402PaymentPayload,
+  parseCantonPaymentInner,
+  parseCantonPaymentPayload,
+} from "./payment";
+export type {
+  CantonPaymentInner,
+  CantonPaymentPayload,
+  X402PaymentPayload,
+} from "./payment";
+export {
+  CantonSupportedExtraSchema,
+  MalformedSupportedExtraError,
+  SettleErrorReasonSchema,
+  SettleResponseErrorSchema,
+  SettleResponseSchema,
+  SettleResponseSuccessSchema,
+  SupportedInstrumentSchema,
+  SupportedKindSchema,
+  SupportedResponseSchema,
+  VerifyInvalidReasonSchema,
+  VerifyRequestSchema,
+  VerifyResponseInvalidSchema,
+  VerifyResponseSchema,
+  VerifyResponseValidSchema,
+  cantonSupportedExtra,
+  isCantonVerifyRequest,
+  isX402Request,
+  parseCantonVerifyRequest,
+  parseX402Request,
+} from "./facilitator";
+export type {
+  CantonExactExtensionReason,
+  CantonSupportedExtra,
+  SchemeVerifier,
+  SettleErrorReason,
+  SettleRequest,
+  SettleResponse,
+  SettleResponseError,
+  SettleResponseSuccess,
+  SpecVerifyInvalidReason,
+  SupportedInstrument,
+  SupportedKind,
+  SupportedResponse,
+  VerifyInvalidReason,
+  VerifyRequest,
+  VerifyResponse,
+  VerifyResponseInvalid,
+  VerifyResponseValid,
+  X402Request,
+} from "./facilitator";
