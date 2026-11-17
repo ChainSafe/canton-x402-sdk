@@ -295,7 +295,6 @@ const REGISTRY_DIRECT = {
   entityName: "TransferRule",
 };
 
-
 /**
  * Why a CREATE in this transaction is not one an honest transfer makes, or null.
  *

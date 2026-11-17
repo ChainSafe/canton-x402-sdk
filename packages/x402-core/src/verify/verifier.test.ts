@@ -1004,7 +1004,7 @@ describe("cantonExactVerifier", () => {
         delivery: {
           blankDisclosureLabels: ["dso"],
           // Not another field's name: that collides, and the repeated-label
-          // guard would refuse the blob before argField was ever consulted.
+          // guard would refuse the blob before the field reader was consulted.
           relabelDisclosure: { receiver: "recipient" },
         },
       });
