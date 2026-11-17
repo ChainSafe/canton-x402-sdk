@@ -55,7 +55,8 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:api": "pnpm build && node scripts/check-api-surface.mjs"
   },
   "dependencies": {
     "@canton-network/core-tx-visualizer": "^1.16.0"

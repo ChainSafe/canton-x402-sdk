@@ -46,6 +46,12 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # The published surface is a decision, not a side effect. `dist` is not
+      # tracked, so without this nothing in a review shows that an export added
+      # a semver-bound name — and after 1.0.0 removing one costs a major.
+      - name: API surface unchanged
+        run: pnpm --filter @chainsafe/x402-core check:api
+
       # Coverage instead of a bare `pnpm test`: the same suites (one vitest run
       # over every package — see vitest.config.ts), plus lcov and the per-package
       # table. Exactly the command contributors run locally.
