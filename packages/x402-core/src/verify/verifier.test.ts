@@ -46,6 +46,8 @@ async function buildSignedFixture(
     memo?: string;
     /** Deform the exercised factory contract; omitted means the real shape. */
     factory?: EncodeOptions["factory"];
+    /** Emit these labels blank, which puts the record in declaration order. */
+    blankLabels?: EncodeOptions["blankLabels"];
   } = {},
 ) {
   const executeBeforeSeconds = overrides.executeBeforeSeconds ?? 120;
@@ -87,7 +89,10 @@ async function buildSignedFixture(
       ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
     },
     // A real payer exercises the admin-signed factory; the check needs it.
-    { factory: overrides.factory ?? {} },
+    {
+      factory: overrides.factory ?? {},
+      ...(overrides.blankLabels === undefined ? {} : { blankLabels: overrides.blankLabels }),
+    },
   );
   const preparedTransaction = gzipped(protobuf);
   const preparedTxHash = await computePreparedTransactionHash(
@@ -613,6 +618,25 @@ describe("cantonExactVerifier", () => {
     const { requirements } = await buildSignedFixture();
     const withMemo = await buildSignedFixture({ memo: "someone else's order" });
     expect(await verifier.verify(withMemo.payload, requirements)).toMatchObject({
+      isValid: false,
+      invalidReason: "invalid_exact_canton_memo_mismatch",
+      extensions: { reason: "transfer_mismatch", detail: "memo" },
+    });
+  });
+
+  it("refuses an unquoted memo hidden behind a blank label", async () => {
+    // The check above was walked straight past. Daml binds a record by label
+    // only when EVERY field is labeled; blanking `meta` alone leaves the engine
+    // in declaration order, so the transfer settles carrying the memo, while a
+    // reader that switched to the label path on ANY label found no `meta` and
+    // reported none. Verify then certified "this transfer carries no memo"
+    // about a transfer carrying one.
+    const { requirements } = await buildSignedFixture();
+    const hidden = await buildSignedFixture({
+      memo: "order-EXPENSIVE-999",
+      blankLabels: ["meta"],
+    });
+    expect(await verifier.verify(hidden.payload, requirements)).toMatchObject({
       isValid: false,
       invalidReason: "invalid_exact_canton_memo_mismatch",
       extensions: { reason: "transfer_mismatch", detail: "memo" },

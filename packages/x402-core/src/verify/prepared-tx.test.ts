@@ -244,6 +244,58 @@ describe("the deadline and the memo", () => {
     expect(got?.memo).toBe("invoice-2024-001");
   });
 
+  it("still reads the memo when ONE label is blank, as the engine does", () => {
+    // THE SHAPE THAT TELLS THE TWO READERS APART. Daml binds a record by label
+    // only when EVERY field carries one; blank a single label and the whole
+    // record is bound in declaration order, with the labels that remain checked
+    // against the name declared at their own index.
+    //
+    // Reading `some` instead of `every` inverted that: one blank label sent the
+    // decoder down the label path, `find` missed the blanked field, and the memo
+    // came back undefined — "this transfer carries no memo" about a transfer
+    // that carries one and settles. A merchant that quotes no memo and
+    // reconciles by memo is the one this costs.
+    const got = decodePreparedTransaction(
+      encodePreparedTransaction({ ...dated, memo: "order-EXPENSIVE-999" }, { blankLabels: ["meta"] }),
+    );
+    expect(got?.memo).toBe("order-EXPENSIVE-999");
+  });
+
+  it("refuses a label that contradicts the position it sits in", () => {
+    // Declaration order binds once any label is blank, so a label naming a
+    // different field than the one declared at its index is a contradiction,
+    // not a pointer somewhere else to go looking. The engine raises
+    // "Mismatching record field label" here; we refuse.
+    const blob = encodePreparedTransaction(dated, {
+      blankLabels: ["meta"],
+      // A label that collides with another field's would be refused by the
+      // repeated-label guard instead, and the test would pass without ever
+      // reaching the position check.
+      relabel: { receiver: "recipient" },
+    });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  // The ledger declares `InstrumentId = {admin: Party, id: Text}`. One reader
+  // that rendered party, text and numeric alike could not tell them apart, so a
+  // sub-record written at the wrong types read back as a well-formed instrument.
+  // Each field gets its own case: miscasting both at once is caught by whichever
+  // read is checked first, which would leave the other unpinned.
+  it("refuses an amount that is not a Numeric", () => {
+    const blob = encodePreparedTransaction(dated, { miscastAmount: true });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  it("refuses an admin that is not a Party", () => {
+    const blob = encodePreparedTransaction(dated, { miscastInstrument: "admin" });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  it("refuses an id that is not a Text", () => {
+    const blob = encodePreparedTransaction(dated, { miscastInstrument: "id" });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
   it("reads only its own key, and only from meta.values", () => {
     const blob = encodePreparedTransaction(dated, {
       memoEntries: [
