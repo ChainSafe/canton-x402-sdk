@@ -14,7 +14,7 @@ import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import { AMULET_INSTRUMENT_ID } from "../networks";
 import type { NetworkId } from "../types/common";
-import { HashingSchemeVersion, isCantonPaymentInner } from "../types/payment";
+import { CantonPaymentInner, HashingSchemeVersion, isCantonPaymentInner } from "../types/payment";
 import { CantonPaymentRequirements, isCantonPaymentRequirements } from "../types/requirements";
 import type {
   SchemeVerifier,
@@ -588,78 +588,23 @@ function factoryProofFailure(transfer: DecodedTransfer): FactoryDetail | null {
 const PROOF_FIELDS = ["preparedTransaction", "preparedTxHash", "signature"] as const;
 
 /**
- * The pure canton-exact verification, factored out of the facilitator's
- * `V2CantonExact.verify`. Runs the stateless checks in order; the facilitator's
- * stateful checks (replay, min-amount FX policy) and the on-chain execute
- * compose on top of a successful result here.
+ * Steps 7-13: does the payer's own key prove this exact transaction?
+ *
+ * The key is well-formed and is the SENDER's, the hash and signature are
+ * canonically encoded, the hashing scheme is one this verifier implements, the
+ * hash is recomputed from the bytes rather than trusted, and the signature
+ * holds against it. Refuses or passes; it reads nothing out for the caller.
+ *
+ * EVERY REFUSAL HERE NAMES THE PAYER, where steps 1-6 name nobody: the payer is
+ * the transfer's sender and is known by the time this runs. Tests pin the exact
+ * key set of both shapes, so a check moved across that boundary changes the
+ * wire response even though the rule is unchanged.
  */
-async function verifyCantonExact(
-  networkId: NetworkId,
-  payload: X402PaymentPayload<unknown, unknown>,
-  requirements: X402PaymentRequirements<unknown>,
-): Promise<VerifyResponse> {
-  // 1. scheme — the requirements the payer chose (`accepted`) and the ones it
-  //    is verified against must both name the one id the spec defines (Rule 1).
-  //    A payment with no `accepted`, or a pre-spec envelope that carries the
-  //    scheme at the top level instead, names none.
-  const accepted = isObj(payload.accepted) ? payload.accepted : undefined;
-  if (payload.x402Version !== 2) return fail("invalid_x402_version", "internal_error");
-  if (!accepted) return fail("unsupported_scheme", "scheme_mismatch");
-  if (accepted.scheme !== EXACT_SCHEME_ID || requirements.scheme !== EXACT_SCHEME_ID) {
-    return fail("unsupported_scheme", "scheme_mismatch");
-  }
-  // 2. network — accepted, requirements, and this verifier's binding must agree
-  if (accepted.network !== requirements.network || requirements.network !== networkId) {
-    return fail("invalid_network", "network_mismatch");
-  }
-  // 3. shapes — narrow the unknown inner/requirements before reading fields.
-  //    `assetTransferMethod` is the same literal in both schemas, so once both
-  //    pass, the payload's method and the requirements' agree.
-  if (!isCantonPaymentRequirements(requirements)) {
-    return fail("invalid_payment_requirements", "internal_error");
-  }
-  if (!isObj(payload.payload)) return fail("invalid_exact_canton_missing_proof", "internal_error");
-  const raw = payload.payload;
-  // Rule 2: a proof that is not there is missing_proof, one that is there but
-  // not well-formed is malformed_payload. The key is not in the spec's
-  // payload, but nothing can be checked without it, so its absence is a
-  // missing proof too. The checks keep the order they had, so
-  // `extensions.reason` stays what this verifier answered before: the key
-  // first, and an empty field left to the checks that refused it.
-  if (typeof raw.publicKey !== "string" || !raw.publicKey) {
-    return fail("invalid_exact_canton_missing_proof", "missing_public_key");
-  }
-  if (PROOF_FIELDS.some((field) => typeof raw[field] !== "string")) {
-    return fail("invalid_exact_canton_missing_proof", "internal_error");
-  }
-  if (!isCantonPaymentInner(raw)) return fail("invalid_exact_canton_malformed_payload", "internal_error");
-  const inner = raw;
-  // 4. Gunzip exactly once: guarding, decoding and hashing all use these
-  //    bytes. A member that is malformed or over either bound is as
-  //    undecodable as a bad protobuf.
-  const prepared = gunzipPreparedTransaction(inner.preparedTransaction);
-  if (prepared === null) {
-    return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", undefined, "undecodable");
-  }
-  const preparedBase64 = bytesToBase64(prepared);
-  // 5. Bound and validate the graph before anything walks it: the decoder
-  //    below, and the upstream recursive hasher after it.
-  const graph = guardPreparedTransaction(preparedBase64);
-  if (!graph.ok) {
-    return fail(
-      "invalid_exact_canton_malformed_payload",
-      "invalid_prepared_transaction_structure",
-      undefined,
-      graph.reason,
-    );
-  }
-  // 6. The signed transfer. Its sender is the payer (spec Rule 8): the payload
-  //    names none, so every result from here on reports this one.
-  const transfer = decodePreparedTransaction(preparedBase64);
-  if (!transfer) {
-    return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", undefined, "undecodable");
-  }
-  const payer = transfer.sender;
+async function checkProof(
+  inner: CantonPaymentInner,
+  payer: string,
+  preparedBase64: string,
+): Promise<VerifyResponseInvalid | null> {
   // 7. public key well-formed (32-byte Ed25519). Malformed key bytes are
   //    indistinguishable from "no usable key" here → missing_public_key. A
   //    key that is not one cannot have signed, so the spec's code is
@@ -717,16 +662,119 @@ async function verifyCantonExact(
     return fail("invalid_exact_canton_signature_invalid", "bad_signature", payer);
   }
 
-  // 14. The signed transfer must actually move what the requirements demand.
-  //     This is the payload's one binding to the requirements: the signature
+  return null;
+}
+
+/**
+ * Steps 1-3: is this envelope one this verifier can read at all?
+ *
+ * Scheme, network, and the two shape narrowings — the payload's inner proof
+ * and the requirements. Returns a refusal, or the two narrowed values the rest
+ * of the pipeline reads fields off.
+ *
+ * NO PAYER IS REPORTED BY ANY REFUSAL HERE, and that is observable: the payer
+ * is the transfer's sender, which is not known until step 6 decodes it, and
+ * tests pin the exact key set of these responses. Nothing that learns the
+ * payer may move into this stage, and nothing here may move after it.
+ */
+function checkEnvelope(
+  networkId: NetworkId,
+  payload: X402PaymentPayload<unknown, unknown>,
+  requirements: X402PaymentRequirements<unknown>,
+): VerifyResponseInvalid | { inner: CantonPaymentInner; requirements: CantonPaymentRequirements } {
+  // 1. scheme — the requirements the payer chose (`accepted`) and the ones it
+  //    is verified against must both name the one id the spec defines (Rule 1).
+  //    A payment with no `accepted`, or a pre-spec envelope that carries the
+  //    scheme at the top level instead, names none.
+  const accepted = isObj(payload.accepted) ? payload.accepted : undefined;
+  if (payload.x402Version !== 2) return fail("invalid_x402_version", "internal_error");
+  if (!accepted) return fail("unsupported_scheme", "scheme_mismatch");
+  if (accepted.scheme !== EXACT_SCHEME_ID || requirements.scheme !== EXACT_SCHEME_ID) {
+    return fail("unsupported_scheme", "scheme_mismatch");
+  }
+  // 2. network — accepted, requirements, and this verifier's binding must agree
+  if (accepted.network !== requirements.network || requirements.network !== networkId) {
+    return fail("invalid_network", "network_mismatch");
+  }
+  // 3. shapes — narrow the unknown inner/requirements before reading fields.
+  //    `assetTransferMethod` is the same literal in both schemas, so once both
+  //    pass, the payload's method and the requirements' agree.
+  if (!isCantonPaymentRequirements(requirements)) {
+    return fail("invalid_payment_requirements", "internal_error");
+  }
+  if (!isObj(payload.payload)) return fail("invalid_exact_canton_missing_proof", "internal_error");
+  const raw = payload.payload;
+  // Rule 2: a proof that is not there is missing_proof, one that is there but
+  // not well-formed is malformed_payload. The key is not in the spec's
+  // payload, but nothing can be checked without it, so its absence is a
+  // missing proof too. The checks keep the order they had, so
+  // `extensions.reason` stays what this verifier answered before: the key
+  // first, and an empty field left to the checks that refused it.
+  if (typeof raw.publicKey !== "string" || !raw.publicKey) {
+    return fail("invalid_exact_canton_missing_proof", "missing_public_key");
+  }
+  if (PROOF_FIELDS.some((field) => typeof raw[field] !== "string")) {
+    return fail("invalid_exact_canton_missing_proof", "internal_error");
+  }
+  if (!isCantonPaymentInner(raw)) return fail("invalid_exact_canton_malformed_payload", "internal_error");
+  return { inner: raw, requirements };
+}
+
+/**
+ * The pure canton-exact verification, factored out of the facilitator's
+ * `V2CantonExact.verify`. Runs the stateless checks in order; the facilitator's
+ * stateful checks (replay, min-amount FX policy) and the on-chain execute
+ * compose on top of a successful result here.
+ */
+async function verifyCantonExact(
+  networkId: NetworkId,
+  payload: X402PaymentPayload<unknown, unknown>,
+  requirements: X402PaymentRequirements<unknown>,
+): Promise<VerifyResponse> {
+  const envelope = checkEnvelope(networkId, payload, requirements);
+  if ("isValid" in envelope) return envelope;
+  // Bound to new names: the narrowings `checkEnvelope` performed do not reach
+  // back across the call, so the rest of the pipeline reads these.
+  const { inner, requirements: quoted } = envelope;
+  // 4. Gunzip exactly once: guarding, decoding and hashing all use these
+  //    bytes. A member that is malformed or over either bound is as
+  //    undecodable as a bad protobuf.
+  const prepared = gunzipPreparedTransaction(inner.preparedTransaction);
+  if (prepared === null) {
+    return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", undefined, "undecodable");
+  }
+  const preparedBase64 = bytesToBase64(prepared);
+  // 5. Bound and validate the graph before anything walks it: the decoder
+  //    below, and the upstream recursive hasher after it.
+  const graph = guardPreparedTransaction(preparedBase64);
+  if (!graph.ok) {
+    return fail(
+      "invalid_exact_canton_malformed_payload",
+      "invalid_prepared_transaction_structure",
+      undefined,
+      graph.reason,
+    );
+  }
+  // 6. The signed transfer. Its sender is the payer (spec Rule 8): the payload
+  //    names none, so every result from here on reports this one.
+  const transfer = decodePreparedTransaction(preparedBase64);
+  if (!transfer) {
+    return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", undefined, "undecodable");
+  }
+  const payer = transfer.sender;
+  // 7-13. the payer's own key must prove this exact transaction.
+  const proof = await checkProof(inner, payer, preparedBase64);
+  if (proof) return proof;
+  // 14. The signed transfer must actually move what the quoted demand.
+  //     This is the payload's one binding to the quoted: the signature
   //     covers the prepared transaction, so checking receiver/instrument/amount
   //     rejects a valid signature over a divergent transfer (e.g. to another
   //     party, or a smaller amount).
-  const mismatch = findTransferMismatch(transfer, requirements);
+  const mismatch = findTransferMismatch(transfer, quoted);
   if (mismatch) return fail(MISMATCH_REASON[mismatch], "transfer_mismatch", payer, mismatch);
   // 15. the exercise must go through a real transfer factory, proved from the
   //     transaction's own input contracts. Placed after 14 because it reads
-  //     the admin that step has just held equal to the requirements', so the
+  //     the admin that step has just held equal to the quoted', so the
   //     two cannot disagree about which instrument this is.
   const factory = factoryProofFailure(transfer);
   if (factory) return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", payer, factory);
@@ -740,7 +788,7 @@ async function verifyCantonExact(
   //     the two a signed TransferFactory_Transfer does is visible only in its
   //     consequences, and relaying a pending one commits the payer's funds
   //     without paying the merchant.
-  const delivery = deliveryFailure(transfer, requirements);
+  const delivery = deliveryFailure(transfer, quoted);
   if (delivery) {
     return fail("invalid_exact_canton_preapproval_missing", "transfer_mismatch", payer, delivery);
   }
