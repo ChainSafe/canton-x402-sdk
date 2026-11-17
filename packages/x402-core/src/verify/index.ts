@@ -14,7 +14,6 @@ export {
   EXACT_SCHEME_ID,
   createCantonExactVerifier,
   decodePayloadTransfer,
-  findTransferMismatch,
   fingerprintForPublicKey,
   isCantonNetworkId,
   matchesFingerprint,

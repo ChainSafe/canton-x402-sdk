@@ -27,10 +27,6 @@
 
 export {
   ASSET_TRANSFER_METHOD,
-  AssetSpecSchema,
-  InstrumentIdSchema,
-  PaymentExtensionsSchema,
-  ResourceInfoSchema,
 } from "./common";
 export type {
   AssetSpec,
@@ -42,9 +38,6 @@ export type {
   X402Version,
 } from "./common";
 export {
-  CantonPaymentRequiredResponseSchema,
-  X402PaymentRequiredResponseEnvelopeSchema,
-  X402PaymentRequirementsEnvelopeSchema,
   isCantonPaymentRequiredResponse,
   isCantonPaymentRequirements,
   isX402PaymentRequiredResponse,
@@ -59,10 +52,7 @@ export type {
   X402PaymentRequirements,
 } from "./requirements";
 export {
-  CantonPaymentInnerSchema,
-  CantonPaymentPayloadSchema,
   HashingSchemeVersion,
-  X402PaymentEnvelopeSchema,
   isCantonPaymentInner,
   isCantonPaymentPayload,
   isX402PaymentPayload,
@@ -73,20 +63,12 @@ export type {
   X402PaymentPayload,
 } from "./payment";
 export {
-  CantonSupportedExtraSchema,
   MalformedSupportedExtraError,
   SettleErrorReasonSchema,
-  SettleResponseErrorSchema,
   SettleResponseSchema,
-  SettleResponseSuccessSchema,
-  SupportedInstrumentSchema,
-  SupportedKindSchema,
   SupportedResponseSchema,
   VerifyInvalidReasonSchema,
-  VerifyRequestSchema,
-  VerifyResponseInvalidSchema,
   VerifyResponseSchema,
-  VerifyResponseValidSchema,
   cantonSupportedExtra,
   isCantonVerifyRequest,
   isX402Request,
