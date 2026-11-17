@@ -4,6 +4,8 @@ import {
   encodeChoiceArgument,
   encodeNode,
   encodePreparedTransaction,
+  DECOY_CID,
+  EXERCISED_CID,
   stringField,
   wrap,
   type EncodeOptions,
@@ -279,6 +281,57 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   out.set(b, a.length);
   return out;
 }
+
+describe("which disclosure the exercised contract resolves to", () => {
+  it("reports the contract the exercise NAMES, not the first one disclosed", () => {
+    // The decoy is disclosed FIRST and is identical to the real factory but
+    // for its id and signatories, so the contract id is the only thing telling
+    // them apart. A reader that takes the first entry instead of the matched
+    // one reports a contract the transfer never touched, and everything read
+    // off it — signatories included — describes the wrong thing.
+    const blob = encodePreparedTransaction(TRANSFER, {
+      factory: {
+        inputContracts: [
+          // Identical to the real one but for its id and signatories, and
+          // listed FIRST, so the contract id is the only thing telling them
+          // apart. A decoy of a different template would be refused by the
+          // template check instead, and this would pass without exercising
+          // the id match at all.
+          { contractId: DECOY_CID, signatories: ["decoy-signer::1220decoy"] },
+          { contractId: EXERCISED_CID },
+        ],
+      },
+    });
+    const exercised = decodePreparedTransaction(blob)?.exercisedContract;
+    expect(exercised?.contractId).toBe(EXERCISED_CID);
+    expect(exercised?.signatories).toEqual([TRANSFER.instrumentId.admin]);
+  });
+});
+
+describe("the transfer's expectedAdmin", () => {
+  it("refuses one that is not the instrument's admin", () => {
+    // `expectedAdmin` is what the on-ledger factory guards on; the instrument's
+    // admin is what the requirements are bound to. A transfer naming different
+    // parties in them says two things about which issuer it is for, and would
+    // aim the exercise at one factory while the quote described another.
+    const blob = encodePreparedTransaction(TRANSFER, { expectedAdmin: "other-dso::1220aaaa" });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  it("refuses a transfer carrying none at all", () => {
+    // Absent is refused rather than read as "any admin will do".
+    const blob = encodePreparedTransaction(TRANSFER, { expectedAdmin: "" });
+    expect(decodePreparedTransaction(blob)).toBeNull();
+  });
+
+  it("reads one that agrees, which is what a real transfer carries", () => {
+    // The control: the refusals above are the disagreement, not the field.
+    const blob = encodePreparedTransaction(TRANSFER, {
+      expectedAdmin: TRANSFER.instrumentId.admin,
+    });
+    expect(decodePreparedTransaction(blob)?.instrumentId.admin).toBe(TRANSFER.instrumentId.admin);
+  });
+});
 
 describe("what replaced the walker's wire strictness", () => {
   it("reads a repeated singular field the way the ledger does, not the way a first-match walker would", () => {
