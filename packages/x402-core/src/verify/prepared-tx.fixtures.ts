@@ -67,11 +67,18 @@ interface Field {
 }
 
 /** A Daml `Value` holding a record. `positional` omits labels (order-only). */
-function recordValue(fields: Field[], positional: boolean): Uint8Array {
+function recordValue(
+  fields: Field[],
+  positional: boolean,
+  blank?: ReadonlySet<string>,
+  relabel?: Readonly<Record<string, string>>,
+): Uint8Array {
   const record = Writer.create();
   for (const f of fields) {
     const rf = Writer.create();
-    if (!positional) rf.uint32(tag(1, WIRE_LEN)).string(f.label);
+    // A blanked label is written as "", which is how the wire carries an
+    // unlabeled field — Canton reads an empty label as absent.
+    if (!positional) rf.uint32(tag(1, WIRE_LEN)).string(blank?.has(f.label) ? "" : (relabel?.[f.label] ?? f.label));
     rf.uint32(tag(2, WIRE_LEN)).bytes(f.value);
     record.uint32(tag(2, WIRE_LEN)).bytes(concat(rf.finish(), f.extra)); // Record.fields (repeated)
   }
@@ -121,6 +128,28 @@ export interface EncodeOptions {
    * emit none.
    */
   actAs?: readonly string[];
+  /**
+   * Labels to emit blank, leaving every other field labeled. A record with one
+   * blank label is bound positionally by the engine, so this is the shape that
+   * tells a label-keyed reader apart from a declaration-order one.
+   */
+  blankLabels?: readonly string[];
+  /**
+   * Rewrite a field's label, e.g. `{ receiver: "sender" }` puts the label
+   * "sender" on the field declared as `receiver`. Combined with a blank label
+   * elsewhere, this is a record the engine binds positionally and whose labels
+   * contradict their own positions.
+   */
+  relabel?: Readonly<Record<string, string>>;
+  /**
+   * Encode ONE of `InstrumentId`'s values at the wrong type: the admin as Text,
+   * or the id as Party. The ledger declares `{admin: Party, id: Text}` and
+   * refuses either; a reader that renders party and text alike cannot tell.
+   * One field at a time, so each typed read is pinned by its own case.
+   */
+  miscastInstrument?: "admin" | "id";
+  /** Encode the transfer's `amount` as Text, where the ledger declares Numeric. */
+  miscastAmount?: boolean;
   /** Raw bytes appended to a layer, e.g. `{ node: wrap(1, new Uint8Array()) }`. */
   extra?: Partial<Record<EncodeLayer, Uint8Array>>;
   /** The transfer node's id (defaults to "0"). */
@@ -254,13 +283,32 @@ export function encodeChoiceArgument(
 ): Uint8Array {
   const positional = opts.positional ?? false;
   const extra = opts.extra ?? {};
+  const blank = new Set(opts.blankLabels ?? []);
+  const relabel = opts.relabel ?? {};
 
+  // Declaration order is `{admin, id}`, which is what real bytes carry: every
+  // MainNet capture and our own LocalNet one put the admin party first. The
+  // fixture had them the other way round, agreeing with the decoder's indices
+  // rather than with the ledger, so the positional path was only ever read
+  // back against the same mistake that wrote it.
   const instrument = recordValue(
     [
-      { label: "id", value: text(transfer.instrumentId.id) },
-      { label: "admin", value: party(transfer.instrumentId.admin) },
+      {
+        label: "admin",
+        value:
+          opts.miscastInstrument === "admin"
+            ? text(transfer.instrumentId.admin)
+            : party(transfer.instrumentId.admin),
+      },
+      {
+        label: "id",
+        value:
+          opts.miscastInstrument === "id" ? party(transfer.instrumentId.id) : text(transfer.instrumentId.id),
+      },
     ],
     positional,
+    blank,
+    relabel,
   );
   // The real transfer always carries the trailing fields; fixtures opt in so
   // the ones written before them still encode byte-identically.
@@ -277,7 +325,7 @@ export function encodeChoiceArgument(
         value: concat(party(transfer.receiver), extra.receiver),
         extra: extra.receiverField,
       },
-      { label: "amount", value: numeric(transfer.amount) },
+      { label: "amount", value: opts.miscastAmount ? text(transfer.amount) : numeric(transfer.amount) },
       { label: "instrumentId", value: instrument },
       // Declaration order continues: requestedAt, executeBefore,
       // inputHoldingCids, meta. All four or none — a positional record is read
@@ -291,12 +339,14 @@ export function encodeChoiceArgument(
             { label: "inputHoldingCids", value: emptyList },
             {
               label: "meta",
-              value: recordValue([{ label: "values", value: textMap(memoEntries) }], positional),
+              value: recordValue([{ label: "values", value: textMap(memoEntries) }], positional, blank, relabel),
             },
           ]
         : []),
     ],
     positional,
+    blank,
+    relabel,
   );
   // `expectedAdmin` defaults to the instrument's admin, which is what a real
   // transfer carries. Set it to make the two disagree; "" leaves the field out
@@ -310,6 +360,8 @@ export function encodeChoiceArgument(
       { label: "transfer", value: transferRecord },
     ],
     positional,
+    blank,
+    relabel,
   );
 }
 

@@ -125,24 +125,55 @@ type VendorCreate = {
 type VendorInputContract = { contract: { oneofKind?: string; v1?: VendorCreate } };
 
 /**
- * Pick a record field by label, falling back to positional index. A Daml LF
- * record is encoded either fully-labeled or fully-positional (proto rule), so we
- * detect which and use the matching strategy. The positional order mirrors the
- * choice/record's Daml declaration order.
+ * Pick a record field the way the engine binds one.
+ *
+ * Daml binds a record BY LABEL only when EVERY field carries one. A single
+ * unlabeled field puts the whole record in DECLARATION ORDER, and each label
+ * that is still present is then checked against the name declared at its own
+ * index rather than searched for elsewhere. `value.proto` states the same
+ * rule: with all keys present the order does not matter; with any key omitted
+ * the order MUST match the declaration.
+ *
+ * This read `some` where the engine reads `every`, which inverts the rule and
+ * hands the choice of mode to whoever wrote the blob. Blanking ONE label sent
+ * us down the label path while the engine stayed positional, and every field
+ * we then looked up by name came back undefined — a field silently DROPPED
+ * rather than a blob refused. Erasing the memo that way read as "this transfer
+ * carries none" about a transfer that carries one and settles.
  */
 function pick(fields: readonly VendorField[], label: string, index: number): VendorValue | undefined {
-  const labeled = fields.some((f) => f.label !== "");
-  return labeled ? fields.find((f) => f.label === label)?.value : fields[index]?.value;
+  if (fields.every((f) => f.label !== "")) return fields.find((f) => f.label === label)?.value;
+  
+  const field = fields[index];
+  if (!field) return undefined;
+  // Declaration order binds here, so a label that disagrees with the name
+  // declared at this index is a contradiction, not a pointer somewhere else.
+  if (field.label !== "" && field.label !== label) return undefined;
+  return field.value;
 }
 
-/** A scalar the walker reads as a string: party, text or numeric are all strings on the wire. */
-function str(value: VendorValue | undefined): string | undefined {
+/**
+ * Scalars read AT their declared type.
+ *
+ * One reader that took party, text and numeric alike could not tell a Party
+ * from a Text, so a record written as `[party("Amulet"), text("DSO::...")]`
+ * read back as a well-formed instrument whose admin was the DSO. The ledger
+ * binds `InstrumentId` as `{admin: Party, id: Text}` and refuses that blob;
+ * reading each field at its declared type refuses it here instead.
+ */
+function partyOf(value: VendorValue | undefined): string | undefined {
   const sum = value?.sum;
-  if (!sum) return undefined;
-  if (sum.oneofKind === "party") return sum.party as string;
-  if (sum.oneofKind === "text") return sum.text as string;
-  if (sum.oneofKind === "numeric") return sum.numeric as string;
-  return undefined;
+  return sum?.oneofKind === "party" ? (sum.party as string) : undefined;
+}
+
+function textOf(value: VendorValue | undefined): string | undefined {
+  const sum = value?.sum;
+  return sum?.oneofKind === "text" ? (sum.text as string) : undefined;
+}
+
+function numericOf(value: VendorValue | undefined): string | undefined {
+  const sum = value?.sum;
+  return sum?.oneofKind === "numeric" ? (sum.numeric as string) : undefined;
 }
 
 /**
@@ -217,23 +248,23 @@ function textMap(value: VendorValue | undefined): Map<string, VendorValue | unde
 function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | null {
   const arg = fieldsOf(chosenValue);
   if (!arg) return null;
-  const expectedAdmin = str(pick(arg, "expectedAdmin", 0));
+  const expectedAdmin = partyOf(pick(arg, "expectedAdmin", 0));
   const transfer = fieldsOf(pick(arg, "transfer", 1));
   if (!transfer) return null;
 
-  const sender = str(pick(transfer, "sender", 0));
-  const receiver = str(pick(transfer, "receiver", 1));
-  const amount = str(pick(transfer, "amount", 2));
+  const sender = partyOf(pick(transfer, "sender", 0));
+  const receiver = partyOf(pick(transfer, "receiver", 1));
+  const amount = numericOf(pick(transfer, "amount", 2));
   const instr = fieldsOf(pick(transfer, "instrumentId", 3));
-  const id = instr && str(pick(instr, "id", 0));
-  const admin = instr && str(pick(instr, "admin", 1));
+  const id = instr && textOf(pick(instr, "id", 1));
+  const admin = instr && partyOf(pick(instr, "admin", 0));
   // Declaration order after the four above: requestedAt, executeBefore,
   // inputHoldingCids, meta.
   const executeBeforeMicros = micros(pick(transfer, "executeBefore", 5));
   // `meta` is a Metadata RECORD whose single field `values` holds the TextMap —
   // not a TextMap directly.
   const meta = fieldsOf(pick(transfer, "meta", 7));
-  const memo = meta && str(textMap(pick(meta, "values", 0))?.get(MEMO_KEY));
+  const memo = meta && textOf(textMap(pick(meta, "values", 0))?.get(MEMO_KEY));
 
   if (!sender || !receiver || !amount || !id || !admin) return null;
   if (!expectedAdmin || expectedAdmin !== admin) return null;
