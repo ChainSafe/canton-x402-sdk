@@ -77,12 +77,19 @@ It stays in the locator set so the node is found and answered precisely rather
 than reported as no delivery at all, but its argument layout is unmeasured, so
 binding its amount would mean reading a position nobody checked.
 
-### A record is read the way the engine binds it, here too
+### One reader for a record's fields, not two
 
-`argField` chose label-mode when ANY field carried a label; the engine chooses
-it only when EVERY field does. This is the reader that decides whose
-preapproval the delivery spends, so a disclosure with one blank label was read
-by name while the ledger read it by position. Same correction as `pick`.
+An earlier draft of this work carried its own copy of the rule for reading a
+Daml record field, and the copy drifted: it chose label-mode when ANY field
+carried a label, where the engine chooses it only when EVERY field does — in
+the reader that decides whose preapproval a delivery spends, so a disclosure
+with one blank label was read by name while the ledger read it by position.
+
+Both call sites now share one internal `recordField`, so there is a single
+place for that rule to be right or wrong. The unification is load-bearing
+rather than cosmetic: one mutation of it fails tests in both the decoder and
+the verifier suites, where before each copy had to be mutated separately and
+either could rot alone.
 
 ### Severity, measured rather than argued
 

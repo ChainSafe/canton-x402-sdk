@@ -35,6 +35,7 @@ import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 import { gunzipPreparedTransaction } from "./prepared-tx-codec";
 import { computePreparedTransactionHash } from "./prepared-tx-hash";
 import { guardPreparedTransaction } from "./prepared-tx-guard";
+import { recordField } from "./record-fields";
 
 // @noble/ed25519 v3 needs sha512 wired (same as the facilitator's wallet.ts).
 ed25519Hashes.sha512 = sha512;
@@ -294,25 +295,6 @@ const REGISTRY_DIRECT = {
   entityName: "TransferRule",
 };
 
-type Consequence = NonNullable<DecodedTransfer["consequences"]>[number];
-type DisclosedArgument = NonNullable<Consequence["target"]>["argument"];
-
-/** A disclosure's field by label, falling back to declaration order, as `pick` does. */
-function argField(argument: DisclosedArgument, label: string, index: number): string | undefined {
-  // The engine's rule, as `pick` reads it in the decoder: a record binds BY
-  // LABEL only when EVERY field carries one. A single blank label puts the
-  // whole record in declaration order, and a label still present is then
-  // checked against the name declared at its own index.
-  //
-  // This read `some`, the inverse, which is how a record with one blank label
-  // could be read here by name while the ledger read it by position — and this
-  // is the reader that decides whose preapproval the delivery spends.
-  if (argument.every((f) => f.label !== "")) return argument.find((f) => f.label === label)?.value;
-  const field = argument[index];
-  if (!field) return undefined;
-  if (field.label !== "" && field.label !== label) return undefined;
-  return field.value;
-}
 
 /**
  * Why a CREATE in this transaction is not one an honest transfer makes, or null.
@@ -484,7 +466,7 @@ function deliveryFailure(
   // `amount` is declaration index 2 of `{context, inputs, amount, sender}`,
   // confirmed on all three real Canton Coin captures, where it equals the
   // root's exactly.
-  const sent = argField(sends[0].chosenArgument ?? [], "amount", 2);
+  const sent = recordField(sends[0].chosenArgument ?? [], "amount", 2);
   const sentAtomic = sent === undefined ? null : ledgerToAtomic(sent, WIRE_DECIMALS);
   const rootAtomic = ledgerToAtomic(transfer.amount, WIRE_DECIMALS);
   if (sentAtomic === null || rootAtomic === null || sentAtomic !== rootAtomic) {
@@ -496,9 +478,9 @@ function deliveryFailure(
   // contract to read rather than a bare id.
   if (!target) return "delivery_unresolved";
 
-  const dso = argField(target.argument, "dso", 0);
-  const receiver = argField(target.argument, "receiver", 1);
-  const provider = argField(target.argument, "provider", 2);
+  const dso = recordField(target.argument, "dso", 0);
+  const receiver = recordField(target.argument, "receiver", 1);
+  const provider = recordField(target.argument, "provider", 2);
   if (!dso || !receiver || !provider) return "delivery_unresolved";
   // A preapproval belonging to anyone else grants nothing.
   if (receiver !== requirements.payTo) return "delivery_receiver";

@@ -28,6 +28,7 @@
 
 import { decodePreparedTransaction as decodeVendorPreparedTransaction } from "@canton-network/core-tx-visualizer";
 import { canonicalNodeId } from "./prepared-tx-guard";
+import { recordField } from "./record-fields";
 
 /**
  * The transfer a prepared transaction authorizes, decoded out of the opaque
@@ -210,34 +211,6 @@ type VendorCreate = {
 type VendorInputContract = { contract: { oneofKind?: string; v1?: VendorCreate } };
 
 /**
- * Pick a record field the way the engine binds one.
- *
- * Daml binds a record BY LABEL only when EVERY field carries one. A single
- * unlabeled field puts the whole record in DECLARATION ORDER, and each label
- * that is still present is then checked against the name declared at its own
- * index rather than searched for elsewhere. `value.proto` states the same
- * rule: with all keys present the order does not matter; with any key omitted
- * the order MUST match the declaration.
- *
- * This read `some` where the engine reads `every`, which inverts the rule and
- * hands the choice of mode to whoever wrote the blob. Blanking ONE label sent
- * us down the label path while the engine stayed positional, and every field
- * we then looked up by name came back undefined — a field silently DROPPED
- * rather than a blob refused. Erasing the memo that way read as "this transfer
- * carries none" about a transfer that carries one and settles.
- */
-function pick(fields: readonly VendorField[], label: string, index: number): VendorValue | undefined {
-  if (fields.every((f) => f.label !== "")) return fields.find((f) => f.label === label)?.value;
-  
-  const field = fields[index];
-  if (!field) return undefined;
-  // Declaration order binds here, so a label that disagrees with the name
-  // declared at this index is a contradiction, not a pointer somewhere else.
-  if (field.label !== "" && field.label !== label) return undefined;
-  return field.value;
-}
-
-/**
  * Scalars read AT their declared type.
  *
  * One reader that took party, text and numeric alike could not tell a Party
@@ -357,12 +330,12 @@ function textMap(value: VendorValue | undefined): Map<string, VendorValue | unde
 function readTransferRecord(
   transfer: readonly VendorField[],
 ): Pick<DecodedTransfer, "sender" | "receiver" | "amount" | "instrumentId"> | null {
-  const sender = partyOf(pick(transfer, "sender", 0));
-  const receiver = partyOf(pick(transfer, "receiver", 1));
-  const amount = numericOf(pick(transfer, "amount", 2));
-  const instr = fieldsOf(pick(transfer, "instrumentId", 3));
-  const id = instr && textOf(pick(instr, "id", 1));
-  const admin = instr && partyOf(pick(instr, "admin", 0));
+  const sender = partyOf(recordField(transfer, "sender", 0));
+  const receiver = partyOf(recordField(transfer, "receiver", 1));
+  const amount = numericOf(recordField(transfer, "amount", 2));
+  const instr = fieldsOf(recordField(transfer, "instrumentId", 3));
+  const id = instr && textOf(recordField(instr, "id", 1));
+  const admin = instr && partyOf(recordField(instr, "admin", 0));
   if (!sender || !receiver || !amount || !id || !admin) return null;
   return { sender, receiver, amount, instrumentId: { id, admin } };
 }
@@ -373,7 +346,7 @@ function readDelivered(
 ): NonNullable<DecodedTransfer["consequences"]>[number]["delivers"] {
   const arg = fieldsOf(chosenValue);
   if (!arg) return undefined;
-  const transfer = fieldsOf(pick(arg, "transfer", 0));
+  const transfer = fieldsOf(recordField(arg, "transfer", 0));
   if (!transfer) return undefined;
   return readTransferRecord(transfer) ?? undefined;
 }
@@ -381,8 +354,8 @@ function readDelivered(
 function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | null {
   const arg = fieldsOf(chosenValue);
   if (!arg) return null;
-  const expectedAdmin = partyOf(pick(arg, "expectedAdmin", 0));
-  const transfer = fieldsOf(pick(arg, "transfer", 1));
+  const expectedAdmin = partyOf(recordField(arg, "expectedAdmin", 0));
+  const transfer = fieldsOf(recordField(arg, "transfer", 1));
   if (!transfer) return null;
 
   const money = readTransferRecord(transfer);
@@ -393,11 +366,11 @@ function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | n
   const admin = money?.instrumentId.admin;
   // Declaration order after the four above: requestedAt, executeBefore,
   // inputHoldingCids, meta.
-  const executeBeforeMicros = micros(pick(transfer, "executeBefore", 5));
+  const executeBeforeMicros = micros(recordField(transfer, "executeBefore", 5));
   // `meta` is a Metadata RECORD whose single field `values` holds the TextMap —
   // not a TextMap directly.
-  const meta = fieldsOf(pick(transfer, "meta", 7));
-  const memo = meta && textOf(textMap(pick(meta, "values", 0))?.get(MEMO_KEY));
+  const meta = fieldsOf(recordField(transfer, "meta", 7));
+  const memo = meta && textOf(textMap(recordField(meta, "values", 0))?.get(MEMO_KEY));
 
   if (!sender || !receiver || !amount || !id || !admin) return null;
   if (!expectedAdmin || expectedAdmin !== admin) return null;
