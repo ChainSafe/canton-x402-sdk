@@ -35,7 +35,7 @@ import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 import { gunzipPreparedTransaction } from "./prepared-tx-codec";
 import { computePreparedTransactionHash } from "./prepared-tx-hash";
 import { guardPreparedTransaction } from "./prepared-tx-guard";
-import { recordField } from "./record-fields";
+import { recordField, sameTemplate } from "./record-fields";
 
 // @noble/ed25519 v3 needs sha512 wired (same as the facilitator's wallet.ts).
 ed25519Hashes.sha512 = sha512;
@@ -195,7 +195,10 @@ export function parseCantonNetworkId(s: string): NetworkId {
  */
 function fail(
   invalidReason: VerifyInvalidReason,
-  reason: VerifyInvalidReason,
+  // Named apart from `invalidReason` because the two are the SAME type and sit
+  // next to each other: transposing them at a call site compiles and changes
+  // the wire response. The name is all that distinguishes them here.
+  extensionReason: VerifyInvalidReason,
   payer?: string,
   detail?: string,
 ): VerifyResponseInvalid {
@@ -203,7 +206,7 @@ function fail(
     isValid: false,
     invalidReason,
     ...(payer ? { payer } : {}),
-    extensions: { reason, ...(detail !== undefined ? { detail } : {}) },
+    extensions: { reason: extensionReason, ...(detail !== undefined ? { detail } : {}) },
   };
 }
 
@@ -296,6 +299,46 @@ const REGISTRY_DIRECT = {
 };
 
 /**
+ * The `extensions.detail` codes each refusal produces.
+ *
+ * Declared as literal unions rather than `string` for the reason
+ * `MISMATCH_REASON` is already pinned with `satisfies`: every one of these is
+ * asserted by name in the suite and matched by name by a client, so a typo in
+ * a new return site would otherwise compile and invent a code nobody handles.
+ */
+type CreateDetail = "create_unissued";
+type FactoryDetail = "factory_unresolved" | "factory_interface";
+type DeliveryDetail =
+  | "no_direct_delivery"
+  | "delivery_admin"
+  | "delivery_ambiguous"
+  | "delivery_amount"
+  | "delivery_instrument"
+  | "delivery_legacy_send"
+  | "delivery_receiver"
+  | "delivery_sender"
+  | "delivery_signatories"
+  | "delivery_unchecked"
+  | "delivery_unresolved";
+
+/**
+ * Two on-ledger `Decimal` amounts, compared as NUMBERS.
+ *
+ * "0.02" and "0.0200000000" are one amount on a ledger, so comparing the
+ * strings would refuse an honest transfer over spelling alone. One scale for
+ * every instrument, as elsewhere in this file.
+ *
+ * An absent left-hand side is not equal to anything: a field the reader could
+ * not find is not a match, it is a missing field.
+ */
+function sameLedgerAmount(a: string | undefined, b: string): boolean {
+  if (a === undefined) return false;
+  const left = ledgerToAtomic(a, WIRE_DECIMALS);
+  const right = ledgerToAtomic(b, WIRE_DECIMALS);
+  return left !== null && right !== null && left === right;
+}
+
+/**
  * Why a CREATE in this transaction is not one an honest transfer makes, or null.
  *
  * A contract the SENDER signs carries the sender's authority into whatever
@@ -317,7 +360,7 @@ const REGISTRY_DIRECT = {
  * registry `Holding [registrar, owner]` and `TransferOffer [sender,
  * registrar]`. None would be refused.
  */
-function createFailure(transfer: DecodedTransfer): string | null {
+function senderSignedCreateFailure(transfer: DecodedTransfer): CreateDetail | null {
   for (const made of transfer.creates ?? []) {
     if (!made.signatories.includes(transfer.sender)) continue;
     if (!made.signatories.includes(transfer.instrumentId.admin)) return "create_unissued";
@@ -369,20 +412,14 @@ function createFailure(transfer: DecodedTransfer): string | null {
 function deliveryFailure(
   transfer: DecodedTransfer,
   requirements: CantonPaymentRequirements,
-): string | null {
+): DeliveryDetail | null {
   const consequences = transfer.consequences ?? [];
 
   const direct = consequences.filter(
-    (c) =>
-      c.choiceId === REGISTRY_DIRECT.choiceId &&
-      c.templateId.moduleName === REGISTRY_DIRECT.moduleName &&
-      c.templateId.entityName === REGISTRY_DIRECT.entityName,
+    (c) => c.choiceId === REGISTRY_DIRECT.choiceId && sameTemplate(c.templateId, REGISTRY_DIRECT),
   );
   const sends = consequences.filter(
-    (c) =>
-      PREAPPROVAL_SEND_CHOICES.has(c.choiceId) &&
-      c.templateId.moduleName === PREAPPROVAL_TEMPLATE.moduleName &&
-      c.templateId.entityName === PREAPPROVAL_TEMPLATE.entityName,
+    (c) => PREAPPROVAL_SEND_CHOICES.has(c.choiceId) && sameTemplate(c.templateId, PREAPPROVAL_TEMPLATE),
   );
 
   // WHICH ARM IS DECIDED BY THE INSTRUMENT, never by a node. Choosing it from
@@ -431,14 +468,13 @@ function deliveryFailure(
     if (!delivers) return "delivery_unresolved";
     if (delivers.sender !== transfer.sender) return "delivery_sender";
     if (delivers.receiver !== transfer.receiver) return "delivery_receiver";
-    if (delivers.instrumentId.id !== transfer.instrumentId.id) return "delivery_instrument";
-    if (delivers.instrumentId.admin !== transfer.instrumentId.admin) return "delivery_instrument";
-    // Both are on-ledger Decimals, where "0.02" and "0.0200000000" are one
-    // amount — comparing the strings would refuse an honest transfer over
-    // spelling. One scale for every instrument, as elsewhere in this file.
-    const delivered = ledgerToAtomic(delivers.amount, WIRE_DECIMALS);
-    const rooted = ledgerToAtomic(transfer.amount, WIRE_DECIMALS);
-    if (delivered === null || rooted === null || delivered !== rooted) return "delivery_amount";
+    if (
+      delivers.instrumentId.id !== transfer.instrumentId.id ||
+      delivers.instrumentId.admin !== transfer.instrumentId.admin
+    ) {
+      return "delivery_instrument";
+    }
+    if (!sameLedgerAmount(delivers.amount, transfer.amount)) return "delivery_amount";
     if (sends.length > 0) return "delivery_unchecked";
     return null;
   }
@@ -466,11 +502,7 @@ function deliveryFailure(
   // confirmed on all three real Canton Coin captures, where it equals the
   // root's exactly.
   const sent = recordField(sends[0].chosenArgument ?? [], "amount", 2);
-  const sentAtomic = sent === undefined ? null : ledgerToAtomic(sent, WIRE_DECIMALS);
-  const rootAtomic = ledgerToAtomic(transfer.amount, WIRE_DECIMALS);
-  if (sentAtomic === null || rootAtomic === null || sentAtomic !== rootAtomic) {
-    return "delivery_amount";
-  }
+  if (!sameLedgerAmount(sent, transfer.amount)) return "delivery_amount";
 
   const target = sends[0].target;
   // The preapproval must be disclosed by this transaction, so there is a
@@ -527,7 +559,7 @@ function deliveryFailure(
  * merely exposes a same-named choice and have it SETTLE, which before this
  * check it could.
  */
-function factoryProofFailure(transfer: DecodedTransfer): string | null {
+function factoryProofFailure(transfer: DecodedTransfer): FactoryDetail | null {
   const exercised = transfer.exercisedContract;
   // Absent means the decoder could not resolve the exercised contract to
   // exactly one input contract that agrees with it — see resolveExercised.
@@ -536,8 +568,7 @@ function factoryProofFailure(transfer: DecodedTransfer): string | null {
   // absent one is refused rather than read as "no interface required".
   const inherited = exercised.interfaceId;
   if (!inherited) return "factory_interface";
-  if (inherited.moduleName !== TRANSFER_FACTORY_INTERFACE.moduleName) return "factory_interface";
-  if (inherited.entityName !== TRANSFER_FACTORY_INTERFACE.entityName) return "factory_interface";
+  if (!sameTemplate(inherited, TRANSFER_FACTORY_INTERFACE)) return "factory_interface";
   // NOT CHECKED: who signed the factory. The Token Standard says nothing about
   // it — `TransferFactory` is an interface and signatories are an
   // implementation's own choice — and real bytes bear that out: Canton Coin's
@@ -703,7 +734,7 @@ async function verifyCantonExact(
   //      admin on it. Such a contract hands the payer's authority to whoever
   //      controls its choices, and nothing else here would notice: the quoted
   //      payment can be delivered perfectly while it is left behind.
-  const created = createFailure(transfer);
+  const created = senderSignedCreateFailure(transfer);
   if (created) return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", payer, created);
   // 16. the transfer must DELIVER, not leave a pending instruction. Which of
   //     the two a signed TransferFactory_Transfer does is visible only in its

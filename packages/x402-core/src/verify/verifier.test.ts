@@ -973,6 +973,18 @@ describe("cantonExactVerifier", () => {
       expect(await verifier.verify(payload, requirements)).toMatchObject({ isValid: true });
     });
 
+    it("refuses a send whose argument carries no amount at all", async () => {
+      // The absent case, which nothing pinned: a field the reader cannot find
+      // is not a match, it is a missing field. Treating `undefined` as equal to
+      // the root would let a send with no readable amount deliver anything.
+      const { payload, requirements } = await buildSignedFixture({
+        delivery: { omitDelivers: true },
+      });
+      expect(await verifier.verify(payload, requirements)).toMatchObject(
+        refusal("delivery_amount"),
+      );
+    });
+
     it("refuses the legacy TransferPreapproval_Send", async () => {
       // Found, not ignored: it is in the locator set, so the answer names the
       // legacy choice rather than reporting no delivery at all. Its argument

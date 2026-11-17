@@ -28,7 +28,7 @@
 
 import { decodePreparedTransaction as decodeVendorPreparedTransaction } from "@canton-network/core-tx-visualizer";
 import { canonicalNodeId } from "./prepared-tx-guard";
-import { recordField } from "./record-fields";
+import { recordField, sameTemplate } from "./record-fields";
 
 /**
  * The transfer a prepared transaction authorizes, decoded out of the opaque
@@ -229,6 +229,11 @@ function textOf(value: VendorValue | undefined): string | undefined {
   return sum?.oneofKind === "text" ? (sum.text as string) : undefined;
 }
 
+function numericOf(value: VendorValue | undefined): string | undefined {
+  const sum = value?.sum;
+  return sum?.oneofKind === "numeric" ? (sum.numeric as string) : undefined;
+}
+
 /**
  * Any scalar leaf as a string, for ENUMERATING a record whose shape we do not
  * know. There is no declared type to read it at, so permissiveness is the point
@@ -245,10 +250,6 @@ function anyScalar(value: VendorValue | undefined): string | undefined {
   return undefined;
 }
 
-function numericOf(value: VendorValue | undefined): string | undefined {
-  const sum = value?.sum;
-  return sum?.oneofKind === "numeric" ? (sum.numeric as string) : undefined;
-}
 
 /**
  * A record's fields — refusing one whose labels repeat.
@@ -299,27 +300,6 @@ function textMap(value: VendorValue | undefined): Map<string, VendorValue | unde
 }
 
 /**
- * Read the TransferFactory_Transfer argument record `{ expectedAdmin, transfer }`.
- *
- * `expectedAdmin` names the FACTORY's admin — the Token Standard has the
- * factory validate it against its own — while `instrumentId.admin` names the
- * registry that administers the INSTRUMENT. Different things, and the standard
- * does not require them equal.
- *
- * We require it anyway. `TransferFactoryView.admin` is "the party representing
- * the registry app that administers the instruments for which this transfer
- * factory can be used", so for a well-formed registry they are one party, and
- * the real Canton Coin payment carries the DSO in both. The factory check in
- * `canton-exact.ts` already rests on the same assumption, demanding the
- * exercised contract be signed by `instrumentId.admin`. A registry that split
- * the two parties would fail both checks together, which is the one thing to
- * look at first if an honest non-Amulet transfer is ever refused here.
- *
- * What it buys: `expectedAdmin` is what the ledger guards on, so pinning it to
- * an admin a facilitator has pinned to the real DSO means a transfer aimed at
- * another issuer's factory is refused at verify rather than at execution.
- */
-/**
  * The money-carrying fields of a Token Standard `Transfer` record.
  *
  * Shared, because the same record appears twice in one transaction: once as
@@ -351,6 +331,27 @@ function readDelivered(
   return readTransferRecord(transfer) ?? undefined;
 }
 
+/**
+ * Read the TransferFactory_Transfer argument record `{ expectedAdmin, transfer }`.
+ *
+ * `expectedAdmin` names the FACTORY's admin — the Token Standard has the
+ * factory validate it against its own — while `instrumentId.admin` names the
+ * registry that administers the INSTRUMENT. Different things, and the standard
+ * does not require them equal.
+ *
+ * We require it anyway. `TransferFactoryView.admin` is "the party representing
+ * the registry app that administers the instruments for which this transfer
+ * factory can be used", so for a well-formed registry they are one party, and
+ * the real Canton Coin payment carries the DSO in both. The factory check in
+ * `canton-exact.ts` already rests on the same assumption, demanding the
+ * exercised contract be signed by `instrumentId.admin`. A registry that split
+ * the two parties would fail both checks together, which is the one thing to
+ * look at first if an honest non-Amulet transfer is ever refused here.
+ *
+ * What it buys: `expectedAdmin` is what the ledger guards on, so pinning it to
+ * an admin a facilitator has pinned to the real DSO means a transfer aimed at
+ * another issuer's factory is refused at verify rather than at execution.
+ */
 function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | null {
   const arg = fieldsOf(chosenValue);
   if (!arg) return null;
@@ -377,21 +378,6 @@ function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | n
   return { sender, receiver, amount, instrumentId: { id, admin }, executeBeforeMicros, memo };
 }
 
-/**
- * Two template identifiers naming the same Daml template.
- *
- * The package id is NOT compared. An exercise's `template_id` names the package
- * the choice was resolved against, which the payer's participant picks by
- * package NAME; the input contract's names the package its contract was created
- * under. Canton documents that the two differ once a contract has been upgraded
- * or downgraded, so requiring them equal would refuse honest payments for the
- * whole window of a Splice rollout. Name, module and entity are what an upgrade
- * preserves, and `resolveExercised` pairs this with the package name.
- */
-function sameTemplate(a: VendorIdentifier | undefined, b: VendorIdentifier | undefined): boolean {
-  if (!a || !b) return false;
-  return a.moduleName === b.moduleName && a.entityName === b.entityName;
-}
 
 /**
  * A record's leaves as strings, in declaration order with the labels it
@@ -429,9 +415,6 @@ function scalarFields(value: VendorValue | undefined): readonly { label: string;
  * package name, same module, same entity — because a transaction that says two
  * different things about one contract is not one to read further. They need not
  * agree on the package id; see `sameTemplate`.
- */
-/**
- * The disclosed contract an exercise targets, whichever exercise it is.
  *
  * Shared by the root transfer and its consequences: the same question — which
  * input contract is this, and do the two agree about what it is — and the same
