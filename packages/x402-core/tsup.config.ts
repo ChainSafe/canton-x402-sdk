@@ -11,4 +11,9 @@ export default defineConfig({
   ...baseTsup,
   entry: ["src/index.ts"],
   noExternal: ["@noble/hashes", "@noble/ed25519", "protobufjs", "valibot"],
+  // `noExternal` inlines valibot into the JS but leaves `import * as v from
+  // "valibot"` at the top of the .d.ts, and valibot is not a dependency — so a
+  // consumer resolves `v` to `any` under skipLibCheck and every published type
+  // silently becomes `any`. Inline the types too.
+  dts: { resolve: ["valibot"] },
 });

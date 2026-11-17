@@ -31,8 +31,18 @@ qualify and remain public — the **picklists** `VerifyInvalidReasonSchema` and
 and the **validators with no `is*` twin**, `VerifyResponseSchema`,
 `SettleResponseSchema` and `SupportedResponseSchema`.
 
-This keeps valibot out of the public API, so the validation library can change
-without a major.
+This keeps valibot out of the types a caller writes against: `SettleResponse`,
+`CantonPaymentRequirements` and the rest are now plain structural types in the
+published `.d.ts`, not `v.InferOutput<...>` of a schema. Core also stops
+*importing* valibot in its declarations — it bundles valibot but never depended
+on it, so until now every published type resolved to `any` for anyone with
+`skipLibCheck` on. `dts: { resolve: ["valibot"] }` inlines the types the way
+`noExternal` already inlined the code.
+
+It does not get valibot out of the package. The five schema objects above are
+valibot values and carry valibot's own `PicklistSchema`, `VariantSchema` and
+`ObjectSchema` types, so a valibot major can still be breaking for those five —
+and only those five.
 
 **The `parse*` functions** — `parseCantonPaymentInner`,
 `parseCantonPaymentPayload`, `parseCantonPaymentRequirements`,
