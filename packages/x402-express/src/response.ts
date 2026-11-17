@@ -10,6 +10,8 @@
 import type { Request, Response } from "express";
 import {
   encodePaymentRequiredHeader,
+  encodePaymentResponseHeader,
+  type SettleResponseError,
   type X402PaymentPayload,
   type ResourceInfo,
   type X402PaymentRequiredResponse,
@@ -37,6 +39,17 @@ export class PaymentRejection extends Error {
   }
 }
 
+/**
+ * Internal control-flow signal: the settle outcome is unknown. Answered with a
+ * 402 carrying the facilitator's answer in `PAYMENT-RESPONSE`, and no
+ * challenge: the payer resends the same payment, it does not sign another.
+ */
+export class SettlementPending extends Error {
+  constructor(readonly response: SettleResponseError) {
+    super("settlement_pending");
+  }
+}
+
 /** Send the response for anything thrown by the flow, and tell the merchant. */
 export async function respondToFailure<
   TSpec extends BaseRequirementsSpec,
@@ -54,6 +67,13 @@ export async function respondToFailure<
   payment: PaymentRejectionInfo<TRequirements, TPayload>["payment"],
 ): Promise<void> {
   let rejection: PaymentRejectionInfo<TRequirements, TPayload> | undefined;
+
+  if (err instanceof SettlementPending) {
+    // Not a rejection, so `onReject` is not called: the payment may still
+    // land, and nothing the merchant reserved is owed an undo.
+    respondPending(res, err.response);
+    return;
+  }
 
   if (err instanceof PaymentRejection) {
     try {
@@ -126,6 +146,19 @@ function respond402<TRequirements extends X402PaymentRequirements<unknown>>(
   };
   res.setHeader("PAYMENT-REQUIRED", encodePaymentRequiredHeader(paymentRequired));
   res.status(402).json({ ...paymentRequired, ...(details ? { details } : {}) });
+}
+
+/**
+ * Answer 402 for a settlement whose outcome is unknown: the facilitator's
+ * answer, base64-encoded in `PAYMENT-RESPONSE` as the HTTP transport carries a
+ * settle answer, and no `PAYMENT-REQUIRED` or `accepts`, so nothing invites a
+ * second payment.
+ */
+function respondPending(res: Response, response: SettleResponseError): void {
+  res.setHeader("PAYMENT-RESPONSE", encodePaymentResponseHeader(response));
+  res
+    .status(402)
+    .json({ x402Version: 2, error: response.errorReason, transaction: response.transaction });
 }
 
 function errMsg(err: unknown): string {
