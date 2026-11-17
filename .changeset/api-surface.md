@@ -26,13 +26,30 @@ be demoted to type-only without the declarations moving at all.
 `CantonPaymentRequiredResponseSchema`, `CantonPaymentRequirementsSchema`,
 `CantonRequirementsExtraSchema`, and the three `X402Payment*EnvelopeSchema`.
 
-→ Use the matching **type** and `is*` guard; both are unchanged. The rule
-applied throughout is: publish the type always, publish the runtime object only
-where it is the single reachable way to do something the type cannot. Two cases
-qualify and remain public — the **picklists** `VerifyInvalidReasonSchema` and
-`SettleErrorReasonSchema`, where the object *is* the enumerable list of codes,
-and the **validators with no `is*` twin**, `VerifyResponseSchema`,
-`SettleResponseSchema` and `SupportedResponseSchema`.
+→ **Eight have an `is*` guard**, unchanged, and so is the type: use
+`isCantonVerifyRequest`, `isCantonPaymentInner`, `isCantonPaymentPayload`,
+`isCantonPaymentRequiredResponse`, `isCantonPaymentRequirements`,
+`isX402PaymentPayload`, `isX402PaymentRequirements` and
+`isX402PaymentRequiredResponse`.
+
+→ **The other twelve have no guard** — `VerifyResponseValidSchema`,
+`VerifyResponseInvalidSchema`, `SettleResponseSuccessSchema`,
+`SettleResponseErrorSchema`, `SupportedKindSchema`, `SupportedInstrumentSchema`,
+`CantonSupportedExtraSchema`, `AssetSpecSchema`, `InstrumentIdSchema`,
+`PaymentExtensionsSchema`, `ResourceInfoSchema` and
+`CantonRequirementsExtraSchema`. These are the parts the larger validators are
+assembled from, not messages anything receives on its own. Their **types stay
+published**: validate at the level that has a guard and use the type for the
+part. If you were validating one of them standalone, say so — a guard is an
+addition, not a breaking change, which is why none is published on spec.
+
+The rule applied throughout is: publish the type always, publish the runtime
+object only where it is the single reachable way to do something the type cannot
+*and* the thing is received whole. Two cases qualify and remain public — the
+**picklists** `VerifyInvalidReasonSchema` and `SettleErrorReasonSchema`, where
+the object *is* the enumerable list of codes, and the **whole-response
+validators with no `is*` twin**, `VerifyResponseSchema`, `SettleResponseSchema`
+and `SupportedResponseSchema`.
 
 This keeps valibot out of the types a caller writes against: `SettleResponse`,
 `CantonPaymentRequirements` and the rest are now plain structural types in the
