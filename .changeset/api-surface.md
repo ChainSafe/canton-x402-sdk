@@ -10,7 +10,10 @@ Until now the surface was a side effect of which files happened to be
 `export *`-ed, so roughly half of what the package published had never been
 chosen by anyone. The next release is 1.0.0, after which every published name
 is frozen for the whole major — so each one is now a decision, and CI fails if
-the built declarations stop matching `packages/x402-core/api-surface.txt`.
+the build stops matching `packages/x402-core/api-surface.txt`. It compares every
+`export` statement in the built declarations, and separately checks that each
+name not marked `type` is really exported by the built ESM and CJS — a name can
+be demoted to type-only without the declarations moving at all.
 
 ### If you used one of these
 
