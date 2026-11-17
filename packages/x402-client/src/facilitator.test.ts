@@ -71,6 +71,37 @@ describe("FacilitatorClient", () => {
     expect(err.cause).toBe(boom);
   });
 
+  it("settle returns a failure sent with 200 as a value, a pending one with its transaction, network and payer", async () => {
+    const pending = {
+      success: false,
+      errorReason: "settlement_pending",
+      transaction: "ab".repeat(32),
+      network: "canton:x",
+      payer: "p",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json(pending)),
+    );
+    const client = new FacilitatorClient("https://f.example", { apiKey: "k" });
+    expect(await client.settle(payload, requirements)).toEqual(pending);
+  });
+
+  it("settle still throws on a failure sent with 400, its answer kept as the body", async () => {
+    // A 400 answered before settle failures came with 200 may be an unknown
+    // outcome reported as `timeout`: turning it into a value would have the
+    // middleware issue a fresh challenge, and the payer sign again.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ success: false, errorReason: "timeout" }, 400)),
+    );
+    const client = new FacilitatorClient("https://f.example", { apiKey: "k" });
+    const err: FacilitatorError = await client.settle(payload, requirements).catch((e) => e);
+    expect(err).toBeInstanceOf(FacilitatorError);
+    expect(err.status).toBe(400);
+    expect(err.body).toEqual({ success: false, errorReason: "timeout" });
+  });
+
   it("settle returns a success outcome", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ success: true, network: "canton:x", transaction: "upd1", payer: "p" })));
     const client = new FacilitatorClient("https://f.example", { apiKey: "k" });

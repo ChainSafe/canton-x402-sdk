@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   encodePaymentHeader,
   encodePaymentRequiredHeader,
+  encodePaymentResponseHeader,
   type CantonPaymentPayload,
   type CantonPaymentRequiredResponse,
   type CantonPaymentRequirements,
@@ -190,4 +191,35 @@ describe("createX402Fetch", () => {
     expect(payer.authorize).toHaveBeenCalledWith(requirements, {});
   });
 
+});
+
+describe("createX402Fetch, when the settlement is pending", () => {
+  it("returns the pending answer as it is, and does not sign again", async () => {
+    // A pending 402 carries the settle answer in PAYMENT-RESPONSE and no
+    // challenge, so there is nothing to pay: the first transfer may still land.
+    const payer = makePayer();
+    const pending = new Response(JSON.stringify({ x402Version: 2, error: "settlement_pending" }), {
+      status: 402,
+      headers: {
+        "PAYMENT-RESPONSE": encodePaymentResponseHeader({
+          success: false,
+          errorReason: "settlement_pending",
+          transaction: "deadbeef",
+          network: "canton:x",
+        }),
+      },
+    });
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
+      new Headers(init?.headers).has("PAYMENT-SIGNATURE")
+        ? pending
+        : new Response(
+            JSON.stringify({ x402Version: 2, resource: RESOURCE, accepts: [requirements] }),
+            { status: 402 },
+          ),
+    ) as unknown as FetchLike;
+    const res = await createX402Fetch(payer, { fetch: fetchMock })(RESOURCE.url);
+    expect(res).toBe(pending);
+    expect(payer.authorize).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

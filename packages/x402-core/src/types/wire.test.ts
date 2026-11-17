@@ -187,7 +187,13 @@ describe("x402-core wire types", () => {
       extensions: { reason: "transfer_mismatch", detail: "amount" },
     };
     const settleSpec: SettleResponse = { success: false, errorReason: "invalid_exact_canton_execute_failed" };
-    const settlePending: SettleResponse = { success: false, errorReason: "settlement_pending" };
+    const settlePending: SettleResponse = {
+      success: false,
+      errorReason: "settlement_pending",
+      transaction: "ab".repeat(32),
+      network: "canton:devnet",
+      payer: "alice::1220beef",
+    };
     expect([verifySpec, settleSpec, settlePending].every((r) => !("isValid" in r && r.isValid))).toBe(true);
     // `invalidReason` is only reachable after narrowing on `isValid`.
     if (verifyOk.isValid) expect(verifyOk.payer).toBe("alice::1220beef");

@@ -1,8 +1,9 @@
 // Payment header codec — the single source of truth for serialising and
 // deserialising the x402 payment envelope. Shared by the payer (builds the
 // header), the merchant middleware (reads it), and the facilitator. The 402's
-// `PAYMENT-REQUIRED` header is base64(JSON) the same way, so its encoder lives
-// here too.
+// `PAYMENT-REQUIRED` header is base64(JSON) the same way, and so is the
+// `PAYMENT-RESPONSE` header carrying a settle answer, so their codecs live here
+// too.
 //
 // ── The envelope ────────────────────────────────────────────────────────────
 // The payment travels in the `PAYMENT-SIGNATURE` request header (x402 v2 HTTP
@@ -24,6 +25,7 @@
 // TextEncoder/TextDecoder — no Node Buffer.
 
 import { isX402PaymentPayload, isX402PaymentRequiredResponse } from "./types";
+import type { SettleResponse } from "./types/facilitator";
 import type { CantonPaymentPayload } from "./types/payment";
 import type {
   CantonPaymentRequiredResponse,
@@ -104,6 +106,58 @@ export function decodePaymentRequiredHeader(headerValue: string): CantonPaymentR
   // Optimistically typed as canton-exact, as the payment decoder is: whether
   // an entry is one this reader can pay is checked per entry, by the payer.
   return parsed as CantonPaymentRequiredResponse;
+}
+
+/**
+ * Serialise a settle answer into a `PAYMENT-RESPONSE` response header value:
+ * base64 of its UTF-8 JSON, as the x402 v2 HTTP transport carries it.
+ */
+export function encodePaymentResponseHeader(response: SettleResponse): string {
+  return bytesToBase64(new TextEncoder().encode(JSON.stringify(response)));
+}
+
+/**
+ * Parse a `PAYMENT-RESPONSE` header value into the settle answer it carries.
+ *
+ * Throws on bad base64 / JSON, on nesting past {@link MAX_PAYMENT_DEPTH}, or
+ * when the value is not a settle answer: a boolean `success`, `transaction` and
+ * `network` strings on a success, an `errorReason` string on a failure, and
+ * `transaction`, `network` and `payer` strings where present. The reason is not checked against the codes this SDK knows, so an
+ * answer from a newer facilitator still reads.
+ */
+export function decodePaymentResponseHeader(headerValue: string): SettleResponse {
+  let raw: string;
+  try {
+    raw = new TextDecoder().decode(base64ToBytes(headerValue));
+  } catch (err) {
+    throw new Error(`PAYMENT-RESPONSE header is not valid base64: ${errMsg(err)}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`PAYMENT-RESPONSE header is not valid JSON: ${errMsg(err)}`);
+  }
+  if (nestsDeeperThan(parsed, MAX_PAYMENT_DEPTH)) {
+    throw new Error(`PAYMENT-RESPONSE header nests deeper than ${MAX_PAYMENT_DEPTH} levels`);
+  }
+  if (!isSettleAnswer(parsed)) {
+    throw new Error("PAYMENT-RESPONSE header is not a settle answer (success, errorReason)");
+  }
+  return parsed as SettleResponse;
+}
+
+/** The envelope of a settle answer, checked field by field. */
+function isSettleAnswer(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const r = value as Record<string, unknown>;
+  if (typeof r.success !== "boolean") return false;
+  if (r.success && (typeof r.transaction !== "string" || typeof r.network !== "string"))
+    return false;
+  if (!r.success && typeof r.errorReason !== "string") return false;
+  return ["transaction", "network", "payer"].every(
+    (k) => r[k] === undefined || typeof r[k] === "string",
+  );
 }
 
 /**

@@ -4,6 +4,7 @@ import express, { type Express } from "express";
 import request from "supertest";
 import {
   decodePayloadTransfer,
+  decodePaymentResponseHeader,
   encodePaymentHeader,
   isCantonPaymentRequirements,
   isCantonPaymentRequiredResponse,
@@ -2803,4 +2804,100 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     expect(res.body.details).toContain("JPYx");
   });
 
+});
+
+describe("a settlement whose outcome is not known yet (settlement_pending)", () => {
+  const PENDING = {
+    success: false,
+    errorReason: "settlement_pending",
+    transaction: "h",
+    network: "canton:x",
+    payer: "alice::x",
+  };
+
+  /** A facilitator whose settle answers come from a script, one per call, each answered with 200. */
+  function scriptedSettle(...answers: unknown[]) {
+    let settles = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/v2/verify")) return json({ isValid: true, payer: "alice::x" });
+        if (url.includes("/v2/settle")) {
+          const answer = answers[Math.min(settles++, answers.length - 1)];
+          return json(answer);
+        }
+        return new Response("no route", { status: 404 });
+      }),
+    );
+    return { settles: () => settles };
+  }
+
+  function pendingApp(booked: string[], onReject = vi.fn()) {
+    const served = vi.fn();
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        ...baseOptions,
+        settle: true,
+        onReject,
+        requirements: {
+          ...baseOptions.requirements,
+          accepts: [
+            {
+              asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } },
+              synchronizerId: SYNC,
+              amount: "500000000",
+              memo: () => {
+                const m = `order-${booked.length}`;
+                booked.push(m);
+                return m;
+              },
+            },
+          ],
+        },
+      } as PaymentRequiredOptions),
+    );
+    app.get("/paid", (_req, res) => {
+      served();
+      res.json({ ok: true });
+    });
+    return { app, served, onReject };
+  }
+
+  it("a pending answer: 402 with PAYMENT-RESPONSE, no challenge, not served, settled once", async () => {
+    const facilitator = scriptedSettle(PENDING);
+    const booked: string[] = [];
+    const { app, served, onReject } = pendingApp(booked);
+    const res = await request(app)
+      .get("/paid")
+      .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-0" } }));
+    expect(res.status).toBe(402);
+    // Not settled again: a facilitator that cannot look the submission up
+    // refuses the same payload as a replay.
+    expect(facilitator.settles()).toBe(1);
+    expect(decodePaymentResponseHeader(res.headers["payment-response"])).toEqual(PENDING);
+    // Nothing that invites a second payment: no challenge in the header or the
+    // body, and no reference minted for one.
+    expect(res.headers["payment-required"]).toBeUndefined();
+    expect(res.body.accepts).toBeUndefined();
+    expect(res.body).toMatchObject({ error: "settlement_pending", transaction: "h" });
+    expect(booked).toEqual([]);
+    expect(served).not.toHaveBeenCalled();
+    // Not a rejection: the payment may still land, so no undo is owed.
+    await new Promise((r) => setImmediate(r));
+    expect(onReject).not.toHaveBeenCalled();
+  });
+
+  it("a pending answer that names no transaction is a plain failure, not retried", async () => {
+    const facilitator = scriptedSettle({ success: false, errorReason: "settlement_pending" });
+    const { app } = pendingApp([]);
+    const res = await request(app)
+      .get("/paid")
+      .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-0" } }));
+    expect(res.status).toBe(402);
+    expect(facilitator.settles()).toBe(1);
+    expect(res.headers["payment-required"]).toBeDefined();
+    expect(res.headers["payment-response"]).toBeUndefined();
+  });
 });

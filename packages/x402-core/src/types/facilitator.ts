@@ -224,8 +224,33 @@ export const SettleResponseErrorSchema = v.object({
   success: v.literal(false),
   errorReason: SettleErrorReasonSchema,
   errorDetails: v.optional(v.string()),
+  /**
+   * The transaction the answer is about. On `settlement_pending` it is the
+   * payment's `preparedTxHash`: the relay went out and its outcome is not known
+   * yet. Empty or absent when nothing was relayed.
+   */
+  transaction: v.optional(v.string()),
+  network: v.optional(v.string()),
+  payer: v.optional(v.string()),
 });
 export type SettleResponseError = v.InferOutput<typeof SettleResponseErrorSchema>;
+
+/**
+ * True for a `settlement_pending` answer: the transaction was relayed and may
+ * still commit, so the payment must not be treated as failed and the payer
+ * must not be asked to sign again. The spec requires such an answer to name the
+ * transaction; one that names none is read as a plain failure.
+ */
+export function isSettlementPending(
+  response: SettleResponse,
+): response is SettleResponseError & { transaction: string } {
+  return (
+    !response.success &&
+    response.errorReason === "settlement_pending" &&
+    typeof response.transaction === "string" &&
+    response.transaction !== ""
+  );
+}
 
 /** Discriminated on `success`. */
 export const SettleResponseSchema = v.variant("success", [
