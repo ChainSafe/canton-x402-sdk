@@ -62,7 +62,7 @@ export interface DecodedTransfer {
    * plus `::<protocol-version>-<serial>`. Both parts are the synchronizer's
    * own — the protocol version is fixed when it is initialised, the serial
    * steps on a logical upgrade — not anything a participant picks.
-   * {@link synchronizerMatches} takes either.
+   * {@link isSameSynchronizer} takes either.
    */
   synchronizerId?: string;
   /**

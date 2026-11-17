@@ -3,6 +3,16 @@
 // dispatch registry (./registry). The SchemeVerifier contract itself lives in
 // ../types/facilitator (re-exported from the package root via ../types).
 export {
+  fingerprintForPublicKey,
+  isCantonNetworkId,
+  matchesFingerprint,
+  parseCantonNetworkId,
+  signHash,
+  signatureFromBase64,
+  signatureToBase64,
+  verifySignature,
+} from "./primitives";
+export {
   WIRE_DECIMALS,
   atomicToLedger,
   isValidAmount,
@@ -14,14 +24,6 @@ export {
   EXACT_SCHEME_ID,
   createCantonExactVerifier,
   decodePayloadTransfer,
-  fingerprintForPublicKey,
-  isCantonNetworkId,
-  matchesFingerprint,
-  parseCantonNetworkId,
-  signHash,
-  signatureFromBase64,
-  signatureToBase64,
-  verifySignature,
 } from "./canton-exact";
 export {
   MEMO_KEY,
