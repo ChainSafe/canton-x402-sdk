@@ -36,9 +36,10 @@ what a given facilitator accepts — the network id and the asset to pay in.
 Settlements land directly at your **Canton party** — the payout party of the
 project your API key belongs to. The payer transfers Amulet (CC) straight to
 it; the facilitator holds no balance, so there is nothing to withdraw. That
-relies on your payout party having a `TransferPreapproval`: to a party without
-one, Amulet delivers each payment as a transfer offer that the party has to
-accept before the CC is its own (see
+requires your payout party to hold a live `TransferPreapproval`. Without one,
+Amulet cannot pay it directly — the Token Standard turns the transfer into an
+offer the party must accept — so the facilitator **refuses** the payment rather
+than relaying one that lands somewhere the payer can still withdraw it (see
 [What settlement does](/facilitator#what-settlement-does)). Completed
 settlements show up on the Settlements page of the merchant dashboard.
 
