@@ -7,6 +7,7 @@ import {
   createCantonExactVerifier,
   createVerifierRegistry,
   decodePayloadTransfer,
+  DEFAULT_MAX_DECOMPRESSED_BYTES,
   decodePreparedTransaction,
   EXACT_SCHEME_ID,
   fingerprintForPublicKey,
@@ -564,13 +565,20 @@ describe("cantonExactVerifier", () => {
   it("reads preparedTransaction only as one gzip member within the caps", async () => {
     const { payload, requirements, protobuf, payerPublicKeys } = await buildSignedFixture();
     const bytes = Buffer.from(protobuf, "base64");
-    // The same transfer padded past the 64 KiB decompressed cap with an unknown
+    // The same transfer padded past the decompressed cap with an unknown
     // field (15, length-delimited); about 100 bytes gzipped. The decoder used to
     // skip that field, so the cap was the only thing that could refuse it — it
     // now refuses the unknown field itself, since the signing hash does not
     // cover one. Either way the payload is refused, and the caps themselves are
     // pinned directly in prepared-tx-codec.test.ts.
-    const pad = 70_000;
+    //
+    // Derived from the cap rather than written down. The literal here was
+    // calibrated against 64 KiB; raising the bound to 72 slid the padded
+    // transfer under it, the gunzip succeeded, and the unknown field was
+    // refused as invalid_prepared_transaction_structure instead. That the two
+    // paths answer differently is why this failed rather than quietly
+    // measuring the same rule twice.
+    const pad = DEFAULT_MAX_DECOMPRESSED_BYTES + 1024;
     const padded = Buffer.concat([bytes, Buffer.from([(15 << 3) | 2, 0x80 | (pad & 0x7f), 0x80 | ((pad >> 7) & 0x7f), pad >> 14]), Buffer.alloc(pad)]);
     expect(decodePreparedTransaction(padded.toString("base64"))).toBeNull();
     const overCap = gzipPreparedTransaction(padded);
