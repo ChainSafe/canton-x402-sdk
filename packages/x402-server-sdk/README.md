@@ -50,7 +50,7 @@ const sdk = await SDK.create({
 // 2. Construct the payer with your party key + the assets it supports.
 const payer = new CantonX402Payer({
   sdk,
-  key: { partyId: "payer::1220…", publicKey: "<base64>", privateKey: "<base64 seed>" },
+  key: { partyId: "payer::1220…", publicKey: "<base64>", privateKey: "<base64 32-byte seed or 64-byte secret key>" },
   network: net.network,
   registries: [
     // one entry per supported asset (Amulet here; add USDCx etc. with their registries)
