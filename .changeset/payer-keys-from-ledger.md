@@ -34,6 +34,14 @@ keys. The payload does not say which one signed, so any of them verifying is the
 party verifying. Passing a party's whole set is correct; passing none refuses
 the payment.
 
+**Standard base64, not base64url.** Core decodes a key with `atob`, which
+refuses `-` and `_`, while a JWKS serves its `x` as base64url. Roughly three
+keys in four contain a byte that the two spell differently, so passing `jwk.x`
+through unconverted refuses most payments — and refuses them *quietly*:
+`verifySignature` answers false rather than throwing, so an undecodable key is
+indistinguishable from a key that did not sign, and the payer is blamed for a
+bad signature. Convert before calling.
+
 The keys are NOT narrowed to the one whose fingerprint equals the party's `::`
 suffix. That suffix is the party's NAMESPACE fingerprint, equal to the signing
 key's only for a single-key party, so narrowing would refuse an honest payment

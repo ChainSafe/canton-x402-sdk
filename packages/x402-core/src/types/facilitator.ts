@@ -74,11 +74,14 @@ export interface SchemeVerifier {
    * a malformed payload is a refusal. Pure: replay, policy and settlement stay
    * with the caller.
    *
-   * `payerPublicKeys` are the payer party's PUBLIC keys, base64 Ed25519, which
-   * the CALLER reads from the ledger first — the payload carries none, and the
-   * payer is the transfer's sender ({@link decodePayloadTransfer}). A party may
-   * publish several and the payload does not say which signed, so any one
-   * verifying is the party verifying; none refuses the payment.
+   * `payerPublicKeys` are the payer party's PUBLIC keys, STANDARD base64
+   * Ed25519 — not base64url, which is what a JWKS `x` is: most keys spell
+   * differently in the two, and an undecodable one is silently just a key that
+   * did not sign. The CALLER reads them from the ledger first — the payload
+   * carries none, and the payer is the transfer's sender
+   * ({@link decodePayloadTransfer}). A party may publish several and the
+   * payload does not say which signed, so any one verifying is the party
+   * verifying; none refuses the payment.
    */
   verify(
     payload: X402PaymentPayload<unknown, unknown>,
