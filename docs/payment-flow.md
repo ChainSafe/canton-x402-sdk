@@ -45,7 +45,7 @@ server (step 4).
 
    The payment — the requirements it was built against as `accepted` (the
    `accepts[]` entry the payer chose), and the payload: `assetTransferMethod`,
-   `preparedTransaction`, `preparedTxHash`, `signature`, `publicKey`,
+   `preparedTransaction`, `preparedTxHash`, `signature`,
    `hashingSchemeVersion` — is JSON-encoded, base64'd into a
    `PAYMENT-SIGNATURE` header, and the request is retried. That header carries
    the prepared transaction, gzipped, with its disclosed contracts. The

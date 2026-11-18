@@ -50,7 +50,7 @@ const sdk = await SDK.create({
 // 2. Construct the payer with your party key + the assets it supports.
 const payer = new CantonX402Payer({
   sdk,
-  key: { partyId: "payer::1220…", publicKey: "<base64>", privateKey: "<base64 seed>" },
+  key: { partyId: "payer::1220…", privateKey: "<base64 seed>" },
   network: net.network,
   registries: [
     // one entry per supported asset (Amulet here; add USDCx etc. with their registries)
@@ -123,9 +123,9 @@ the requirements to verify against from it.
   `preparedTxHash` as hex);
 - assembles the payment: `accepted` (the requirements it answers, as the spec names
   them), and the payload (`assetTransferMethod: "transfer-factory"`, the prepared transaction gzipped with `gzipPreparedTransaction`,
-  required `publicKey`, and the `hashingSchemeVersion` prepare used)
-  **without executing** — facilitator derives fingerprint from `publicKey` (`fingerprintForPublicKey`; no `keyFingerprint` on the wire). It names no payer: the
-  facilitator takes the transfer's sender, and checks the key's fingerprint against it.
+  and the `hashingSchemeVersion` prepare used) **without executing**. It carries
+  no key and names no payer: the facilitator takes the transfer's sender and
+  reads that party's signing keys from the ledger itself.
 
 `CantonX402Payer` is stateless: double-settle is prevented by the facilitator (it
 rejects a reused memo, when the merchant quotes one) and by Canton itself: a

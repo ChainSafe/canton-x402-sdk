@@ -74,6 +74,7 @@ type CantonPaymentRequirements
 type CantonRequirementsExtra
 type CantonRequirementsExtraKey
 type CantonSupportedExtra
+type CantonVerifyContext
 type DecodedTransfer
 type DeploymentExtraSelector
 type DeploymentPreference

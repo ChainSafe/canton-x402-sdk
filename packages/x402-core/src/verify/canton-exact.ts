@@ -1,8 +1,9 @@
 // The canton-exact scheme verifier — scheme `exact` on a `canton:*` network.
 //
 // This file is the ORDER a payment is checked in. What each step checks
-// against lives elsewhere: Ed25519 verification and the Canton key-fingerprint
-// derivation in ./primitives, the binding to the merchant's quote in
+// against lives elsewhere: Ed25519 verification in ./primitives (the key
+// fingerprint is NOT used here any more — see step 7-8), the binding to the
+// merchant's quote in
 // ./transfer-binding, the factory and delivery rules in ./transfer-rules, and
 // the canton-payload shape guards in ../types. Pure and stateless — the
 // stateful guards (replay) and on-chain execution stay in the facilitator,
@@ -12,6 +13,7 @@ import type { NetworkId } from "../types/common";
 import { CantonPaymentInner, HashingSchemeVersion, isCantonPaymentInner } from "../types/payment";
 import { CantonPaymentRequirements, isCantonPaymentRequirements } from "../types/requirements";
 import type {
+  CantonVerifyContext,
   SchemeVerifier,
   VerifyInvalidReason,
   CantonExactExtensionReason,
@@ -33,9 +35,9 @@ import {
 } from "./transfer-rules";
 import {
   bytesToBase64,
-  fingerprintForPublicKey,
   PREPARED_TX_HASH,
   signatureFromBase64,
+  fingerprintForPublicKey,
   verifySignature,
 } from "./primitives";
 
@@ -114,37 +116,45 @@ const PROOF_FIELDS = ["preparedTransaction", "preparedTxHash", "signature"] as c
 /**
  * Steps 7-13: does the payer's own key prove this exact transaction?
  *
- * The key is well-formed and is the SENDER's, the hash and signature are
- * canonically encoded, the hashing scheme is one this verifier implements, the
- * hash is recomputed from the bytes rather than trusted, and the signature
- * holds against it. Refuses or passes; it reads nothing out for the caller.
+ * The hash and signature are canonically encoded, the hashing scheme is one
+ * this verifier implements, the hash is recomputed from the bytes rather than
+ * trusted, and the signature holds against a key the SENDER publishes. No key
+ * is checked here — the caller resolved them by party id, and that lookup is
+ * what makes them the sender's. Refuses or passes; it reads nothing out for
+ * the caller.
  *
  * EVERY REFUSAL HERE NAMES THE PAYER, where steps 1-6 name nobody: the payer is
  * the transfer's sender and is known by the time this runs. Tests pin the exact
  * key set of both shapes, so a check moved across that boundary changes the
  * wire response even though the rule is unchanged.
+ *
+ * On success it reports WHICH key verified, as the fingerprint a Canton
+ * submission names beside the signature in `partySignatures.signedBy`. Only
+ * the search below knows which of the party's keys that was, and recomputing
+ * it outside would be a second implementation of this check, free to disagree
+ * with this one. The fingerprint rather than the key because that is the whole
+ * of what a caller wants, and deriving it here keeps it beside the search.
  */
 async function checkProof(
   inner: CantonPaymentInner,
   payer: string,
   preparedBase64: string,
-): Promise<VerifyResponseInvalid | null> {
-  // 7. public key well-formed (32-byte Ed25519). Malformed key bytes are
-  //    indistinguishable from "no usable key" here → missing_public_key. A
-  //    key that is not one cannot have signed, so the spec's code is
-  //    signature_invalid.
-  let derivedFingerprint: string;
-  try {
-    derivedFingerprint = fingerprintForPublicKey(inner.publicKey);
-  } catch {
+  payerPublicKeys: readonly string[],
+): Promise<StageResult<{ signedBy: string }>> {
+  // 7-8. There is no key to check here any more. The payload carries none — the
+  //      spec's never did — and the ones the caller passes were read from the
+  //      ledger BY PARTY ID, so that lookup is what binds them to the sender and
+  //      there is nothing left for this verifier to re-derive. The fingerprint
+  //      check that used to live here existed because the key arrived inside the
+  //      payload, chosen by whoever sent it.
+  //
+  //      Deliberately NOT narrowed to the key whose fingerprint equals the
+  //      sender's `::` suffix: that suffix is the party's NAMESPACE fingerprint,
+  //      which equals the signing key's only for a single-key party. One
+  //      mid-rotation publishes two, and narrowing would refuse the honest
+  //      payment that the other one signed.
+  if (payerPublicKeys.length === 0) {
     return fail("invalid_exact_canton_signature_invalid", "missing_public_key", payer);
-  }
-  // 8. the key must be the sender's: its fingerprint must match the sender
-  //    party's `::<fingerprint>` suffix. Without this, any key could sign a
-  //    transfer that names another party as the sender.
-  const partySuffix = payer.split("::")[1];
-  if (!partySuffix || derivedFingerprint.toLowerCase() !== partySuffix.toLowerCase()) {
-    return fail("invalid_exact_canton_signature_invalid", "bad_fingerprint", payer);
   }
   // 9. Validate the prepared-transaction hash and signature encodings.
   //    `signature` is canonical base64, while `preparedTxHash` is canonical
@@ -181,13 +191,32 @@ async function checkProof(
     return fail("invalid_exact_canton_signature_invalid", "prepared_transaction_hash_mismatch", payer);
   }
 
-  // 13. Verify the payload's base64 signature against the trusted hash.
-  if (!verifySignature(computedHash, signatureHex, inner.publicKey)) {
+  // 13. Verify the payload's base64 signature against the trusted hash, under ANY
+  //     key the party publishes: the payload does not say which one signed, and
+  //     any of them verifying is the party verifying. `verifySignature` answers
+  //     false rather than throwing, so bytes that are not a usable key are simply
+  //     not the one that signed. `find`, not `some`: the key that verified is
+  //     the answer, not a by-product.
+  const signingKey = payerPublicKeys.find((key) => verifySignature(computedHash, signatureHex, key));
+  if (signingKey === undefined) {
     return fail("invalid_exact_canton_signature_invalid", "bad_signature", payer);
   }
 
-  return null;
+  return { signedBy: fingerprintForPublicKey(signingKey) };
 }
+
+/**
+ * What a stage of the pipeline hands back: the refusal that ended it, or what
+ * it proved for the next stage to read.
+ *
+ * Both stages below return one. `refused` is the discriminant rather than an
+ * inline `"isValid" in x`, which tests for the ABSENCE of a property at each
+ * call site — correct today, and quietly wrong the day a success type gains an
+ * `isValid` of its own.
+ */
+type StageResult<T extends object> = VerifyResponseInvalid | T;
+const refused = <T extends object>(result: StageResult<T>): result is VerifyResponseInvalid =>
+  "isValid" in result;
 
 /**
  * Steps 1-3: is this envelope one this verifier can read at all?
@@ -205,7 +234,7 @@ function checkEnvelope(
   networkId: NetworkId,
   payload: X402PaymentPayload<unknown, unknown>,
   requirements: X402PaymentRequirements<unknown>,
-): VerifyResponseInvalid | { inner: CantonPaymentInner; requirements: CantonPaymentRequirements } {
+): StageResult<{ inner: CantonPaymentInner; requirements: CantonPaymentRequirements }> {
   // 1. scheme — the requirements the payer chose (`accepted`) and the ones it
   //    is verified against must both name the one id the spec defines (Rule 1).
   //    A payment with no `accepted`, or a pre-spec envelope that carries the
@@ -229,14 +258,10 @@ function checkEnvelope(
   if (!isObj(payload.payload)) return fail("invalid_exact_canton_missing_proof", "internal_error");
   const raw = payload.payload;
   // Rule 2: a proof that is not there is missing_proof, one that is there but
-  // not well-formed is malformed_payload. The key is not in the spec's
-  // payload, but nothing can be checked without it, so its absence is a
-  // missing proof too. The checks keep the order they had, so
-  // `extensions.reason` stays what this verifier answered before: the key
-  // first, and an empty field left to the checks that refused it.
-  if (typeof raw.publicKey !== "string" || !raw.publicKey) {
-    return fail("invalid_exact_canton_missing_proof", "missing_public_key");
-  }
+  // not well-formed is malformed_payload. The payer's key is no longer among the
+  // fields checked here — the spec's payload never had one, and it now comes
+  // from the party's topology instead (#105), so its absence is the caller's to
+  // answer and not a malformed payload.
   if (PROOF_FIELDS.some((field) => typeof raw[field] !== "string")) {
     return fail("invalid_exact_canton_missing_proof", "internal_error");
   }
@@ -254,9 +279,15 @@ async function verifyCantonExact(
   networkId: NetworkId,
   payload: X402PaymentPayload<unknown, unknown>,
   requirements: X402PaymentRequirements<unknown>,
+  context: CantonVerifyContext,
 ): Promise<VerifyResponse> {
+  // Narrowed like the payload is, because `verify` answers rather than throws:
+  // a caller outside TypeScript can pass anything, and reading a field off it
+  // would crash where every other bad input is a refusal. No keys is already a
+  // refusal with its own reason, which is what garbage here amounts to.
+  const payerPublicKeys = Array.isArray(context?.payerPublicKeys) ? context.payerPublicKeys : [];
   const envelope = checkEnvelope(networkId, payload, requirements);
-  if ("isValid" in envelope) return envelope;
+  if (refused(envelope)) return envelope;
   // Bound to new names: the narrowings `checkEnvelope` performed do not reach
   // back across the call, so the rest of the pipeline reads these.
   const { inner, requirements: quoted } = envelope;
@@ -287,8 +318,8 @@ async function verifyCantonExact(
   }
   const payer = transfer.sender;
   // 7-13. the payer's own key must prove this exact transaction.
-  const proof = await checkProof(inner, payer, preparedBase64);
-  if (proof) return proof;
+  const proof = await checkProof(inner, payer, preparedBase64, payerPublicKeys);
+  if (refused(proof)) return proof;
   // 14. The signed transfer must actually move what the quote demands.
   //     This is the payload's one binding to the quote: the signature
   //     covers the prepared transaction, so checking receiver/instrument/amount
@@ -323,7 +354,15 @@ async function verifyCantonExact(
   if (isTransferExpired(transfer.executeBeforeMicros)) {
     return fail("invalid_exact_canton_expired", "transfer_expired", payer);
   }
-  return { isValid: true, payer };
+  // `signedBy` is the fingerprint of the key that verified, which is what a
+  // Canton submission must name beside this signature. Core found it in step
+  // 13; handing it back saves the caller re-deriving it, and keeps one answer
+  // to "which key signed" rather than two that can drift.
+  return {
+    isValid: true,
+    payer,
+    extensions: { signedBy: proof.signedBy },
+  };
 }
 
 /**
@@ -346,10 +385,11 @@ export function decodePayloadTransfer(preparedTransaction: string): DecodedTrans
  *
  * Accepts that scheme id and that network id only; there is no alias set.
  */
-export function createCantonExactVerifier(networkId: NetworkId): SchemeVerifier {
+export function createCantonExactVerifier(networkId: NetworkId): SchemeVerifier<CantonVerifyContext> {
   return {
     schemeId: EXACT_SCHEME_ID,
     networkId,
-    verify: (payload, requirements) => verifyCantonExact(networkId, payload, requirements),
+    verify: (payload, requirements, context) =>
+      verifyCantonExact(networkId, payload, requirements, context),
   };
 }

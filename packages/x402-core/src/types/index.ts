@@ -77,6 +77,7 @@ export {
 export type {
   CantonExactExtensionReason,
   CantonSupportedExtra,
+  CantonVerifyContext,
   SchemeVerifier,
   SettleErrorReason,
   SettleRequest,

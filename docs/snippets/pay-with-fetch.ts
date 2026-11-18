@@ -34,7 +34,6 @@ const payer = new CantonX402Payer({
   sdk,
   key: {
     partyId: process.env.PAYER_PARTY_ID!,
-    publicKey: process.env.PAYER_PUBLIC_KEY!,
     privateKey: process.env.PAYER_PRIVATE_KEY!,
   },
   network: net.network,

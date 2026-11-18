@@ -39,6 +39,7 @@ export type {
   PaymentExtensions,
   ResourceInfo,
   Scheme,
+  CantonVerifyContext,
   SchemeVerifier,
   SettleErrorReason,
   SettleRequest,

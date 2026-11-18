@@ -34,8 +34,14 @@ export function base64ToBytes(b64: string): Uint8Array {
 
 /**
  * Canton key fingerprint for a base64 Ed25519 public key:
- * `1220` + hex(SHA-256(0x0000000c ‖ pubkey)). Must equal the payer party's
- * `::<fingerprint>` suffix. Ported from the facilitator (parity-tested).
+ * `1220` + hex(SHA-256(0x0000000c ‖ pubkey)). Ported from the facilitator
+ * (parity-tested), and checked against a live party's JWKS.
+ *
+ * It equals a party's `::<fingerprint>` suffix only when that key IS the party's
+ * namespace key, which holds for a single-key external party and not in general:
+ * Canton lets a party publish up to 20 signing keys with a threshold, and the
+ * suffix names the namespace. So this identifies a key; it does not decide
+ * whether a key may sign for a party.
  */
 export function fingerprintForPublicKey(publicKeyBase64: string): string {
   const pk = base64ToBytes(publicKeyBase64);

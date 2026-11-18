@@ -1,0 +1,11 @@
+# Diff TypeScript as text even when a blob on one side contains a byte git reads
+# as binary. `verify/registry.ts` carried a literal NUL as its map-key delimiter,
+# which made git, GitHub and ripgrep classify the file as binary: GitHub rendered
+# every change to it as "binary file not shown", and text searches skipped it in
+# silence. The byte is now written as the escape `\x00`, but a diff is binary if
+# EITHER side is, so without this the file stays unreviewable in any PR whose
+# base still holds the old blob.
+*.ts diff
+*.tsx diff
+*.mts diff
+*.cts diff

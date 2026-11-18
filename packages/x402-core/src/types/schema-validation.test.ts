@@ -26,7 +26,6 @@ const inner: CantonPaymentInner = {
     preparedTransaction: "cHJlcGFyZWQ=",
   preparedTxHash: "deadbeef",
   signature: "cafe",
-  publicKey: "cHVibGljS2V5",
   hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
 };
 
@@ -60,14 +59,14 @@ describe("schema-first guards + parsers", () => {
   });
 
   it("parse throws a structured error naming the failing field", () => {
-    const { publicKey: _omit, ...noPublicKey } = inner;
-    expect(() => parseCantonPaymentInner(noPublicKey)).toThrow(ValiError);
+    const { signature: _omit, ...noSignature } = inner;
+    expect(() => parseCantonPaymentInner(noSignature)).toThrow(ValiError);
     try {
-      parseCantonPaymentInner(noPublicKey);
+      parseCantonPaymentInner(noSignature);
     } catch (err) {
       const issues = (err as ValiError<typeof import("../types/payment").CantonPaymentInnerSchema>).issues;
       const path = issues[0]?.path?.map((p) => p.key).join(".");
-      expect(path).toBe("publicKey");
+      expect(path).toBe("signature");
     }
   });
 
