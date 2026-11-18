@@ -51,18 +51,15 @@ the object *is* the enumerable list of codes, and the **whole-response
 validators with no `is*` twin**, `VerifyResponseSchema`, `SettleResponseSchema`
 and `SupportedResponseSchema`.
 
-This keeps valibot out of the types a caller writes against: `SettleResponse`,
-`CantonPaymentRequirements` and the rest are now plain structural types in the
-published `.d.ts`, not `v.InferOutput<...>` of a schema. Core also stops
-*importing* valibot in its declarations — it bundles valibot but never depended
-on it, so until now every published type resolved to `any` for anyone with
-`skipLibCheck` on. `dts: { resolve: ["valibot"] }` inlines the types the way
-`noExternal` already inlined the code.
+Core's declarations no longer import valibot. It was only a devDependency, so
+for anyone without it every schema-derived type (`SettleResponse`,
+`CantonPaymentRequirements` and the rest) resolved to `any` under
+`skipLibCheck`. `dts: { resolve: ["valibot"] }` now inlines valibot's types
+the way `noExternal` already inlines its code.
 
-It does not get valibot out of the package. The five schema objects above are
-valibot values and carry valibot's own `PicklistSchema`, `VariantSchema` and
-`ObjectSchema` types, so a valibot major can still be breaking for those five —
-and only those five.
+That does not take valibot out of the API. Those types are still inferred from
+valibot schemas, and the five schema objects above are valibot values, so a
+valibot major in core can still be breaking for both.
 
 **The `parse*` functions** — `parseCantonPaymentInner`,
 `parseCantonPaymentPayload`, `parseCantonPaymentRequirements`,
