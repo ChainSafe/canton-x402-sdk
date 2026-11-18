@@ -28,7 +28,7 @@
 
 import { decodePreparedTransaction as decodeVendorPreparedTransaction } from "@canton-network/core-tx-visualizer";
 import { canonicalNodeId } from "./prepared-tx-guard";
-import { recordField } from "./record-fields";
+import { recordField, sameTemplate } from "./record-fields";
 
 /**
  * The transfer a prepared transaction authorizes, decoded out of the opaque
@@ -62,7 +62,7 @@ export interface DecodedTransfer {
    * plus `::<protocol-version>-<serial>`. Both parts are the synchronizer's
    * own — the protocol version is fixed when it is initialised, the serial
    * steps on a logical upgrade — not anything a participant picks.
-   * {@link synchronizerMatches} takes either.
+   * {@link isSameSynchronizer} takes either.
    */
   synchronizerId?: string;
   /**
@@ -214,7 +214,7 @@ type VendorInputContract = { contract: { oneofKind?: string; v1?: VendorCreate }
  * Scalars read AT their declared type.
  *
  * One reader that took party, text and numeric alike could not tell a Party
- * from a Text, so a record written as `[party("Amulet"), text("DSO::...")]`
+ * from a Text, so a record written as `[text("DSO::..."), party("Amulet")]`
  * read back as a well-formed instrument whose admin was the DSO. The ledger
  * binds `InstrumentId` as `{admin: Party, id: Text}` and refuses that blob;
  * reading each field at its declared type refuses it here instead.
@@ -227,6 +227,11 @@ function partyOf(value: VendorValue | undefined): string | undefined {
 function textOf(value: VendorValue | undefined): string | undefined {
   const sum = value?.sum;
   return sum?.oneofKind === "text" ? (sum.text as string) : undefined;
+}
+
+function numericOf(value: VendorValue | undefined): string | undefined {
+  const sum = value?.sum;
+  return sum?.oneofKind === "numeric" ? (sum.numeric as string) : undefined;
 }
 
 /**
@@ -245,10 +250,6 @@ function anyScalar(value: VendorValue | undefined): string | undefined {
   return undefined;
 }
 
-function numericOf(value: VendorValue | undefined): string | undefined {
-  const sum = value?.sum;
-  return sum?.oneofKind === "numeric" ? (sum.numeric as string) : undefined;
-}
 
 /**
  * A record's fields — refusing one whose labels repeat.
@@ -299,27 +300,6 @@ function textMap(value: VendorValue | undefined): Map<string, VendorValue | unde
 }
 
 /**
- * Read the TransferFactory_Transfer argument record `{ expectedAdmin, transfer }`.
- *
- * `expectedAdmin` names the FACTORY's admin — the Token Standard has the
- * factory validate it against its own — while `instrumentId.admin` names the
- * registry that administers the INSTRUMENT. Different things, and the standard
- * does not require them equal.
- *
- * We require it anyway. `TransferFactoryView.admin` is "the party representing
- * the registry app that administers the instruments for which this transfer
- * factory can be used", so for a well-formed registry they are one party, and
- * the real Canton Coin payment carries the DSO in both. The factory check in
- * `canton-exact.ts` already rests on the same assumption, demanding the
- * exercised contract be signed by `instrumentId.admin`. A registry that split
- * the two parties would fail both checks together, which is the one thing to
- * look at first if an honest non-Amulet transfer is ever refused here.
- *
- * What it buys: `expectedAdmin` is what the ledger guards on, so pinning it to
- * an admin a facilitator has pinned to the real DSO means a transfer aimed at
- * another issuer's factory is refused at verify rather than at execution.
- */
-/**
  * The money-carrying fields of a Token Standard `Transfer` record.
  *
  * Shared, because the same record appears twice in one transaction: once as
@@ -351,6 +331,27 @@ function readDelivered(
   return readTransferRecord(transfer) ?? undefined;
 }
 
+/**
+ * Read the TransferFactory_Transfer argument record `{ expectedAdmin, transfer }`.
+ *
+ * `expectedAdmin` names the FACTORY's admin — the Token Standard has the
+ * factory validate it against its own — while `instrumentId.admin` names the
+ * registry that administers the INSTRUMENT. Different things, and the standard
+ * does not require them equal.
+ *
+ * We require it anyway. `TransferFactoryView.admin` is "the party representing
+ * the registry app that administers the instruments for which this transfer
+ * factory can be used", so for a well-formed registry they are one party, and
+ * the real Canton Coin payment carries the DSO in both. `factoryViolation` in
+ * `transfer-rules.ts` deliberately checks no signatory, so this equality is the
+ * only place the two admins are tied together. A registry that split them would
+ * be refused right here, which is the one thing to look at first if an honest
+ * non-Amulet transfer is ever rejected.
+ *
+ * What it buys: `expectedAdmin` is what the ledger guards on, so pinning it to
+ * an admin a facilitator has pinned to the real DSO means a transfer aimed at
+ * another issuer's factory is refused at verify rather than at execution.
+ */
 function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | null {
   const arg = fieldsOf(chosenValue);
   if (!arg) return null;
@@ -377,28 +378,13 @@ function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | n
   return { sender, receiver, amount, instrumentId: { id, admin }, executeBeforeMicros, memo };
 }
 
-/**
- * Two template identifiers naming the same Daml template.
- *
- * The package id is NOT compared. An exercise's `template_id` names the package
- * the choice was resolved against, which the payer's participant picks by
- * package NAME; the input contract's names the package its contract was created
- * under. Canton documents that the two differ once a contract has been upgraded
- * or downgraded, so requiring them equal would refuse honest payments for the
- * whole window of a Splice rollout. Name, module and entity are what an upgrade
- * preserves, and `resolveExercised` pairs this with the package name.
- */
-function sameTemplate(a: VendorIdentifier | undefined, b: VendorIdentifier | undefined): boolean {
-  if (!a || !b) return false;
-  return a.moduleName === b.moduleName && a.entityName === b.entityName;
-}
 
 /**
  * A record's leaves as strings, in declaration order with the labels it
  * carried.
  *
  * Only party, text and numeric read as a value. A record, a list, a timestamp
- * — anything {@link str} does not render — reads as a field with no value,
+ * — anything {@link anyScalar} does not render — reads as a field with no value,
  * which keeps its position so a reader matching by index still lines up, but
  * does NOT distinguish "not a scalar" from "a scalar of a kind not rendered".
  * A reader that needs one of those has to decode it itself.
@@ -429,9 +415,6 @@ function scalarFields(value: VendorValue | undefined): readonly { label: string;
  * package name, same module, same entity — because a transaction that says two
  * different things about one contract is not one to read further. They need not
  * agree on the package id; see `sameTemplate`.
- */
-/**
- * The disclosed contract an exercise targets, whichever exercise it is.
  *
  * Shared by the root transfer and its consequences: the same question — which
  * input contract is this, and do the two agree about what it is — and the same
@@ -476,6 +459,146 @@ function bodyOf(node: VendorNode): { kind: string; body: Record<string, unknown>
 }
 
 /**
+ * The tree under the roots: what the transfer exercised, and what its choice
+ * produced.
+ *
+ * THROWS rather than returning a reason, and that is load-bearing. Every
+ * refusal in here reaches a caller only through `decodePreparedTransaction`'s
+ * own `catch`, which turns the lot into `null` — the single answer its callers
+ * handle, and `decodePayloadTransfer` calls it with no guard in front. So this
+ * must be called from INSIDE that try. Thirty-one tests fail if it is not.
+ */
+function walkNodes(
+  txn: NonNullable<Vendor["transaction"]>,
+  inputContracts: readonly VendorInputContract[],
+): {
+  transferArg: VendorValue | undefined;
+  exercised: DecodedTransfer["exercisedContract"];
+  consequences: NonNullable<DecodedTransfer["consequences"]>[number][];
+  creates: NonNullable<DecodedTransfer["creates"]>[number][];
+} {
+  // Canton parses node ids as integers and refuses nodes the roots cannot
+  // reach, and the signed hash covers only the tree under the roots. So read
+  // exactly that tree, with ids spelled the one way Canton reads them.
+  const nodes = new Map<string, VendorNode>();
+  for (const node of txn.nodes) {
+    const nodeId = canonicalNodeId(node.nodeId);
+    if (nodes.has(nodeId)) throw new Error(`node ${nodeId} is repeated`);
+    nodes.set(nodeId, node);
+  }
+
+  const reached = new Set<string>();
+  const stack: { nodeId: string; rolledBack: boolean }[] = [];
+  const reach = (ids: readonly string[], rolledBack: boolean): void => {
+    // Pushed in reverse so nodes are visited in the order the tree lists them.
+    for (const nodeId of [...ids].reverse()) {
+      if (reached.has(nodeId)) throw new Error(`node ${nodeId} is referenced twice`);
+      reached.add(nodeId);
+      stack.push({ nodeId, rolledBack });
+    }
+  };
+  // ONE ROOT, AND IT IS THE TRANSFER. A payment is a single command, so its
+  // transaction is a single tree whose root is the transfer being paid for.
+  // Allowing the transfer to sit beside or beneath anything else would let a
+  // payer attach legs the facilitator relays, and pays the traffic fee for,
+  // without ever having verified them. Consequences of the transfer — the
+  // children its own choice produces — are not that, and still decode.
+  if (txn.roots.length !== 1) {
+    throw new Error(`transaction declares ${txn.roots.length} roots, expected 1`);
+  }
+  reach(txn.roots, false);
+
+  let transferArg: VendorValue | undefined; // the root TransferFactory_Transfer's chosen_value
+  let exercised: DecodedTransfer["exercisedContract"];
+  const consequences: NonNullable<DecodedTransfer["consequences"]>[number][] = [];
+  const creates: NonNullable<DecodedTransfer["creates"]>[number][] = [];
+  for (let next = stack.pop(); next; next = stack.pop()) {
+    const node = nodes.get(next.nodeId);
+    if (!node) throw new Error(`node ${next.nodeId} is missing`);
+    const body = bodyOf(node);
+    if (!body) continue;
+    if (body.kind === "rollback") {
+      reach((body.body as { children: string[] }).children, true);
+      continue;
+    }
+    if (body.kind === "create") {
+      // A rolled-back create left nothing behind, as a rolled-back
+      // consequence happened to nobody.
+      if (!next.rolledBack) {
+        const made = body.body as {
+          contractId?: string;
+          templateId?: VendorIdentifier;
+          signatories?: string[];
+        };
+        if (made.templateId) {
+          creates.push({
+            contractId: made.contractId ?? "",
+            templateId: made.templateId,
+            signatories: made.signatories ?? [],
+          });
+        }
+      }
+      continue;
+    }
+    if (body.kind !== "exercise") continue;
+
+    const exercise = body.body as {
+      choiceId: string;
+      chosenValue?: VendorValue;
+      children: string[];
+      contractId?: string;
+      packageName?: string;
+      templateId?: VendorIdentifier;
+      interfaceId?: VendorIdentifier;
+      consuming?: boolean;
+    };
+    reach(exercise.children, next.rolledBack);
+    if (exercise.choiceId !== TRANSFER_CHOICE) {
+      // A rolled-back consequence happened to nobody, so it is not reported
+      // as one; the node still has to be reachable, which `reach` above did.
+      if (!next.rolledBack && exercise.templateId) {
+        const resolved = resolveTarget(exercise, inputContracts);
+        const delivered = readDelivered(exercise.chosenValue);
+        consequences.push({
+          choiceId: exercise.choiceId,
+          templateId: exercise.templateId,
+          consuming: exercise.consuming === true,
+          ...(delivered === undefined ? {} : { delivers: delivered }),
+          chosenArgument: scalarFields(exercise.chosenValue),
+          ...(resolved === undefined
+            ? {}
+            : {
+                target: {
+                  contractId: resolved.create.contractId,
+                  signatories: resolved.create.signatories,
+                  argument: scalarFields(resolved.create.argument as VendorValue | undefined),
+                },
+              }),
+        });
+      }
+      continue;
+    }
+    // A transfer under a rollback node moves nothing.
+    if (next.rolledBack) throw new Error("transfer under a rollback node");
+    // The transfer IS the root, so there is exactly one of it. Canton runs
+    // every transfer in the tree; reporting one of several would describe a
+    // payment the caller never made, binding the requirements to one leg and
+    // letting the rest through unchecked.
+    // Against the raw root reference, as the walker compared it: ids are
+    // canonicalised where a node is DEFINED, so a non-canonical reference
+    // resolves to no node and is refused as missing rather than here.
+    if (next.nodeId !== txn.roots[0]) {
+      throw new Error("the transfer is not the transaction's root");
+    }
+    transferArg = exercise.chosenValue;
+    exercised = resolveExercised(exercise, inputContracts);
+  }
+  if (reached.size !== nodes.size) throw new Error("a node is not reachable from the roots");
+
+  return { transferArg, exercised, consequences, creates };
+}
+
+/**
  * Decode the `preparedTransaction` blob (base64) into the transfer it authorizes,
  * or `null` if it can't be decoded or contains no `TransferFactory_Transfer`
  * exercise. Never throws — an undecodable blob is treated as "no proof of a
@@ -499,123 +622,10 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
     const synchronizerId = decoded.metadata?.synchronizerId || undefined;
     const actAs = decoded.metadata?.submitterInfo?.actAs ?? [];
 
-    // Canton parses node ids as integers and refuses nodes the roots cannot
-    // reach, and the signed hash covers only the tree under the roots. So read
-    // exactly that tree, with ids spelled the one way Canton reads them.
-    const nodes = new Map<string, VendorNode>();
-    for (const node of txn.nodes) {
-      const nodeId = canonicalNodeId(node.nodeId);
-      if (nodes.has(nodeId)) throw new Error(`node ${nodeId} is repeated`);
-      nodes.set(nodeId, node);
-    }
-
-    const reached = new Set<string>();
-    const stack: { nodeId: string; rolledBack: boolean }[] = [];
-    const reach = (ids: readonly string[], rolledBack: boolean): void => {
-      // Pushed in reverse so nodes are visited in the order the tree lists them.
-      for (const nodeId of [...ids].reverse()) {
-        if (reached.has(nodeId)) throw new Error(`node ${nodeId} is referenced twice`);
-        reached.add(nodeId);
-        stack.push({ nodeId, rolledBack });
-      }
-    };
-    // ONE ROOT, AND IT IS THE TRANSFER. A payment is a single command, so its
-    // transaction is a single tree whose root is the transfer being paid for.
-    // Allowing the transfer to sit beside or beneath anything else would let a
-    // payer attach legs the facilitator relays, and pays the traffic fee for,
-    // without ever having verified them. Consequences of the transfer — the
-    // children its own choice produces — are not that, and still decode.
-    if (txn.roots.length !== 1) {
-      throw new Error(`transaction declares ${txn.roots.length} roots, expected 1`);
-    }
-    reach(txn.roots, false);
-
-    let transferArg: VendorValue | undefined; // the root TransferFactory_Transfer's chosen_value
-    let exercised: DecodedTransfer["exercisedContract"];
-    const consequences: NonNullable<DecodedTransfer["consequences"]>[number][] = [];
-    const creates: NonNullable<DecodedTransfer["creates"]>[number][] = [];
-    for (let next = stack.pop(); next; next = stack.pop()) {
-      const node = nodes.get(next.nodeId);
-      if (!node) throw new Error(`node ${next.nodeId} is missing`);
-      const body = bodyOf(node);
-      if (!body) continue;
-      if (body.kind === "rollback") {
-        reach((body.body as { children: string[] }).children, true);
-        continue;
-      }
-      if (body.kind === "create") {
-        // A rolled-back create left nothing behind, as a rolled-back
-        // consequence happened to nobody.
-        if (!next.rolledBack) {
-          const made = body.body as {
-            contractId?: string;
-            templateId?: VendorIdentifier;
-            signatories?: string[];
-          };
-          if (made.templateId) {
-            creates.push({
-              contractId: made.contractId ?? "",
-              templateId: made.templateId,
-              signatories: made.signatories ?? [],
-            });
-          }
-        }
-        continue;
-      }
-      if (body.kind !== "exercise") continue;
-
-      const exercise = body.body as {
-        choiceId: string;
-        chosenValue?: VendorValue;
-        children: string[];
-        contractId?: string;
-        packageName?: string;
-        templateId?: VendorIdentifier;
-        interfaceId?: VendorIdentifier;
-        consuming?: boolean;
-      };
-      reach(exercise.children, next.rolledBack);
-      if (exercise.choiceId !== TRANSFER_CHOICE) {
-        // A rolled-back consequence happened to nobody, so it is not reported
-        // as one; the node still has to be reachable, which `reach` above did.
-        if (!next.rolledBack && exercise.templateId) {
-          const resolved = resolveTarget(exercise, decoded.metadata?.inputContracts ?? []);
-          const delivered = readDelivered(exercise.chosenValue);
-          consequences.push({
-            choiceId: exercise.choiceId,
-            templateId: exercise.templateId,
-            consuming: exercise.consuming === true,
-            ...(delivered === undefined ? {} : { delivers: delivered }),
-            chosenArgument: scalarFields(exercise.chosenValue),
-            ...(resolved === undefined
-              ? {}
-              : {
-                  target: {
-                    contractId: resolved.create.contractId,
-                    signatories: resolved.create.signatories,
-                    argument: scalarFields(resolved.create.argument as VendorValue | undefined),
-                  },
-                }),
-          });
-        }
-        continue;
-      }
-      // A transfer under a rollback node moves nothing.
-      if (next.rolledBack) throw new Error("transfer under a rollback node");
-      // The transfer IS the root, so there is exactly one of it. Canton runs
-      // every transfer in the tree; reporting one of several would describe a
-      // payment the caller never made, binding the requirements to one leg and
-      // letting the rest through unchecked.
-      // Against the raw root reference, as the walker compared it: ids are
-      // canonicalised where a node is DEFINED, so a non-canonical reference
-      // resolves to no node and is refused as missing rather than here.
-      if (next.nodeId !== txn.roots[0]) {
-        throw new Error("the transfer is not the transaction's root");
-      }
-      transferArg = exercise.chosenValue;
-      exercised = resolveExercised(exercise, decoded.metadata?.inputContracts ?? []);
-    }
-    if (reached.size !== nodes.size) throw new Error("a node is not reachable from the roots");
+    const { transferArg, exercised, consequences, creates } = walkNodes(
+      txn,
+      decoded.metadata?.inputContracts ?? [],
+    );
 
     const transfer = transferArg ? readTransfer(transferArg) : null;
     if (!transfer) return null;
