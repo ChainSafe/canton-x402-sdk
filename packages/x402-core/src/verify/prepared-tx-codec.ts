@@ -10,6 +10,9 @@
 //    decompressed-size cap (RECOMMENDED ~64 KiB). Never allocate the output up
 //    front from a declared size."
 //
+// The decompressed cap here is 72 KiB rather than that recommended 64; see
+// DEFAULT_MAX_DECOMPRESSED_BYTES for the measurement that moved it.
+//
 // The bytes come from the client before anything else is checked, so decoding
 // them is attack surface. gunzip is not enough: it decodes concatenated members
 // and drops trailing bytes without complaint, which are two of the shapes the
@@ -25,8 +28,18 @@ import { crc32, gzipSync, inflateRawSync, type ZlibOptions } from "node:zlib";
 
 /** The spec's recommended cap on the gzip member, in bytes. */
 export const DEFAULT_MAX_COMPRESSED_BYTES = 8 * 1024;
-/** The spec's recommended cap on the decompressed prepared transaction, in bytes. */
-export const DEFAULT_MAX_DECOMPRESSED_BYTES = 64 * 1024;
+/**
+ * The cap on the decompressed prepared transaction, in bytes. The spec
+ * recommends ~64 KiB; this is 72, which still meets what it requires — that
+ * both bounds exist and abort incrementally.
+ *
+ * Canton 3.7 grew a prepared transaction's fixed overhead to about 25 KiB, so
+ * a payer spending eight holdings inflates to 66213 B and 64 KiB refused it by
+ * 677. Not more than 72, because {@link DEFAULT_MAX_COMPRESSED_BYTES} binds
+ * next — nine holdings gzip past 8 KiB — and this is the only bound a
+ * decompression bomb meets: gzip reaches 1026:1.
+ */
+export const DEFAULT_MAX_DECOMPRESSED_BYTES = 72 * 1024;
 
 /**
  * The two bounds. The spec only recommends their values, so they can be set,
