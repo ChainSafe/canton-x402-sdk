@@ -18,7 +18,6 @@ const toB64 = (b: Uint8Array) => Buffer.from(b).toString("base64");
 const publicKeyB64 = toB64(getPublicKey(seed));
 const key: CantonPartyKey = {
   partyId: `payer::${fingerprintForPublicKey(publicKeyB64)}`,
-  publicKey: publicKeyB64,
   privateKey: toB64(seed),
 };
 
@@ -98,7 +97,9 @@ describe("CantonX402Payer.authorize", () => {
     expect(result).not.toHaveProperty("scheme");
     expect(result).not.toHaveProperty("network");
     expect(inner.assetTransferMethod).toBe("transfer-factory");
-    expect(inner.publicKey).toBe(publicKeyB64);
+    // No key in the payload: a facilitator reads the payer party's own from
+    // the ledger (#105), so there is nothing here for it to disagree with.
+    expect(inner).not.toHaveProperty("publicKey");
     // The spec's payload names no payer (it is the transfer's sender, Rule 8),
     // and has no requirementsHash.
     for (const field of ["payer", "requirementsHash"]) expect(inner).not.toHaveProperty(field);

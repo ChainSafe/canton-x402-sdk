@@ -122,7 +122,6 @@ export async function buildX402Fetch(): Promise<FetchLike> {
     sdk,
     key: {
       partyId: req(process.env.PAYER_PARTY_ID, "PAYER_PARTY_ID"),
-      publicKey: req(process.env.PAYER_PUBLIC_KEY, "PAYER_PUBLIC_KEY"),
       privateKey: req(process.env.PAYER_PRIVATE_KEY, "PAYER_PRIVATE_KEY"),
     },
     network: net.network,

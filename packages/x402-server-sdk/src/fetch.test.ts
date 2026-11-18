@@ -31,7 +31,6 @@ const payload = {
     preparedTransaction: "cHJlcA==",
     preparedTxHash: "deadbeef",
     signature: "cafe",
-    publicKey: "cGs=",
     hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
   },
 } as unknown as CantonPaymentPayload;

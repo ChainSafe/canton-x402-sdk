@@ -20,9 +20,11 @@ import type { PaymentContext, X402Payer } from "./payer.js";
 export interface CantonPartyKey {
   /** Party ID: `<hint>::<fingerprint>`. */
   partyId: string;
-  /** Base64 32-byte Ed25519 public key. */
-  publicKey: string;
-  /** Base64 32-byte Ed25519 seed (private). */
+  /**
+   * Base64 32-byte Ed25519 seed (private). No public key beside it: the payload
+   * stopped carrying one (#105), and a facilitator now reads the party's keys
+   * from the ledger, so nothing here needs it.
+   */
   privateKey: string;
 }
 
@@ -148,7 +150,6 @@ export class CantonX402Payer implements X402Payer {
         preparedTransaction: gzipPreparedTransaction(Buffer.from(response.preparedTransaction, "base64")),
         preparedTxHash,
         signature,
-        publicKey: key.publicKey,
         // Must be exactly what prepare used — the signature is bound to a hash
         // computed with this version, so the facilitator's execute must match it.
         hashingSchemeVersion: response.hashingSchemeVersion,

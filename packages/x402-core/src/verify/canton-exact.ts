@@ -1,8 +1,9 @@
 // The canton-exact scheme verifier — scheme `exact` on a `canton:*` network.
 //
 // This file is the ORDER a payment is checked in. What each step checks
-// against lives elsewhere: Ed25519 verification and the Canton key-fingerprint
-// derivation in ./primitives, the binding to the merchant's quote in
+// against lives elsewhere: Ed25519 verification in ./primitives (the key
+// fingerprint is NOT used here any more — see step 7-8), the binding to the
+// merchant's quote in
 // ./transfer-binding, the factory and delivery rules in ./transfer-rules, and
 // the canton-payload shape guards in ../types. Pure and stateless — the
 // stateful guards (replay) and on-chain execution stay in the facilitator,
@@ -33,7 +34,6 @@ import {
 } from "./transfer-rules";
 import {
   bytesToBase64,
-  fingerprintForPublicKey,
   PREPARED_TX_HASH,
   signatureFromBase64,
   verifySignature,
@@ -128,23 +128,22 @@ async function checkProof(
   inner: CantonPaymentInner,
   payer: string,
   preparedBase64: string,
+  payerPublicKeys: readonly string[],
 ): Promise<VerifyResponseInvalid | null> {
-  // 7. public key well-formed (32-byte Ed25519). Malformed key bytes are
-  //    indistinguishable from "no usable key" here → missing_public_key. A
-  //    key that is not one cannot have signed, so the spec's code is
-  //    signature_invalid.
-  let derivedFingerprint: string;
-  try {
-    derivedFingerprint = fingerprintForPublicKey(inner.publicKey);
-  } catch {
+  // 7-8. There is no key to check here any more. The payload carries none — the
+  //      spec's never did — and the ones the caller passes were read from the
+  //      ledger BY PARTY ID, so that lookup is what binds them to the sender and
+  //      there is nothing left for this verifier to re-derive. The fingerprint
+  //      check that used to live here existed because the key arrived inside the
+  //      payload, chosen by whoever sent it.
+  //
+  //      Deliberately NOT narrowed to the key whose fingerprint equals the
+  //      sender's `::` suffix: that suffix is the party's NAMESPACE fingerprint,
+  //      which equals the signing key's only for a single-key party. One
+  //      mid-rotation publishes two, and narrowing would refuse the honest
+  //      payment that the other one signed.
+  if (payerPublicKeys.length === 0) {
     return fail("invalid_exact_canton_signature_invalid", "missing_public_key", payer);
-  }
-  // 8. the key must be the sender's: its fingerprint must match the sender
-  //    party's `::<fingerprint>` suffix. Without this, any key could sign a
-  //    transfer that names another party as the sender.
-  const partySuffix = payer.split("::")[1];
-  if (!partySuffix || derivedFingerprint.toLowerCase() !== partySuffix.toLowerCase()) {
-    return fail("invalid_exact_canton_signature_invalid", "bad_fingerprint", payer);
   }
   // 9. Validate the prepared-transaction hash and signature encodings.
   //    `signature` is canonical base64, while `preparedTxHash` is canonical
@@ -181,8 +180,12 @@ async function checkProof(
     return fail("invalid_exact_canton_signature_invalid", "prepared_transaction_hash_mismatch", payer);
   }
 
-  // 13. Verify the payload's base64 signature against the trusted hash.
-  if (!verifySignature(computedHash, signatureHex, inner.publicKey)) {
+  // 13. Verify the payload's base64 signature against the trusted hash, under ANY
+  //     key the party publishes: the payload does not say which one signed, and
+  //     any of them verifying is the party verifying. `verifySignature` answers
+  //     false rather than throwing, so bytes that are not a usable key are simply
+  //     not the one that signed.
+  if (!payerPublicKeys.some((key) => verifySignature(computedHash, signatureHex, key))) {
     return fail("invalid_exact_canton_signature_invalid", "bad_signature", payer);
   }
 
@@ -229,14 +232,10 @@ function checkEnvelope(
   if (!isObj(payload.payload)) return fail("invalid_exact_canton_missing_proof", "internal_error");
   const raw = payload.payload;
   // Rule 2: a proof that is not there is missing_proof, one that is there but
-  // not well-formed is malformed_payload. The key is not in the spec's
-  // payload, but nothing can be checked without it, so its absence is a
-  // missing proof too. The checks keep the order they had, so
-  // `extensions.reason` stays what this verifier answered before: the key
-  // first, and an empty field left to the checks that refused it.
-  if (typeof raw.publicKey !== "string" || !raw.publicKey) {
-    return fail("invalid_exact_canton_missing_proof", "missing_public_key");
-  }
+  // not well-formed is malformed_payload. The payer's key is no longer among the
+  // fields checked here — the spec's payload never had one, and it now comes
+  // from the party's topology instead (#105), so its absence is the caller's to
+  // answer and not a malformed payload.
   if (PROOF_FIELDS.some((field) => typeof raw[field] !== "string")) {
     return fail("invalid_exact_canton_missing_proof", "internal_error");
   }
@@ -254,6 +253,7 @@ async function verifyCantonExact(
   networkId: NetworkId,
   payload: X402PaymentPayload<unknown, unknown>,
   requirements: X402PaymentRequirements<unknown>,
+  payerPublicKeys: readonly string[],
 ): Promise<VerifyResponse> {
   const envelope = checkEnvelope(networkId, payload, requirements);
   if ("isValid" in envelope) return envelope;
@@ -287,7 +287,7 @@ async function verifyCantonExact(
   }
   const payer = transfer.sender;
   // 7-13. the payer's own key must prove this exact transaction.
-  const proof = await checkProof(inner, payer, preparedBase64);
+  const proof = await checkProof(inner, payer, preparedBase64, payerPublicKeys);
   if (proof) return proof;
   // 14. The signed transfer must actually move what the quote demands.
   //     This is the payload's one binding to the quote: the signature
@@ -350,6 +350,7 @@ export function createCantonExactVerifier(networkId: NetworkId): SchemeVerifier 
   return {
     schemeId: EXACT_SCHEME_ID,
     networkId,
-    verify: (payload, requirements) => verifyCantonExact(networkId, payload, requirements),
+    verify: (payload, requirements, payerPublicKeys) =>
+      verifyCantonExact(networkId, payload, requirements, payerPublicKeys),
   };
 }

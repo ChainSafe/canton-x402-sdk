@@ -34,7 +34,7 @@ UI ◀── decision + on-chain receipt (updateId) ──┘
 - A reachable **facilitator** (`FACILITATOR_URL`) with a **merchant API key**
   (`FACILITATOR_API_KEY`) mapped to `BUREAU_PARTY` (the bureau must be an allowed `payTo`).
   External users target **DevNet** (the facilitator is a blackbox).
-- A **funded payer party** with its Ed25519 key (`PAYER_PARTY_ID` / `PAYER_PUBLIC_KEY` /
+- A **funded payer party** with its Ed25519 key (`PAYER_PARTY_ID` /
   `PAYER_PRIVATE_KEY`, base64), reachable via a participant Ledger API (`LEDGER_CLIENT_URL`)
   whose OAuth the wallet-sdk can use.
   - **LocalNet:** run the facilitator's LocalNet stack, then let the bootstrap script below

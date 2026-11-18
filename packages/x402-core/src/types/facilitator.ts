@@ -69,9 +69,23 @@ export interface SchemeVerifier {
   readonly schemeId: string;
   /** The concrete network this verifier is bound to, e.g. `canton:devnet`. */
   readonly networkId: NetworkId;
+  /**
+   * `payerPublicKeys` are the payer party's PUBLIC signing keys, base64 Ed25519,
+   * which the CALLER resolves from the ledger before calling: the payload carries
+   * no key (the spec's never did), and the payer is the transfer's sender, which
+   * {@link decodePayloadTransfer} reads without verifying anything. Nothing
+   * secret crosses this boundary, and nothing here would be usable if it did.
+   *
+   * A list because that is the shape the sources have, not because several can
+   * verify: a fingerprint is a hash OF the key, so at most one can match the
+   * sender. Keys that are not the sender's are ignored, so passing a party's
+   * whole set is fine and passing none refuses the payment. This stays
+   * synchronous and reads nothing itself, so core needs no ledger access.
+   */
   verify(
     payload: X402PaymentPayload<unknown, unknown>,
     requirements: X402PaymentRequirements<unknown>,
+    payerPublicKeys: readonly string[],
   ): Promise<VerifyResponse>;
 }
 

@@ -120,7 +120,6 @@ function paymentHeader(
       preparedTransaction: "b",
       preparedTxHash: "h",
       signature: "s",
-      publicKey: "pk",
       hashingSchemeVersion: "HASHING_SCHEME_VERSION_V2",
       ...inner,
     },
@@ -410,7 +409,7 @@ describe("paymentRequired", () => {
         settle: true,
         preSettle: ({ payload, requirements, payer, verify }) => {
           seen = {
-            publicKey: payload.payload.publicKey,
+            preparedTxHash: payload.payload.preparedTxHash,
             payTo: requirements.payTo,
             payer,
             isValid: verify.isValid,
@@ -422,7 +421,7 @@ describe("paymentRequired", () => {
       expect(res.status).toBe(402);
       expect(res.body.error).toBe("policy_order_closed");
       expect(seen).toEqual({
-        publicKey: "pk",
+        preparedTxHash: "h",
         payTo: "merchant::x",
         payer: "alice::x",
         isValid: true,
@@ -1025,7 +1024,7 @@ describe("paymentRequired", () => {
       const { payment } = onReject.mock.calls[0][0] as PaymentRejectionInfo;
       expect(payment?.requirements.extra.memo).toBe("order-42");
       expect(payment?.payer).toBe("alice::x");
-      expect(payment?.payload.payload.publicKey).toBe("pk");
+      expect(payment?.payload.payload.preparedTxHash).toBe("h");
     });
 
     it("carries no payment when none was decoded", async () => {

@@ -206,9 +206,9 @@ describe("shape guards + scheme/network match", () => {
     expect(isCantonPaymentRequirements({})).toBe(false);
     expect(isCantonPaymentInner(inner)).toBe(true);
     expect(isCantonPaymentInner({})).toBe(false);
-    // publicKey is required; hashingSchemeVersion is optional (the spec reads an
+    // signature is required; hashingSchemeVersion is optional (the spec reads an
     // absent one as V2).
-    expect(isCantonPaymentInner({ ...inner, publicKey: undefined })).toBe(false);
+    expect(isCantonPaymentInner({ ...inner, signature: undefined })).toBe(false);
     expect(isCantonPaymentInner({ ...inner, hashingSchemeVersion: undefined })).toBe(true);
     expect(isX402PaymentPayload(payload)).toBe(true);
     // Loose: accepts any non-empty scheme in `accepted` (per-scheme inner validated elsewhere).

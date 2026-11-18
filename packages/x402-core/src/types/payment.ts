@@ -50,13 +50,6 @@ export const CantonPaymentInnerSchema = v.object({
    */
   signature: v.pipe(v.string(), v.minLength(1)),
   /**
-   * Base64 32-byte Ed25519 public key. Required — the facilitator verifies the
-   * signature against it, and its fingerprint must match the transfer sender's
-   * `::<fingerprint>` suffix. The spec's payload has no such field: it stays
-   * until the facilitator can read the sender party's keys from the ledger.
-   */
-  publicKey: v.string(),
-  /**
    * Canton interactive-submission hashing scheme the payload was prepared with.
    * The signature is bound to a hash computed with this version, so the
    * facilitator's execute must use the same one. Optional: the spec reads an
