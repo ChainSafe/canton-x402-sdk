@@ -214,7 +214,7 @@ type VendorInputContract = { contract: { oneofKind?: string; v1?: VendorCreate }
  * Scalars read AT their declared type.
  *
  * One reader that took party, text and numeric alike could not tell a Party
- * from a Text, so a record written as `[party("Amulet"), text("DSO::...")]`
+ * from a Text, so a record written as `[text("DSO::..."), party("Amulet")]`
  * read back as a well-formed instrument whose admin was the DSO. The ledger
  * binds `InstrumentId` as `{admin: Party, id: Text}` and refuses that blob;
  * reading each field at its declared type refuses it here instead.
@@ -384,7 +384,7 @@ function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | n
  * carried.
  *
  * Only party, text and numeric read as a value. A record, a list, a timestamp
- * — anything {@link str} does not render — reads as a field with no value,
+ * — anything {@link anyScalar} does not render — reads as a field with no value,
  * which keeps its position so a reader matching by index still lines up, but
  * does NOT distinguish "not a scalar" from "a scalar of a kind not rendered".
  * A reader that needs one of those has to decode it itself.

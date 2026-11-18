@@ -1,9 +1,12 @@
-// The canton-exact scheme verifier + its Canton-specific primitives — that is,
-// scheme `exact` on a `canton:*` network. Composes the scheme-agnostic checks in
-// ./common with Ed25519 signature verification, the Canton key-fingerprint
-// derivation, and the canton-id / canton-payload shape guards. Pure and
-// stateless — the stateful guards (replay) and on-chain execution stay in
-// the facilitator, which composes this verifier's result.
+// The canton-exact scheme verifier — scheme `exact` on a `canton:*` network.
+//
+// This file is the ORDER a payment is checked in. What each step checks
+// against lives elsewhere: Ed25519 verification and the Canton key-fingerprint
+// derivation in ./primitives, the binding to the merchant's quote in
+// ./transfer-binding, the factory and delivery rules in ./transfer-rules, and
+// the canton-payload shape guards in ../types. Pure and stateless — the
+// stateful guards (replay) and on-chain execution stay in the facilitator,
+// which composes this verifier's result.
 
 import type { NetworkId } from "../types/common";
 import { CantonPaymentInner, HashingSchemeVersion, isCantonPaymentInner } from "../types/payment";

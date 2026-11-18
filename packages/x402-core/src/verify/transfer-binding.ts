@@ -1,17 +1,19 @@
 // What the signed transfer must SAY, as against what its tree must DO.
 //
 // `transferViolation` compares the transfer the payer signed with the quote
-// the merchant published — receiver, amount, instrument, deadline, memo,
-// synchronizer — and names the first field that disagrees. The delivery and
-// factory rules in `transfer-rules.ts` ask the other question: not whether the
-// transfer describes the right payment, but whether the transaction actually
-// performs it.
+// the merchant published — memo, synchronizer, receiver, instrument, amount,
+// in that order — and names the first field that disagrees. The deadline is
+// not one of them: it is held against the clock rather than the quote, so it
+// lives with the pipeline in `canton-exact.ts`. The delivery and factory rules
+// in `transfer-rules.ts` ask the other question: not whether the transfer
+// describes the right payment, but whether the transaction actually performs
+// it.
 //
 // `VIOLATION_REASON` is deliberately NOT here. It maps a field name to a WIRE
 // reason code, which is the pipeline's concern; keeping it there is what stops
-// this module knowing anything about responses. The `satisfies Record<
-// NonNullable<ReturnType<typeof transferViolation>>, ...>` constraint
-// typechecks across the import.
+// this module knowing anything about responses. Its `satisfies
+// Record<TransferViolation, ...>` makes the compiler hold that map total
+// across the import, so a member added here without a code fails to build.
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -56,9 +58,10 @@ export function isSameSynchronizer(signed: string | undefined, quoted: string): 
  * The order is observable, not incidental: the check short-circuits, and the
  * caller turns the answer into both an `invalidReason` and the wire's
  * `extensions.detail`, which tests assert by name. A transfer that disagrees on
- * two fields is answered with whichever appears first in this union, so
- * reordering these members — or the `if`s that produce them — changes what a
- * client sees for an unchanged payment.
+ * two fields is answered for whichever `if` in `transferViolation` runs first,
+ * so reordering those changes what a client sees for an unchanged payment. The
+ * members below are kept in that same order to record it — the union itself is
+ * type-level, and reordering it alone changes nothing.
  */
 export type TransferViolation =
   | "memo"
@@ -69,12 +72,12 @@ export type TransferViolation =
 
 /**
  * Check a decoded transfer against the requirements. Returns `null` when the
- * transfer satisfies them, or a short field detail (`"receiver" | "instrument" |
- * "amount" | "memo"`) naming the first divergence. The verifier answers with
- * the spec's code for that field, and the field in `extensions.detail`. The amount must be EQUAL,
- * not merely sufficient (Rule 4), and the two sides are in different units — the
- * transfer carries an on-ledger Decimal, the requirements an atomic integer at
- * the Token Standard's fixed scale.
+ * transfer satisfies them, or a short field detail naming the first divergence
+ * — one of {@link TransferViolation}. The verifier answers with the spec's code
+ * for that field, and the field itself in `extensions.detail`. The amount must
+ * be EQUAL, not merely sufficient (Rule 4), and the two sides are in different
+ * units — the transfer carries an on-ledger Decimal, the requirements an atomic
+ * integer at the Token Standard's fixed scale.
  */
 export function transferViolation(
   transfer: DecodedTransfer,

@@ -10,9 +10,9 @@
  *
  * READING `some` WHERE THE ENGINE READS `every` inverts that, and hands the
  * choice of mode to whoever wrote the blob. Blanking ONE label then sends the
- * reader down the label path while the engine stays positional, and every
- * field looked up by name comes back undefined — a field silently DROPPED
- * rather than a blob refused.
+ * reader down the label path while the engine stays positional. Every other
+ * field still reads, and the lookup for the blanked one misses — a field
+ * silently DROPPED rather than a blob refused.
  *
  * ONE IMPLEMENTATION, DELIBERATELY. This rule was written twice — once for the
  * transaction's own records and once for a disclosed contract's — and the two
