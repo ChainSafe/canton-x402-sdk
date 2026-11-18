@@ -31,10 +31,11 @@ facilitator's alone, since only it holds the state involved:
 3. **Still executable** — the signed transfer's own `executeBefore` is far
    enough in the future to settle (`invalid_exact_canton_expired`). The quote itself no
    longer expires; the deadline that counts is inside what the payer signed.
-4. **The key belongs to the payer** — the fingerprint derived from the
-   payload's `publicKey` must match the `::` suffix of the transfer's sender,
-   so a caller can't sign as a party it doesn't control
-   (`invalid_exact_canton_signature_invalid` otherwise).
+4. **The keys belong to the payer** — the payload carries none. The
+   facilitator reads the sender party's signing keys from the ledger, by that
+   party id, and it is the lookup that binds them to the payer, so a caller
+   can't sign as a party it doesn't control
+   (`invalid_exact_canton_signature_invalid` when none can be resolved).
 5. **The signature is valid** — the hash recomputed from the transaction
    itself must equal `preparedTxHash`, and the payer's key must have signed it
    (`invalid_exact_canton_signature_invalid` otherwise).

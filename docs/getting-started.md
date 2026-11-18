@@ -117,8 +117,10 @@ call the URL and get the paid response back.
 
 ### Before you start
 
-- A **funded payer party** — its `partyId` and Ed25519 keypair (`publicKey` /
-  `privateKey`), holding enough Canton Coin to cover the price.
+- A **funded payer party** — its `partyId` and Ed25519 signing key
+  (`privateKey`, the 32-byte seed; the public half is published on the ledger,
+  which is where a facilitator reads it), holding enough Canton Coin to cover
+  the price.
 - A connection to your **participant's Ledger API** — its URL plus OAuth2
   client credentials (LocalNet uses a self-signed token instead).
 - The **Amulet Token Standard registry** URL — your validator's scan-proxy for

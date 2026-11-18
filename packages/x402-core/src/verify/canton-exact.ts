@@ -114,10 +114,12 @@ const PROOF_FIELDS = ["preparedTransaction", "preparedTxHash", "signature"] as c
 /**
  * Steps 7-13: does the payer's own key prove this exact transaction?
  *
- * The key is well-formed and is the SENDER's, the hash and signature are
- * canonically encoded, the hashing scheme is one this verifier implements, the
- * hash is recomputed from the bytes rather than trusted, and the signature
- * holds against it. Refuses or passes; it reads nothing out for the caller.
+ * The hash and signature are canonically encoded, the hashing scheme is one
+ * this verifier implements, the hash is recomputed from the bytes rather than
+ * trusted, and the signature holds against a key the SENDER publishes. No key
+ * is checked here — the caller resolved them by party id, and that lookup is
+ * what makes them the sender's. Refuses or passes; it reads nothing out for
+ * the caller.
  *
  * EVERY REFUSAL HERE NAMES THE PAYER, where steps 1-6 name nobody: the payer is
  * the transfer's sender and is known by the time this runs. Tests pin the exact

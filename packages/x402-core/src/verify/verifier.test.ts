@@ -301,9 +301,11 @@ describe("cantonExactVerifier", () => {
   });
 
   it("refuses a key that is not the sender's: a transfer from another party, signed with this key", async () => {
-    // The fingerprint check is what binds the key to the transfer's sender.
-    // Without it, any key could sign a transfer naming someone else. The hash
-    // and signature are right for this transaction, so only that check refuses.
+    // What binds a key to the transfer's sender is the caller's lookup. The
+    // keys passed here are the VICTIM's, because the victim is the sender, and
+    // the signature was made with another party's. The hash and signature are
+    // canonical and right for this transaction, so the signature failing under
+    // every key the sender publishes is the only thing that refuses.
     const { payload, requirements, privateKey } = await buildSignedFixture();
     const victim = `victim::${fingerprintForPublicKey(toB64(getPublicKey(new Uint8Array(32).fill(9))))}`;
     const protobuf = encodePreparedTransaction(

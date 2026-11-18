@@ -84,8 +84,9 @@ export function transferViolation(
   requirements: CantonPaymentRequirements,
 ): TransferViolation | null {
   // No sender check: the sender is the payer by definition (spec Rule 8), and the
-  // verifier has already bound the signing key to it — the caller resolved the
-  // party's keys from the ledger BY that party id, and one of them verified.
+  // signing key is already bound to it — not by anything this verifier checks,
+  // but because the caller resolved the party's keys from the ledger BY that
+  // party id, and one of them verified.
   // Rule 12, both ways. The spec only requires the check when the merchant
   // quotes a memo, but `x402.memo` is a key the scheme reserves, not the
   // payer's own namespace — its own references go under its own key, which is
