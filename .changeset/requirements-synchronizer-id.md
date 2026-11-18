@@ -27,15 +27,15 @@ block the signature covers, so it is the payer's commitment rather than a
 relay's choice.
 
 A mismatch answers **`invalid_exact_canton_synchronizer_mismatch`**, new in
-core, with `transfer_mismatch` in `extensions.reason` and `synchronizer` in the
-detail — the shape every other mismatch already uses.
+core, with `synchronizer` in `extensions.detail` — the shape every other
+mismatch already uses.
 
 The scheme spec names `extra.synchronizerId` but defines no rule for it and so
 no code, so this one is ours. In the scheme's own family rather than borrowed
 from the protocol's, for two reasons. `invalidReason` is the slot a client
 written against the scheme matches on, and the first cut put `transfer_mismatch`
-there — a protocol-level code of ours, which no such client matches and which
-`extensions.reason` was already carrying. And the obvious substitute,
+there — a protocol-level code of ours, which no such client matches. And the
+obvious substitute,
 `invalid_network`, already answers Rule 1's quoted-network check: one code for
 two different failures tells a client less, not more.
 

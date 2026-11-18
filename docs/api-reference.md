@@ -139,11 +139,11 @@ guarantee.
 | Field                                       | Rule                                                                                                                                                                                                                                                                           |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `x402Version`                               | Must be exactly `2`, at the top level and inside `paymentPayload`.                                                                                                                                                                                                             |
-| `paymentPayload.accepted`                   | Required: the `accepts[]` entry the payer chose, here elided — a whole `PaymentRequirements`, with the `scheme`, `network`, `amount`, `asset`, `payTo` and `maxTimeoutSeconds` the spec requires of one. Its `scheme` must be `exact` and its `network` must equal `paymentRequirements.network` (spec Rule 1), or the answer is `unsupported_scheme` / `invalid_network`. Its other values are not compared: the transfer is bound to `paymentRequirements`, which the merchant takes from it after checking it against its own terms. A body whose `paymentPayload` has no `accepted`, has one with any of those fields missing or empty or a `maxTimeoutSeconds` that is not a whole number of at least 1, or has `scheme` and `network` at the top level instead (the pre-spec envelope), is not a well-formed request: `400` with `bad_request`. |
-| `paymentPayload.resource`, `paymentPayload.extensions` | Optional; `null` is accepted for either, and neither affects the verdict. `resource` is `{ url, description?, mimeType?, serviceName?, tags?, iconUrl? }` with a non-empty `url`, and `extensions` is an object keyed by extension id. A value of another shape is a malformed body: `400` with `bad_request`. |
+| `paymentPayload.accepted`                   | Required: the `accepts[]` entry the payer chose, here elided — a whole `PaymentRequirements`, with the `scheme`, `network`, `amount`, `asset`, `payTo` and `maxTimeoutSeconds` the spec requires of one. Its `scheme` must be `exact` and its `network` must equal `paymentRequirements.network` (spec Rule 1), or the answer is `unsupported_scheme` / `invalid_network`. Its other values are not compared: the transfer is bound to `paymentRequirements`, which the merchant takes from it after checking it against its own terms. A body whose `paymentPayload` has no `accepted`, has one with any of those fields missing or empty or a `maxTimeoutSeconds` that is not a whole number of at least 1, or has `scheme` and `network` at the top level instead (the pre-spec envelope), is not a well-formed request: `400` with `invalid_payload`. |
+| `paymentPayload.resource`, `paymentPayload.extensions` | Optional; `null` is accepted for either, and neither affects the verdict. `resource` is `{ url, description?, mimeType?, serviceName?, tags?, iconUrl? }` with a non-empty `url`, and `extensions` is an object keyed by extension id. A value of another shape is a malformed body: `400` with `invalid_payload`. |
 | `paymentPayload.payload`                    | The six fields above, all required except `hashingSchemeVersion`, which means `HASHING_SCHEME_VERSION_V2` when absent. `assetTransferMethod` must be `"transfer-factory"`, as in the requirements' `extra`; a payload without it or with another value is `invalid_exact_canton_malformed_payload`. `signature` is canonical base64 of the 64-byte signature and `preparedTxHash` is 64 lower-case hex digits; an empty one is `invalid_exact_canton_malformed_payload`, and any other encoding is `invalid_exact_canton_signature_invalid`. A payload missing any of the three is `invalid_exact_canton_missing_proof`. `preparedTransaction` is base64 of exactly one gzip member with no optional header fields, at most 8 KiB compressed and 64 KiB decompressed; anything else is `invalid_exact_canton_malformed_payload`. The payload carries no key: the facilitator reads the sender party's signing keys from the ledger by that party id, and the signature must verify under one of them (`invalid_exact_canton_signature_invalid` otherwise, including when none can be resolved). The signature covers the prepared transaction, whose receiver, instrument and amount the facilitator checks against `paymentRequirements`: that is what binds the payload to them. |
 | `amount`                                    | Integer string of atomic units — 1 CC = 1e10, so `"500000000"` is 0.05 CC. **Exact**, not a floor: the transfer must move this amount, and an overpayment is rejected.                                                                                                       |
-| `payTo`                                     | Must be a party your API key owns. Otherwise verify answers `transfer_mismatch` and settle answers `unauthorized`.                                                                                                                                                             |
+| `payTo`                                     | Must be a party your API key owns. Otherwise both verify and settle answer `invalid_exact_canton_merchant_not_registered`, with `destination_not_allowed` as the detail.                                                                                                                                                             |
 | `asset`                                     | A symbol — `"CC"` for Canton Coin, or a registry token's own. The instrument it names is `extra.instrumentId`.
 | `extra.instrumentId`                        | Required `{admin, id}`: `asset` alone cannot say which registry issued the instrument, and the facilitator binds the transfer against this.
 | `maxTimeoutSeconds`                         | Required — seconds the client has to complete payment. A whole number of at least 1; `0`, a negative, a fraction and `Infinity` are all refused.
@@ -184,19 +184,20 @@ them:
 `invalid_exact_canton_instrument_id_mismatch`,
 `invalid_exact_canton_memo_mismatch`, `invalid_exact_canton_expired`
 
-`extensions.reason` carries the code each of them answered with before:
-`scheme_mismatch`, `network_mismatch`, `bad_signature`,
-`prepared_transaction_hash_mismatch`, `invalid_prepared_transaction_structure`,
-`missing_public_key`, `transfer_mismatch`, `transfer_expired` or
-`internal_error`. `extensions.detail` names what diverged where there is more to
-say, such as the field of a transfer that does not match.
-
-The facilitator's own checks still answer with its own codes: `nonce_replayed`,
-and `transfer_mismatch` with detail `destination_not_allowed`.
+`extensions.detail` says WHICH of a code's causes it was, where the code alone
+leaves two apart. `invalid_exact_canton_signature_invalid` is the one that most
+needs it: `no_payer_key` (the party publishes none this facilitator can use),
+`malformed_encoding` (the hash or signature is not in the encoding the spec
+asks for), `hash_mismatch` (the hash describes a different transaction) or
+`bad_signature` (it verifies under none of the party's keys). Elsewhere it
+names what diverged — the field of a transfer that does not match — or
+`undecodable`, `payload_shape`, `payload_missing`, `proof_fields_missing`,
+`unsupported_hashing_scheme`. A code whose cause is not in doubt carries no
+`extensions` at all.
 
 A body that is not a well-formed request answers `400` with
-`invalidReason: "bad_request"`, and an unexpected fault answers `500` with
-`internal_error`.
+`invalid_payload`, and an unexpected fault answers `500` with
+`unexpected_verify_error`.
 
 ### curl
 
@@ -317,13 +318,15 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
 
 ### `errorReason` values
 
-`bad_request`, `unauthorized`, `scheme_mismatch`, `network_mismatch`,
-`requirements_hash_mismatch`, `bad_fingerprint`, `bad_signature`,
-`nonce_replayed`, `execution_failed`, `timeout`, `facilitator_error`
+The scheme spec's table and the x402 v2 general codes, the same vocabulary
+`invalidReason` uses — `invalid_exact_canton_execute_failed` for a definite
+ledger rejection, `settlement_pending` when the outcome is not yet known (which
+is **non-terminal**, and carries `transaction`), and `unexpected_settle_error`
+for a fault during settlement, with `errorDetails` saying which.
 
 Every refusal above answers `400`. An unexpected fault answers `500`, and a
 facilitator that is temporarily out of capacity answers `503` with a
-`Retry-After` header; both carry `facilitator_error`.
+`Retry-After` header.
 
 ### curl
 

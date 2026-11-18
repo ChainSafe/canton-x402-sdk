@@ -177,13 +177,16 @@ describe("x402-core wire types", () => {
 
   it("narrows the discriminated response unions", () => {
     const verifyOk: VerifyResponse = { isValid: true, payer: "alice::1220beef" };
-    const verifyBad: VerifyResponse = { isValid: false, invalidReason: "bad_signature" };
-    // The spec's codes, which this core's verifier answers with, and an older
-    // facilitator's, which still parse.
+    const verifyBad: VerifyResponse = {
+      isValid: false,
+      invalidReason: "invalid_exact_canton_synchronizer_mismatch",
+    };
+    // The spec's codes, which this core's verifier answers with, and the one
+    // extension beyond them.
     const verifySpec: VerifyResponse = {
       isValid: false,
       invalidReason: "invalid_exact_canton_amount_mismatch",
-      extensions: { reason: "transfer_mismatch", detail: "amount" },
+      extensions: { detail: "amount" },
     };
     const settleSpec: SettleResponse = { success: false, errorReason: "invalid_exact_canton_execute_failed" };
     const settlePending: SettleResponse = {
@@ -196,7 +199,8 @@ describe("x402-core wire types", () => {
     expect([verifySpec, settleSpec, settlePending].every((r) => !("isValid" in r && r.isValid))).toBe(true);
     // `invalidReason` is only reachable after narrowing on `isValid`.
     if (verifyOk.isValid) expect(verifyOk.payer).toBe("alice::1220beef");
-    if (!verifyBad.isValid) expect(verifyBad.invalidReason).toBe("bad_signature");
+    if (!verifyBad.isValid)
+      expect(verifyBad.invalidReason).toBe("invalid_exact_canton_synchronizer_mismatch");
 
     const settleOk: SettleResponse = {
       success: true,
@@ -206,11 +210,12 @@ describe("x402-core wire types", () => {
     };
     const settleErr: SettleResponse = {
       success: false,
-      errorReason: "execution_failed",
+      errorReason: "invalid_exact_canton_execute_failed",
       errorDetails: "boom",
     };
     if (settleOk.success) expect(settleOk.transaction).toBe("1220update");
-    if (!settleErr.success) expect(settleErr.errorReason).toBe("execution_failed");
+    if (!settleErr.success)
+      expect(settleErr.errorReason).toBe("invalid_exact_canton_execute_failed");
   });
 
   it("exposes the hashing-scheme enum values", () => {

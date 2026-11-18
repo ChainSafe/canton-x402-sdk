@@ -338,7 +338,19 @@ describe("reason codes", () => {
     }
   });
 
-  it("still takes the older codes, so an older facilitator's answer parses", () => {
+  it("takes the older codes a facilitator still answers with, and no others", () => {
+    // Narrowed before 1.0.0 froze them. What stays is what something still
+    // writes to the TOP-LEVEL field — core writes none of these any more, so
+    // the list is the facilitator's. `bad_signature` is in the settle list
+    // because a settle whose verify failed that way passes the verify reason
+    // straight through (canton-exact-v2's verifyReasonToSettleReason).
+  });
+
+  it("no longer takes the codes nothing produces, which 1.x cannot add back", () => {
+    // The cost of the narrowing, stated: an answer from a facilitator on a
+    // published 0.1.x carrying one of these no longer validates. That is the
+    // trade — these were kept for exactly that case, and dropping them before
+    // 1.0.0 was the last chance, since a picklist can only grow in a minor.
     for (const code of [
       "scheme_mismatch",
       "network_mismatch",
@@ -347,28 +359,28 @@ describe("reason codes", () => {
       "bad_signature",
       "prepared_transaction_hash_mismatch",
       "invalid_prepared_transaction_structure",
-      "nonce_replayed",
       "missing_public_key",
       "transfer_mismatch",
       "transfer_expired",
       "internal_error",
+      "nonce_replayed",
     ]) {
-      expect(verifies(code), code).toBe(true);
+      expect(verifies(code), code).toBe(false);
     }
     for (const code of [
-      "bad_request",
       "unauthorized",
       "scheme_mismatch",
       "network_mismatch",
       "requirements_hash_mismatch",
       "bad_fingerprint",
       "bad_signature",
+      "facilitator_error",
       "nonce_replayed",
+      "bad_request",
       "execution_failed",
       "timeout",
-      "facilitator_error",
     ]) {
-      expect(settles(code), code).toBe(true);
+      expect(settles(code), code).toBe(false);
     }
   });
 

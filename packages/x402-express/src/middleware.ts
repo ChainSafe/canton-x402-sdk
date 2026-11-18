@@ -168,13 +168,12 @@ export function paymentRequired<
       // settling, so a payment is never captured for a request we then fail.
       const payer = verify.payer ?? scheme.payerOf(payload);
       if (!payer) {
-        // Worded as the scheme's verifier words an undecodable transfer, with
-        // the protocol-level reason kept in `extensions` for a reader that
-        // knows that one and not the scheme's.
+        // Worded as the scheme's verifier words an undecodable transfer: the
+        // code, and `extensions.detail` naming which of its causes this was.
         throw new PaymentRejection(
           scheme.unreadablePayerReason ?? "transfer_mismatch",
           "undecodable",
-          { reason: "transfer_mismatch", detail: "undecodable" },
+          { detail: "undecodable" },
         );
       }
 

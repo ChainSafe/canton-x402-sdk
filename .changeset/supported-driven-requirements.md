@@ -270,9 +270,9 @@ entry is an `AcceptSpec<TSpec>`, that spec without the shared terms.
 facilitator nor the adapter can say who paid, the refusal carries
 `SchemeAdapter.unreadablePayerReason` — canton-exact's
 `invalid_exact_canton_malformed_payload` — rather than a canton code on every
-scheme. The protocol-level `transfer_mismatch` stays in `extensions.reason` for
-a reader that knows that one and not the scheme's, and is the default for an
-adapter that names none.
+scheme. `undecodable` goes in `extensions.detail`, and
+`invalid_exact_canton_malformed_payload` is the default for an adapter that
+names none.
 
 New exports: `SchemeAdapter`, `SchemeQuote`, `SchemeContext`,
 `BaseRequirementsSpec`, `AcceptSpec`, `SharedTerms`, `FieldRule`, `RuleTable`,

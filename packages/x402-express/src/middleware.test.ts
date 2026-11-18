@@ -638,7 +638,7 @@ describe("paymentRequired", () => {
     });
     expect(onReject.mock.calls[0][0]).toMatchObject({
       reason: "invalid_exact_canton_malformed_payload",
-      extensions: { reason: "transfer_mismatch", detail: "undecodable" },
+      extensions: { detail: "undecodable" },
     });
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/v2/settle"))).toBe(false);
     // The real decoder ran on the payload's transaction and found no transfer in it.
@@ -666,7 +666,7 @@ describe("paymentRequired", () => {
       verify: {
         isValid: false,
         invalidReason: "invalid_exact_canton_amount_mismatch",
-        extensions: { reason: "transfer_mismatch", detail: "amount" },
+        extensions: { detail: "amount" },
       },
     });
     const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());

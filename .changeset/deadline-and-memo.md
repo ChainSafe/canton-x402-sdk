@@ -102,8 +102,15 @@ still be paid at the price it quoted, so a merchant whose prices move should
 re-quote rather than rely on the protocol to stale them out.
 
 That removes `requirements_expired` (nothing can produce it), `isExpired`, and
-the middleware's `validForSeconds` and `nonce` options. `nonce_replayed`
-remains — the guard still exists, it just keys on the memo now.
+the middleware's `validForSeconds` and `nonce` options.
+
+**The memo is not the nonce under another name.** It binds in both directions —
+the transfer's `x402.memo` must equal the quoted value — but nothing enforces
+that a given memo is used once. The replay guard keys on the transaction hash
+instead, so it catches the same signed transaction presented twice and not a
+second transaction against the same quote, which the nonce's unique index did.
+A merchant reconciling by memo should know that two settlements can carry the
+same one.
 
 The facilitator keys its settlement store on `requirements.nonce` today and
 will need the same change; its replay column and the four migrations that touch

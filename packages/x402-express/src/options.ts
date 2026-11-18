@@ -210,10 +210,10 @@ export interface PaymentRejectionInfo<
   /** The `details` string in the response body, when there is one. */
   details?: string;
   /**
-   * For a verify rejection, the facilitator's full `extensions` (may hold more
-   * than `details`, and `reason` holds the code it answered with before the
-   * spec's). The middleware's own refusal of a transfer it cannot decode sets
-   * one in the same shape.
+   * For a verify rejection, the facilitator's full `extensions` — `detail`
+   * says which of the code's causes it was, and a facilitator may add more.
+   * The middleware's own refusal of a transfer it cannot decode sets one in
+   * the same shape.
    */
   extensions?: Record<string, unknown>;
   /** The underlying error, for a 502 or 500. */

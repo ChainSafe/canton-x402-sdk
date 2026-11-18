@@ -16,7 +16,7 @@ moves a payer's funds on its own authority: the only write that moves them is
 These run in order, with no chain write. The first seven are shared code — the
 same `@chainsafe/x402-core` verifier the SDK exposes — so a payer can pre-flight
 its payload against them, and they refuse with the Canton scheme spec's codes,
-keeping the code they used before in `extensions.reason`. The last is the
+saying in `extensions.detail` which of a code's causes it was. The last is the
 facilitator's alone, since only it holds the state involved:
 
 1. **Right scheme and network** — the payload, the requirements, and the
@@ -66,8 +66,9 @@ facilitator's alone, since only it holds the state involved:
    settled before (the ledger is the real guard: a replayed transfer names
    input holdings that are already spent), and for an authenticated merchant
    `payTo` must be a party that key is allowed to receive at (your destination
-   policy). A destination denial comes back as `transfer_mismatch` with a
-   `destination_not_allowed` detail on verify, and as `unauthorized` on settle.
+   policy). A destination denial comes back as
+   `invalid_exact_canton_merchant_not_registered` with a
+   `destination_not_allowed` detail, on verify and on settle alike.
 
 ## What settlement does
 
