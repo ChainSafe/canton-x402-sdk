@@ -185,7 +185,7 @@ them:
 `invalid_exact_canton_memo_mismatch`, `invalid_exact_canton_expired`
 
 `extensions.reason` carries the code each of them answered with before:
-`scheme_mismatch`, `network_mismatch`, `bad_fingerprint`, `bad_signature`,
+`scheme_mismatch`, `network_mismatch`, `bad_signature`,
 `prepared_transaction_hash_mismatch`, `invalid_prepared_transaction_structure`,
 `missing_public_key`, `transfer_mismatch`, `transfer_expired` or
 `internal_error`. `extensions.detail` names what diverged where there is more to
