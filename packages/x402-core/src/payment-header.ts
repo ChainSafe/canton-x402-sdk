@@ -70,7 +70,7 @@ export function encodePaymentRequiredHeader<TRequirements>(
  * location and calls the response body a server implementation concern, so a
  * merchant may well answer `{}` — every registered Canton merchant does.
  *
- * Throws on bad base64 / JSON, on nesting past {@link MAX_PAYMENT_DEPTH}, or
+ * Throws on bad base64 / JSON, on nesting past 64 levels, or
  * when the value is not an x402 v2 `PaymentRequired` (version 2, a `resource`
  * with a `url`, and an `accepts[]` whose entries carry the fields every
  * scheme's requirements share).

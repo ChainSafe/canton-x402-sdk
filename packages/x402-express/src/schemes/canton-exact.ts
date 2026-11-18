@@ -10,7 +10,7 @@ import type { Request } from "express";
 import {
   ASSET_TRANSFER_METHOD,
   assetSymbol,
-  CantonRequirementsExtraSchema,
+  CantonRequirementsExtraKey,
   decodePayloadTransfer,
   isCantonPaymentPayload,
   isCantonPaymentRequirements,
@@ -138,7 +138,7 @@ export interface CantonRequirementsSpec extends BaseRequirementsSpec {
  * `extra`, keyed off the schema's own entries so the table cannot drift from
  * the shape it describes.
  */
-const EXTRA_RULES: Record<keyof typeof CantonRequirementsExtraSchema.entries, RuleTable[string]> = {
+const EXTRA_RULES: Record<CantonRequirementsExtraKey, RuleTable[string]> = {
   // Unreachable today and kept anyway: the schema pins this to a literal, so
   // the requirements guard refuses a wrong value as policy_requirements_invalid
   // before the comparison runs. It is here so that loosening the schema does

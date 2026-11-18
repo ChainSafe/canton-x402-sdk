@@ -100,6 +100,21 @@ export const CantonRequirementsExtraSchema = v.looseObject({
 export type CantonRequirementsExtra = v.InferOutput<typeof CantonRequirementsExtraSchema>;
 
 /**
+ * The keys of `CantonRequirementsExtra`, as a union.
+ *
+ * Exported because a consumer that must handle EVERY extra key — the express
+ * middleware checks its rule table against this exact set, so a key added here
+ * and forgotten there fails to compile — cannot get that union from the type.
+ * `CantonRequirementsExtra` is inferred from a `looseObject`, so it carries an
+ * index signature and `keyof` on it collapses to `string`.
+ *
+ * The alternative was publishing the valibot schema object so callers could
+ * read `.entries`, which would make the validation library part of this
+ * package's public API. This names the concept instead.
+ */
+export type CantonRequirementsExtraKey = keyof typeof CantonRequirementsExtraSchema.entries;
+
+/**
  * canton-exact requirements, sent in the 402's accepts[]. Schema-first — the
  * concrete shape, its validator, and its type are one definition.
  */

@@ -7,7 +7,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  CantonPaymentRequirementsSchema,
+  type CantonPaymentRequirements,
   type X402PaymentRequirements,
 } from "@chainsafe/x402-core";
 
@@ -25,7 +25,7 @@ import { PaymentRejection } from "./response.js";
  * the quiet way an unchecked field becomes something a payer can set freely.
  */
 const COMMON_RULES: Record<
-  keyof typeof CantonPaymentRequirementsSchema.entries,
+  keyof CantonPaymentRequirements,
   RuleTable[string]
 > = {
   scheme: { compare: "equal", reason: "policy_scheme" },

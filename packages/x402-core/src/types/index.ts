@@ -3,7 +3,7 @@
 //
 // v2 (canton-exact) only; legacy v1 shapes are intentionally not carried over.
 // Organized by domain: common (shared kernel) · requirements · payment ·
-// facilitator (verify/settle/supported) · payment-object.
+// facilitator (verify/settle/supported).
 //
 // Multi-scheme generics: the chain-agnostic bases carry the scheme seams
 // via defaulted type params, and the canton-exact types are thin aliases —
@@ -25,8 +25,72 @@
 // Still pending (markers inline): reason-union open-vs-closed; branded DecimalString;
 // per-scheme `CantonNetworkId` narrowing (needs a TNetwork seam).
 
-export * from "./common";
-export * from "./requirements";
-export * from "./payment";
-export * from "./facilitator";
-export * from "./payment-object";
+export {
+  ASSET_TRANSFER_METHOD,
+} from "./common";
+export type {
+  AssetSpec,
+  InstrumentId,
+  NetworkId,
+  PaymentExtensions,
+  ResourceInfo,
+  Scheme,
+  X402Version,
+} from "./common";
+export {
+  isCantonPaymentRequiredResponse,
+  isCantonPaymentRequirements,
+  isX402PaymentRequiredResponse,
+  isX402PaymentRequirements,
+} from "./requirements";
+export type {
+  CantonPaymentRequiredResponse,
+  CantonPaymentRequirements,
+  CantonRequirementsExtra,
+  CantonRequirementsExtraKey,
+  X402PaymentRequiredResponse,
+  X402PaymentRequirements,
+} from "./requirements";
+export {
+  HashingSchemeVersion,
+  isCantonPaymentInner,
+  isCantonPaymentPayload,
+  isX402PaymentPayload,
+} from "./payment";
+export type {
+  CantonPaymentInner,
+  CantonPaymentPayload,
+  X402PaymentPayload,
+} from "./payment";
+export {
+  MalformedSupportedExtraError,
+  SettleErrorReasonSchema,
+  SettleResponseSchema,
+  SupportedResponseSchema,
+  VerifyInvalidReasonSchema,
+  VerifyResponseSchema,
+  cantonSupportedExtra,
+  isCantonVerifyRequest,
+  isSettlementPending,
+  isX402Request,
+} from "./facilitator";
+export type {
+  CantonExactExtensionReason,
+  CantonSupportedExtra,
+  SchemeVerifier,
+  SettleErrorReason,
+  SettleRequest,
+  SettleResponse,
+  SettleResponseError,
+  SettleResponseSuccess,
+  SpecVerifyInvalidReason,
+  SupportedInstrument,
+  SupportedKind,
+  SupportedResponse,
+  VerifyInvalidReason,
+  VerifyRequest,
+  VerifyResponse,
+  VerifyResponseInvalid,
+  VerifyResponseValid,
+  X402Request,
+} from "./facilitator";

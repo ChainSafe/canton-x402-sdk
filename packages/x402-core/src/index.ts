@@ -3,11 +3,129 @@
  *
  * Shared x402 Canton wire types + canonical requirements hashing.
  */
-export * from "./types";
-export * from "./verify";
-export * from "./networks";
-export * from "./payment-header";
-export * from "./deployment";
+export {
+  ASSET_TRANSFER_METHOD,
+  HashingSchemeVersion,
+  MalformedSupportedExtraError,
+  SettleErrorReasonSchema,
+  SettleResponseSchema,
+  SupportedResponseSchema,
+  VerifyInvalidReasonSchema,
+  VerifyResponseSchema,
+  cantonSupportedExtra,
+  isCantonPaymentInner,
+  isCantonPaymentPayload,
+  isCantonPaymentRequiredResponse,
+  isCantonPaymentRequirements,
+  isCantonVerifyRequest,
+  isSettlementPending,
+  isX402PaymentPayload,
+  isX402PaymentRequiredResponse,
+  isX402PaymentRequirements,
+  isX402Request,
+} from "./types";
+export type {
+  AssetSpec,
+  CantonExactExtensionReason,
+  CantonPaymentInner,
+  CantonPaymentPayload,
+  CantonPaymentRequiredResponse,
+  CantonPaymentRequirements,
+  CantonRequirementsExtra,
+  CantonRequirementsExtraKey,
+  CantonSupportedExtra,
+  InstrumentId,
+  NetworkId,
+  PaymentExtensions,
+  ResourceInfo,
+  Scheme,
+  SchemeVerifier,
+  SettleErrorReason,
+  SettleRequest,
+  SettleResponse,
+  SettleResponseError,
+  SettleResponseSuccess,
+  SpecVerifyInvalidReason,
+  SupportedInstrument,
+  SupportedKind,
+  SupportedResponse,
+  VerifyInvalidReason,
+  VerifyRequest,
+  VerifyResponse,
+  VerifyResponseInvalid,
+  VerifyResponseValid,
+  X402PaymentPayload,
+  X402PaymentRequiredResponse,
+  X402PaymentRequirements,
+  X402Request,
+  X402Version,
+} from "./types";
+export {
+  DEFAULT_MAX_COMPRESSED_BYTES,
+  DEFAULT_MAX_DECOMPRESSED_BYTES,
+  EXACT_SCHEME_ID,
+  MEMO_KEY,
+  WIRE_DECIMALS,
+  atomicToLedger,
+  computePreparedTransactionHash,
+  createCantonExactVerifier,
+  createVerifierRegistry,
+  decodePayloadTransfer,
+  decodePreparedTransaction,
+  fingerprintForPublicKey,
+  gunzipPreparedTransaction,
+  gzipPreparedTransaction,
+  isCantonNetworkId,
+  isValidAmount,
+  isValidLedgerAmount,
+  ledgerToAtomic,
+  matchesFingerprint,
+  parseCantonNetworkId,
+  schemeNetworkMatches,
+  signHash,
+  signatureFromBase64,
+  signatureToBase64,
+  verifySignature,
+} from "./verify";
+export type {
+  DecodedTransfer,
+  PreparedTransactionLimits,
+  VerifierRegistry,
+} from "./verify";
+export {
+  AMULET_INSTRUMENT_ID,
+  DEVNET_DSO_PARTY,
+  DEVNET_NETWORK,
+  DEVNET_SYNCHRONIZER_ID,
+  LOCALNET_NETWORK,
+  MAINNET_DSO_PARTY,
+  MAINNET_NETWORK,
+  MAINNET_SYNCHRONIZER_ID,
+  TESTNET_NETWORK,
+  amuletAsset,
+  assetSymbol,
+} from "./networks";
+export {
+  decodePaymentHeader,
+  decodePaymentRequiredHeader,
+  decodePaymentResponseHeader,
+  encodePaymentHeader,
+  encodePaymentRequiredHeader,
+  encodePaymentResponseHeader,
+} from "./payment-header";
+export {
+  DeploymentSelectionError,
+  selectCantonDeployments,
+  selectDeployments,
+} from "./deployment";
+export type {
+  CantonDeploymentExtra,
+  CantonDeploymentPreference,
+  CantonDeploymentTerms,
+  DeploymentExtraSelector,
+  DeploymentPreference,
+  DeploymentTerms,
+} from "./deployment";
 // Public hashing API is the typed requirementsHash; canonicalJson stays a
 // package-internal helper (general RFC-8785 canonicalizer over `unknown`).
 export { requirementsHash } from "./hashing";
