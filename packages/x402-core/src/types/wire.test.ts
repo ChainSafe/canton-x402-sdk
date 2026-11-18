@@ -129,7 +129,7 @@ describe("x402-core wire types", () => {
       networkId: "eip155:1",
       verify: () => Promise.resolve({ isValid: true }),
     };
-    await expect(verifier.verify(request.paymentPayload, request.paymentRequirements, [])).resolves.toEqual({
+    await expect(verifier.verify(request.paymentPayload, request.paymentRequirements, { payerPublicKeys: [] })).resolves.toEqual({
       isValid: true,
     });
   });

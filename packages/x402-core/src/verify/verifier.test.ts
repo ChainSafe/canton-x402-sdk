@@ -26,6 +26,7 @@ import type { EncodeOptions } from "./prepared-tx.fixtures";
 import type {
   CantonPaymentPayload,
   CantonPaymentRequirements,
+  CantonVerifyContext,
   SchemeVerifier,
 } from "../index";
 import { DEVNET_NETWORK, MAINNET_NETWORK } from "../networks";
@@ -46,6 +47,18 @@ const gzipped = (protobufB64: string): string =>
  * that leans on one proves nothing.
  */
 const OTHER_PARTY_KEY = toB64(getPublicKey(new Uint8Array(32).fill(7)));
+
+/**
+ * The success shape. `extensions.signedBy` is the fingerprint of the key that
+ * verified — what a Canton submission names beside the signature. It defaults
+ * to the party's `::` suffix because every fixture here signs with the key
+ * that suffix names; the rotation test is the one that passes another.
+ */
+const verified = (payer: string, signedBy: string = payer.split("::")[1] as string) => ({
+  isValid: true,
+  payer,
+  extensions: { signedBy },
+});
 
 async function buildSignedFixture(
   overrides: {
@@ -206,8 +219,8 @@ describe("cantonExactVerifier", () => {
 
   it("accepts a well-formed, correctly-signed payload", async () => {
     const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture();
-    const result = await verifier.verify(payload, requirements, payerPublicKeys);
-    expect(result).toEqual({ isValid: true, payer });
+    const result = await verifier.verify(payload, requirements, { payerPublicKeys });
+    expect(result).toEqual(verified(payer));
   });
 
   it("rejects a hash that is not bound to the prepared transaction", async () => {
@@ -222,7 +235,7 @@ describe("cantonExactVerifier", () => {
       },
     };
 
-    const result = await verifier.verify(maliciousPayload, requirements, payerPublicKeys);
+    const result = await verifier.verify(maliciousPayload, requirements, { payerPublicKeys });
 
     expect(result).toMatchObject({
       isValid: false,
@@ -242,7 +255,7 @@ describe("cantonExactVerifier", () => {
       },
     };
 
-    expect(await verifier.verify(maliciousPayload, requirements, payerPublicKeys)).toMatchObject({
+    expect(await verifier.verify(maliciousPayload, requirements, { payerPublicKeys })).toMatchObject({
       isValid: false,
       invalidReason: "invalid_exact_canton_malformed_payload",
       extensions: { reason: "invalid_prepared_transaction_structure", detail: "duplicate_reference" },
@@ -257,7 +270,7 @@ describe("cantonExactVerifier", () => {
         ...requirements,
         scheme: "batch-settlement-canton",
       },
-      payerPublicKeys,
+      { payerPublicKeys },
     );
     expect(result).toEqual({
       isValid: false,
@@ -272,7 +285,7 @@ describe("cantonExactVerifier", () => {
     const result = await verifier.verify(
       { ...payload, accepted: { ...payload.accepted, network: other } },
       { ...requirements, network: other },
-      payerPublicKeys,
+      { payerPublicKeys },
     );
     expect(result).toEqual({
       isValid: false,
@@ -287,7 +300,7 @@ describe("cantonExactVerifier", () => {
     const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture();
     for (const requirementsHash of [requirementsHashOf(requirements), "deadbeef"]) {
       const p = { ...payload, payload: { ...payload.payload, requirementsHash } };
-      expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({ isValid: true, payer });
+      expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual(verified(payer));
     }
   });
 
@@ -297,7 +310,7 @@ describe("cantonExactVerifier", () => {
     // reports as having paid.
     const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture();
     const p = { ...payload, payload: { ...payload.payload, payer: "mallory::1220wrong" } };
-    expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({ isValid: true, payer });
+    expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual(verified(payer));
   });
 
   it("refuses a key that is not the sender's: a transfer from another party, signed with this key", async () => {
@@ -329,7 +342,7 @@ describe("cantonExactVerifier", () => {
       },
     };
     const victimKeys = [toB64(getPublicKey(new Uint8Array(32).fill(9)))];
-    expect(await verifier.verify(p, requirements, victimKeys)).toEqual({
+    expect(await verifier.verify(p, requirements, { payerPublicKeys: victimKeys })).toEqual({
       isValid: false,
       invalidReason: "invalid_exact_canton_signature_invalid",
       payer: victim,
@@ -346,7 +359,7 @@ describe("cantonExactVerifier", () => {
         signature: signatureToBase64("ff".repeat(64)),
       },
     };
-    expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({
+    expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual({
       isValid: false,
       invalidReason: "invalid_exact_canton_signature_invalid",
       payer,
@@ -377,7 +390,7 @@ describe("cantonExactVerifier", () => {
       ],
     ] as const;
     for (const [req, detail, invalidReason] of cases) {
-      expect(await verifier.verify(payload, req, payerPublicKeys)).toEqual({
+      expect(await verifier.verify(payload, req, { payerPublicKeys })).toEqual({
         isValid: false,
         invalidReason,
         payer,
@@ -412,7 +425,7 @@ describe("cantonExactVerifier", () => {
       { extra: { node: wrap(1, new Uint8Array()) } },
     );
     const p = { ...payload, payload: { ...payload.payload, preparedTransaction: gzipped(preparedTransaction) } };
-    expect(await verifier.verify(p, requirements, payerPublicKeys)).toMatchObject({
+    expect(await verifier.verify(p, requirements, { payerPublicKeys })).toMatchObject({
       isValid: false,
       invalidReason: "invalid_exact_canton_malformed_payload",
       extensions: { reason: "transfer_mismatch", detail: "undecodable" },
@@ -432,7 +445,7 @@ describe("cantonExactVerifier", () => {
       { nodes: [encodeNode("0", wrap(1, new Uint8Array()))] },
     );
     const p = { ...payload, payload: { ...payload.payload, preparedTransaction: gzipped(preparedTransaction) } };
-    expect(await verifier.verify(p, requirements, payerPublicKeys)).toMatchObject({
+    expect(await verifier.verify(p, requirements, { payerPublicKeys })).toMatchObject({
       isValid: false,
       invalidReason: "invalid_exact_canton_malformed_payload",
       extensions: { reason: "invalid_prepared_transaction_structure", detail: "duplicate_node_id" },
@@ -459,7 +472,7 @@ describe("cantonExactVerifier", () => {
     // valid base64 too, so the 64-byte check is what refuses it.
     for (const variant of [signatureHex, signature.replace(/=+$/, ""), nonCanonical, urlSafe, ` ${signature}`]) {
       const p = { ...payload, payload: { ...payload.payload, signature: variant } };
-      expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({
+      expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual({
         isValid: false,
         invalidReason: "invalid_exact_canton_signature_invalid",
         payer,
@@ -473,7 +486,7 @@ describe("cantonExactVerifier", () => {
     // characters and throws.
     const { payload, requirements, payerPublicKeys } = await buildSignedFixture();
     const p = { ...payload, payload: { ...payload.payload, signature: "A".repeat(5 * 1024 * 1024) } };
-    expect(await verifier.verify(p, requirements, payerPublicKeys)).toMatchObject({
+    expect(await verifier.verify(p, requirements, { payerPublicKeys })).toMatchObject({
       isValid: false,
       invalidReason: "invalid_exact_canton_signature_invalid",
       extensions: { reason: "bad_signature" },
@@ -489,7 +502,7 @@ describe("cantonExactVerifier", () => {
     for (const preparedTxHash of [hash.toUpperCase(), `1220${hash}`, `${hash}00`, hash.slice(2)]) {
       const signature = signatureToBase64(signHash(preparedTxHash, seedB64));
       const p = { ...payload, payload: { ...payload.payload, preparedTxHash, signature } };
-      expect(await verifier.verify(p, requirements, payerPublicKeys)).toMatchObject({
+      expect(await verifier.verify(p, requirements, { payerPublicKeys })).toMatchObject({
         isValid: false,
         invalidReason: "invalid_exact_canton_signature_invalid",
         extensions: { reason: "bad_signature" },
@@ -503,7 +516,7 @@ describe("cantonExactVerifier", () => {
       const { [field]: _omit, ...without } = payload.payload;
       for (const inner of [without, { ...payload.payload, [field]: 7 }]) {
         const p = { ...payload, payload: inner } as unknown as CantonPaymentPayload;
-        expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({
+        expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual({
           isValid: false,
           invalidReason: "invalid_exact_canton_missing_proof",
           extensions: { reason: "internal_error" },
@@ -523,7 +536,7 @@ describe("cantonExactVerifier", () => {
     ] as const;
     for (const [field, extensions] of cases) {
       const p = { ...payload, payload: { ...payload.payload, [field]: "" } };
-      expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({
+      expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual({
         isValid: false,
         invalidReason: "invalid_exact_canton_malformed_payload",
         extensions,
@@ -540,7 +553,7 @@ describe("cantonExactVerifier", () => {
     const { signature: _sig, ...noSignature } = payload.payload;
     for (const inner of [noSignature, []]) {
       const p = { ...payload, payload: inner } as unknown as CantonPaymentPayload;
-      expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({
+      expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual({
         isValid: false,
         invalidReason: "invalid_exact_canton_missing_proof",
         extensions: { reason: "internal_error" },
@@ -566,7 +579,7 @@ describe("cantonExactVerifier", () => {
     // The protobuf without gzip is what a payer built before this sends.
     for (const preparedTransaction of [protobuf, overCap, trailing]) {
       const p = { ...payload, payload: { ...payload.payload, preparedTransaction } };
-      expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({
+      expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual({
         isValid: false,
         invalidReason: "invalid_exact_canton_malformed_payload",
         extensions: { reason: "transfer_mismatch", detail: "undecodable" },
@@ -581,7 +594,7 @@ describe("cantonExactVerifier", () => {
     const variants = [withoutMethod, { ...payload.payload, assetTransferMethod: "transfer-preapproval" }];
     for (const inner of variants) {
       const p = { ...payload, payload: inner } as unknown as CantonPaymentPayload;
-      expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({
+      expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual({
         isValid: false,
         invalidReason: "invalid_exact_canton_malformed_payload",
         extensions: { reason: "internal_error" },
@@ -596,7 +609,7 @@ describe("cantonExactVerifier", () => {
       ...payload,
       payload: { ...rest, preparedTransactionHash: preparedTxHash, partySignature: signature },
     };
-    expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({
+    expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual({
       isValid: false,
       invalidReason: "invalid_exact_canton_missing_proof",
       extensions: { reason: "internal_error" },
@@ -609,7 +622,7 @@ describe("cantonExactVerifier", () => {
     const fixture = await buildSignedFixture();
     const nowMicros = BigInt(Date.now()) * 1000n;
     for (const micros of [nowMicros - 60_000_000n, nowMicros, nowMicros + 1_000_000n]) {
-      expect(await verifier.verify(await reDeadline(fixture, micros), fixture.requirements, fixture.payerPublicKeys)).toMatchObject({
+      expect(await verifier.verify(await reDeadline(fixture, micros), fixture.requirements, { payerPublicKeys: fixture.payerPublicKeys })).toMatchObject({
         isValid: false,
         invalidReason: "invalid_exact_canton_expired",
         extensions: { reason: "transfer_expired" },
@@ -622,7 +635,7 @@ describe("cantonExactVerifier", () => {
     // reading an absent field as unlimited would make Rule 10 skippable by
     // leaving the field out.
     const fixture = await buildSignedFixture();
-    expect(await verifier.verify(await reDeadline(fixture, undefined), fixture.requirements, fixture.payerPublicKeys)).toMatchObject({
+    expect(await verifier.verify(await reDeadline(fixture, undefined), fixture.requirements, { payerPublicKeys: fixture.payerPublicKeys })).toMatchObject({
       isValid: false,
       invalidReason: "invalid_exact_canton_expired",
       extensions: { reason: "transfer_expired" },
@@ -631,12 +644,12 @@ describe("cantonExactVerifier", () => {
 
   it("binds the memo when the merchant quotes one (Rule 12)", async () => {
     const quoted = await buildSignedFixture({ memo: "invoice-2024-001" });
-    expect(await verifier.verify(quoted.payload, quoted.requirements, quoted.payerPublicKeys)).toMatchObject({ isValid: true });
+    expect(await verifier.verify(quoted.payload, quoted.requirements, { payerPublicKeys: quoted.payerPublicKeys })).toMatchObject({ isValid: true });
 
     // Signed a different memo, or none, against requirements that quote one.
     for (const memo of ["invoice-2024-002", undefined]) {
       const other = await buildSignedFixture(memo === undefined ? {} : { memo });
-      expect(await verifier.verify(other.payload, quoted.requirements, other.payerPublicKeys)).toMatchObject({
+      expect(await verifier.verify(other.payload, quoted.requirements, { payerPublicKeys: other.payerPublicKeys })).toMatchObject({
         invalidReason: "invalid_exact_canton_memo_mismatch",
         extensions: { reason: "transfer_mismatch", detail: "memo" },
       });
@@ -649,7 +662,7 @@ describe("cantonExactVerifier", () => {
     // expensive one, for any merchant that matches ledger payments by memo.
     const { requirements, payerPublicKeys } = await buildSignedFixture();
     const withMemo = await buildSignedFixture({ memo: "someone else's order" });
-    expect(await verifier.verify(withMemo.payload, requirements, payerPublicKeys)).toMatchObject({
+    expect(await verifier.verify(withMemo.payload, requirements, { payerPublicKeys })).toMatchObject({
       isValid: false,
       invalidReason: "invalid_exact_canton_memo_mismatch",
       extensions: { reason: "transfer_mismatch", detail: "memo" },
@@ -668,7 +681,7 @@ describe("cantonExactVerifier", () => {
       memo: "order-EXPENSIVE-999",
       blankLabels: ["meta"],
     });
-    expect(await verifier.verify(hidden.payload, requirements, payerPublicKeys)).toMatchObject({
+    expect(await verifier.verify(hidden.payload, requirements, { payerPublicKeys })).toMatchObject({
       isValid: false,
       invalidReason: "invalid_exact_canton_memo_mismatch",
       extensions: { reason: "transfer_mismatch", detail: "memo" },
@@ -681,7 +694,7 @@ describe("cantonExactVerifier", () => {
     // transfer decodes, which is why the payer is named where the old
     // missing-key refusal named nobody.
     const { payload, requirements, payer } = await buildSignedFixture();
-    expect(await verifier.verify(payload, requirements, [])).toEqual({
+    expect(await verifier.verify(payload, requirements, { payerPublicKeys: [] })).toEqual({
       isValid: false,
       invalidReason: "invalid_exact_canton_signature_invalid",
       payer,
@@ -694,7 +707,7 @@ describe("cantonExactVerifier", () => {
     // is not special-cased, because the lookup by party is what binds the set.
     const { payload, requirements, payer } = await buildSignedFixture();
     for (const keys of [[OTHER_PARTY_KEY], [toB64(new Uint8Array(31))]]) {
-      expect(await verifier.verify(payload, requirements, keys)).toEqual({
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys: keys })).toEqual({
         isValid: false,
         invalidReason: "invalid_exact_canton_signature_invalid",
         payer,
@@ -703,17 +716,45 @@ describe("cantonExactVerifier", () => {
     }
   });
 
-  it("accepts a signature made by ANY key the party publishes, not just the first", async () => {
-    // Canton lets a party publish up to 20 signing keys with a threshold, and a
-    // party mid-rotation publishes two. The payload does not say which signed, so
-    // every published key is tried. Narrowing to the one whose fingerprint equals
-    // the party's `::` suffix — its NAMESPACE fingerprint — would refuse this.
+  it("accepts a key the party publishes that is NOT the one its `::` suffix names", async () => {
+    // THE CASE THE ANY-KEY RULE EXISTS FOR, and the only one in this file that
+    // tells the two behaviours apart. A party's `::` suffix is its NAMESPACE
+    // fingerprint, which equals a signing key's only while it publishes one;
+    // mid-rotation it publishes two, and the new key's fingerprint is not the
+    // suffix. Every other fixture here signs with the key the suffix names, so
+    // narrowing to that key passes all of them — an earlier version of this
+    // test included. Re-add the filter and this is what fails.
     const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture();
-    const rotating = [OTHER_PARTY_KEY, ...payerPublicKeys];
-    // Two DIFFERENT keys, the signer second: the point is that the first one not
-    // matching does not end the search.
-    expect(new Set(rotating).size).toBe(2);
-    expect(await verifier.verify(payload, requirements, rotating)).toEqual({ isValid: true, payer });
+    const namespaceKey = payerPublicKeys[0] as string;
+    const rotatedSeed = new Uint8Array(32).fill(11);
+    const rotatedKey = toB64(getPublicKey(rotatedSeed));
+    const suffix = payer.split("::")[1] as string;
+    // What makes the case: the signer's fingerprint is NOT the party's suffix.
+    expect(fingerprintForPublicKey(namespaceKey)).toBe(suffix);
+    expect(fingerprintForPublicKey(rotatedKey)).not.toBe(suffix);
+
+    // The same transaction, signed by the rotated key instead of the namespace one.
+    const p = {
+      ...payload,
+      payload: {
+        ...payload.payload,
+        signature: signatureToBase64(signHash(payload.payload.preparedTxHash, toB64(rotatedSeed))),
+      },
+    };
+    // Namespace key first, so this also pins that a key which does not verify
+    // is not the end of the search.
+    expect(await verifier.verify(p, requirements, { payerPublicKeys: [namespaceKey, rotatedKey] })).toEqual(
+      // signedBy is the ROTATED key, not the party's `::` suffix: that is the
+      // value a submission must carry, and the suffix would be the wrong one.
+      verified(payer, fingerprintForPublicKey(rotatedKey)),
+    );
+    // And it is genuinely the rotated key that signed: without it, refused.
+    expect(await verifier.verify(p, requirements, { payerPublicKeys: [namespaceKey] })).toEqual({
+      isValid: false,
+      invalidReason: "invalid_exact_canton_signature_invalid",
+      payer,
+      extensions: { reason: "bad_signature" },
+    });
   });
 
   it("refuses a payment with no usable accepted, or a pre-spec envelope, with unsupported_scheme rather than a throw", async () => {
@@ -728,7 +769,7 @@ describe("cantonExactVerifier", () => {
       { ...noAccepted, scheme: "exact", network: NETWORK },
     ];
     for (const p of variants) {
-      expect(await verifier.verify(p as unknown as CantonPaymentPayload, requirements, payerPublicKeys)).toEqual({
+      expect(await verifier.verify(p as unknown as CantonPaymentPayload, requirements, { payerPublicKeys })).toEqual({
         isValid: false,
         invalidReason: "unsupported_scheme",
         extensions: { reason: "scheme_mismatch" },
@@ -739,7 +780,7 @@ describe("cantonExactVerifier", () => {
   it("refuses an x402Version other than 2", async () => {
     const { payload, requirements, payerPublicKeys } = await buildSignedFixture();
     const p = { ...payload, x402Version: 1 } as unknown as CantonPaymentPayload;
-    expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({
+    expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual({
       isValid: false,
       invalidReason: "invalid_x402_version",
       extensions: { reason: "internal_error" },
@@ -751,7 +792,7 @@ describe("cantonExactVerifier", () => {
     // name the same scheme and network. One that differs elsewhere verifies.
     const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture();
     const accepted = { ...requirements, amount: "1", payTo: "someoneelse::1220" };
-    expect(await verifier.verify({ ...payload, accepted }, requirements, payerPublicKeys)).toEqual({ isValid: true, payer });
+    expect(await verifier.verify({ ...payload, accepted }, requirements, { payerPublicKeys })).toEqual(verified(payer));
   });
 
   it("verifies a payment carrying resource and extensions, or null for either", async () => {
@@ -761,7 +802,7 @@ describe("cantonExactVerifier", () => {
       { ...payload, resource: null, extensions: null },
     ];
     for (const p of variants) {
-      expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({ isValid: true, payer });
+      expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual(verified(payer));
     }
   });
 
@@ -769,7 +810,7 @@ describe("cantonExactVerifier", () => {
     const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture();
     const { hashingSchemeVersion: _omit, ...innerNoScheme } = payload.payload;
     const p = { ...payload, payload: innerNoScheme };
-    expect(await verifier.verify(p, requirements, payerPublicKeys)).toEqual({ isValid: true, payer });
+    expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual(verified(payer));
   });
 
   // A signed TransferFactory_Transfer either delivers to the receiver now or
@@ -785,7 +826,7 @@ describe("cantonExactVerifier", () => {
 
     it("refuses a transfer that delivers nothing", async () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({ delivery: null });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(refusal("no_direct_delivery"));
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(refusal("no_direct_delivery"));
     });
 
     it("refuses a consequence that is not a delivery choice", async () => {
@@ -793,7 +834,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { choiceId: "AllocationFactory_TransferInternal" },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(refusal("no_direct_delivery"));
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(refusal("no_direct_delivery"));
     });
 
     it("refuses a delivery choice whose template module alone is wrong", async () => {
@@ -801,19 +842,19 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { moduleName: "Splice.Wallet" },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(refusal("no_direct_delivery"));
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(refusal("no_direct_delivery"));
     });
 
     it("refuses a delivery choice whose template entity alone is wrong", async () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { entityName: "Impostor" },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(refusal("no_direct_delivery"));
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(refusal("no_direct_delivery"));
     });
 
     it("refuses two deliveries, since binding either leaves the other unchecked", async () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({ delivery: { duplicate: true } });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(refusal("delivery_ambiguous"));
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(refusal("delivery_ambiguous"));
     });
 
     it("refuses a delivery whose preapproval the transaction never discloses", async () => {
@@ -821,7 +862,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { omitDisclosure: true },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(refusal("delivery_unresolved"));
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(refusal("delivery_unresolved"));
     });
 
     it("refuses a preapproval belonging to someone else", async () => {
@@ -830,14 +871,14 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { receiver: "someone-else::1220other" },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(refusal("delivery_receiver"));
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(refusal("delivery_receiver"));
     });
 
     it("refuses a preapproval under another issuer", async () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { dso: "other-dso::1220other" },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(refusal("delivery_admin"));
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(refusal("delivery_admin"));
     });
 
     it("refuses a disclosure carrying an extra signatory", async () => {
@@ -848,14 +889,14 @@ describe("cantonExactVerifier", () => {
           signatories: ["DSO::1220dso", "merchant::1220merch", "app-provider::1220prov", "extra::1220x"],
         },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(refusal("delivery_signatories"));
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(refusal("delivery_signatories"));
     });
 
     it("refuses a disclosure missing one of the trio", async () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { signatories: ["DSO::1220dso", "merchant::1220merch", "stranger::1220s"] },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(refusal("delivery_signatories"));
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(refusal("delivery_signatories"));
     });
 
     it("accepts a merchant that provides its own preapproval", async () => {
@@ -870,7 +911,7 @@ describe("cantonExactVerifier", () => {
           signatories: ["DSO::1220dso", "merchant::1220merch"],
         },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject({ isValid: true });
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
 
     it("refuses a preapproval where one party fills all three roles", async () => {
@@ -886,7 +927,7 @@ describe("cantonExactVerifier", () => {
           signatories: ["merchant::1220merch"],
         },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_signatories"),
       );
     });
@@ -897,7 +938,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { rolledBack: true },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("no_direct_delivery"),
       );
     });
@@ -905,7 +946,7 @@ describe("cantonExactVerifier", () => {
     it("accepts Canton Coin's preapproval delivery, bound to this merchant", async () => {
       // What the captured LocalNet payment carries.
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture();
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject({ isValid: true });
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
 
     const registryDelivery = {
@@ -920,7 +961,7 @@ describe("cantonExactVerifier", () => {
         instrumentId: usdx,
         delivery: registryDelivery,
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject({ isValid: true });
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
 
     it("refuses a Canton Coin payment carrying a registry delivery beside it", async () => {
@@ -934,7 +975,7 @@ describe("cantonExactVerifier", () => {
           delivers: { receiver: "mallory::1220bad", amount: "999.0" },
         },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_unchecked"),
       );
     });
@@ -952,7 +993,7 @@ describe("cantonExactVerifier", () => {
           delivers: { receiver: "mallory::1220bad", amount: "999.0" },
         },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_unchecked"),
       );
     });
@@ -971,7 +1012,7 @@ describe("cantonExactVerifier", () => {
           delivers: { receiver: "mallory::1220bad", amount: "999.0" },
         },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject({ isValid: false });
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: false });
     });
 
     it("refuses a dust send against a correctly bound preapproval", async () => {
@@ -982,7 +1023,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { sendAmount: "0.0000000001" },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_amount"),
       );
     });
@@ -998,7 +1039,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { sendAmount: "0.0100000000" },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject({ isValid: true });
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
 
     it("refuses a send whose argument carries no amount at all", async () => {
@@ -1008,7 +1049,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { omitDelivers: true },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_amount"),
       );
     });
@@ -1020,7 +1061,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { choiceId: "TransferPreapproval_Send" },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_legacy_send"),
       );
     });
@@ -1033,7 +1074,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: { blankDisclosureLabels: ["dso"] },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject({ isValid: true });
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
 
     it("refuses a disclosure whose label contradicts the position it sits in", async () => {
@@ -1048,7 +1089,7 @@ describe("cantonExactVerifier", () => {
           relabelDisclosure: { receiver: "recipient" },
         },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_unresolved"),
       );
     });
@@ -1063,7 +1104,7 @@ describe("cantonExactVerifier", () => {
         instrumentId: usdx,
         delivery: { ...registryDelivery, omitDisclosure: true },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_unresolved"),
       );
     });
@@ -1079,7 +1120,7 @@ describe("cantonExactVerifier", () => {
           signatories: ["someone-else::1220other", "bridge-operator::1220bridge"],
         },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_admin"),
       );
     });
@@ -1091,7 +1132,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         delivery: registryDelivery,
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("no_direct_delivery"),
       );
     });
@@ -1105,7 +1146,7 @@ describe("cantonExactVerifier", () => {
         instrumentId: usdx,
         delivery: { ...registryDelivery, delivers: { receiver: "mallory::1220bad" } },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_receiver"),
       );
     });
@@ -1115,7 +1156,7 @@ describe("cantonExactVerifier", () => {
         instrumentId: usdx,
         delivery: { ...registryDelivery, delivers: { amount: "0.0000000001" } },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(refusal("delivery_amount"));
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(refusal("delivery_amount"));
     });
 
     it("reads the amount as a decimal, so spelling alone does not refuse", async () => {
@@ -1125,7 +1166,7 @@ describe("cantonExactVerifier", () => {
         instrumentId: usdx,
         delivery: { ...registryDelivery, delivers: { amount: "0.01" } },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject({ isValid: true });
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
 
     it("refuses a registry delivery from another sender", async () => {
@@ -1133,7 +1174,7 @@ describe("cantonExactVerifier", () => {
         instrumentId: usdx,
         delivery: { ...registryDelivery, delivers: { sender: "someone::1220else" } },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(refusal("delivery_sender"));
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(refusal("delivery_sender"));
     });
 
     it("refuses a registry delivery that carries no transfer record", async () => {
@@ -1143,7 +1184,7 @@ describe("cantonExactVerifier", () => {
         instrumentId: usdx,
         delivery: { ...registryDelivery, omitDelivers: true },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_unresolved"),
       );
     });
@@ -1157,7 +1198,7 @@ describe("cantonExactVerifier", () => {
           delivers: { instrumentId: { id: usdx.id, admin: "other-issuer::1220other" } },
         },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_instrument"),
       );
     });
@@ -1170,7 +1211,7 @@ describe("cantonExactVerifier", () => {
           delivers: { instrumentId: { id: "OTHER", admin: usdx.admin } },
         },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_instrument"),
       );
     });
@@ -1181,7 +1222,7 @@ describe("cantonExactVerifier", () => {
         instrumentId: usdx,
         delivery: { ...registryDelivery, duplicate: true },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("delivery_ambiguous"),
       );
     });
@@ -1191,7 +1232,7 @@ describe("cantonExactVerifier", () => {
         instrumentId: usdx,
         delivery: null,
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         refusal("no_direct_delivery"),
       );
     });
@@ -1221,7 +1262,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         creates: [{ signatories: [payer, "mallory::1220bad"] }],
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         malformed("create_unissued"),
       );
     });
@@ -1233,7 +1274,7 @@ describe("cantonExactVerifier", () => {
       const withChange = await buildSignedFixture({
         creates: [{ signatories: ["DSO::1220dso", payer] }],
       });
-      expect(await verifier.verify(withChange.payload, withChange.requirements, payerPublicKeys)).toMatchObject({
+      expect(await verifier.verify(withChange.payload, withChange.requirements, { payerPublicKeys })).toMatchObject({
         isValid: true,
       });
     });
@@ -1245,7 +1286,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         creates: [{ signatories: ["merchant::1220merch", "someone::1220else"] }],
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject({ isValid: true });
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
   });
 
@@ -1261,7 +1302,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         factory: { inputContracts: [] },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         factoryRefusal("factory_unresolved"),
       );
     });
@@ -1274,7 +1315,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         factory: { inputContracts: [{ contractId: "00" + "ab".repeat(31) }] },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         factoryRefusal("factory_unresolved"),
       );
     });
@@ -1284,7 +1325,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         factory: { inputContracts: [{}, {}] },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         factoryRefusal("factory_unresolved"),
       );
     });
@@ -1296,7 +1337,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         factory: { inputContracts: [{ templateId: { moduleName: "Splice.Wallet" } }] },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         factoryRefusal("factory_unresolved"),
       );
     });
@@ -1307,7 +1348,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         factory: { inputContracts: [{ templateId: { entityName: "NotTheSameEntity" } }] },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         factoryRefusal("factory_unresolved"),
       );
     });
@@ -1318,7 +1359,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         factory: { contractId: "" },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         factoryRefusal("factory_unresolved"),
       );
     });
@@ -1329,7 +1370,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         factory: { inputContracts: [{ packageName: "not-splice-amulet" }] },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         factoryRefusal("factory_unresolved"),
       );
     });
@@ -1340,7 +1381,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         factory: { omitInterfaceId: true },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         factoryRefusal("factory_interface"),
       );
     });
@@ -1349,7 +1390,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         factory: { interfaceId: { moduleName: "Splice.Wallet.Impostor" } },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         factoryRefusal("factory_interface"),
       );
     });
@@ -1360,7 +1401,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         factory: { interfaceId: { entityName: "NotTransferFactory" } },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject(
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
         factoryRefusal("factory_interface"),
       );
     });
@@ -1377,14 +1418,14 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         factory: { inputContracts: [{ signatories: ["someone-else::1220other"] }] },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject({ isValid: true });
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
 
     it("accepts the real factory", async () => {
       // The same path the refusals above deviate from, so they are known to
       // fail on the rule and not on the fixture.
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture();
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject({ isValid: true });
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
 
     it("accepts a factory whose template is not Canton Coin's", async () => {
@@ -1397,7 +1438,7 @@ describe("cantonExactVerifier", () => {
           templateId: { moduleName: "Other.Registry.Rules", entityName: "OtherRules" },
         },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject({ isValid: true });
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
 
     it("accepts an exercise and a disclosure whose package IDS differ", async () => {
@@ -1409,7 +1450,7 @@ describe("cantonExactVerifier", () => {
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
         factory: { inputContracts: [{ templateId: { packageId: "a".repeat(64) } }] },
       });
-      expect(await verifier.verify(payload, requirements, payerPublicKeys)).toMatchObject({ isValid: true });
+      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
   });
 
@@ -1427,12 +1468,12 @@ describe("createVerifierRegistry", () => {
 
   it("dispatches a payload to its verifier", async () => {
     const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture();
-    expect(await registry.verify(payload, requirements, payerPublicKeys)).toEqual({ isValid: true, payer });
+    expect(await registry.verify(payload, requirements, { payerPublicKeys })).toEqual(verified(payer));
   });
 
   it("answers invalid_network for a registered scheme on a network it does not serve (Rule 1)", async () => {
     const { payload, requirements, payerPublicKeys } = await buildSignedFixture();
-    expect(await registry.verify(payload, { ...requirements, network: "canton:testnet" }, payerPublicKeys)).toEqual({
+    expect(await registry.verify(payload, { ...requirements, network: "canton:testnet" }, { payerPublicKeys })).toEqual({
       isValid: false,
       invalidReason: "invalid_network",
       // What the registry answered before, for any pair it had no verifier for.
@@ -1442,7 +1483,7 @@ describe("createVerifierRegistry", () => {
 
   it("answers unsupported_scheme for a scheme it has no verifier for (Rule 1)", async () => {
     const { payload, requirements, payerPublicKeys } = await buildSignedFixture();
-    expect(await registry.verify(payload, { ...requirements, scheme: "upto" }, payerPublicKeys)).toEqual({
+    expect(await registry.verify(payload, { ...requirements, scheme: "upto" }, { payerPublicKeys })).toEqual({
       isValid: false,
       invalidReason: "unsupported_scheme",
       extensions: { reason: "scheme_mismatch" },
@@ -1454,7 +1495,7 @@ describe("createVerifierRegistry", () => {
     // the specific verdict (Rule 1), rather than a generic no-verifier answer.
     const { payload, requirements, payerPublicKeys } = await buildSignedFixture();
     const p = { ...payload, accepted: { ...payload.accepted, network: "canton:testnet" } };
-    expect(await registry.verify(p, requirements, payerPublicKeys)).toEqual({ isValid: false, invalidReason: "invalid_network", extensions: { reason: "network_mismatch" } });
+    expect(await registry.verify(p, requirements, { payerPublicKeys })).toEqual({ isValid: false, invalidReason: "invalid_network", extensions: { reason: "network_mismatch" } });
   });
 
   it("adding a scheme = registering another SchemeVerifier (no dispatcher change)", async () => {
@@ -1468,10 +1509,10 @@ describe("createVerifierRegistry", () => {
     const multi = createVerifierRegistry([verifier, evmVerifier]);
     const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture();
 
-    expect(await multi.verify(payload, requirements, payerPublicKeys)).toEqual({ isValid: true, payer });
+    expect(await multi.verify(payload, requirements, { payerPublicKeys })).toEqual(verified(payer));
     const evmReq = { ...requirements, scheme: "exact-evm-to-canton-cc", network: "eip155:1" };
     const evmPayload = { x402Version: 2 as const, accepted: evmReq, payload: {} };
-    expect(await multi.verify(evmPayload, evmReq, [])).toEqual({ isValid: true, payer: "0xpayer" });
+    expect(await multi.verify(evmPayload, evmReq, { payerPublicKeys: [] })).toEqual({ isValid: true, payer: "0xpayer" });
   });
 });
 
@@ -1491,9 +1532,16 @@ describe("the ids the verifier answers to", () => {
     };
   }
 
-  const verifies = async (v: SchemeVerifier, scheme: string, network = NETWORK) => {
+  // Typed to the context this scheme needs, not the bare `SchemeVerifier`
+  // whose context defaults to `unknown` — with that, passing the key array
+  // where a context belongs type-checks and silently verifies with no keys.
+  const verifies = async (
+    v: SchemeVerifier<CantonVerifyContext>,
+    scheme: string,
+    network = NETWORK,
+  ) => {
     const f = await fixtureFor(scheme, network);
-    return v.verify(f.payload, f.requirements, f.payerPublicKeys);
+    return v.verify(f.payload, f.requirements, { payerPublicKeys: f.payerPublicKeys });
   };
 
   const verifier = createCantonExactVerifier(NETWORK);
@@ -1528,7 +1576,7 @@ describe("the ids the verifier answers to", () => {
     // Both sides are checked, so naming the right id on one is not enough.
     const { payload, requirements, payerPublicKeys } = await fixtureFor(EXACT_SCHEME_ID, NETWORK);
     expect(
-      await verifier.verify({ ...payload, accepted: { ...payload.accepted, scheme: "exact-canton" } }, requirements, payerPublicKeys),
+      await verifier.verify({ ...payload, accepted: { ...payload.accepted, scheme: "exact-canton" } }, requirements, { payerPublicKeys }),
     ).toEqual({ isValid: false, invalidReason: "unsupported_scheme", extensions: { reason: "scheme_mismatch" } });
   });
 
@@ -1538,14 +1586,14 @@ describe("the ids the verifier answers to", () => {
     // would let this verify.
     const { payload, requirements, payerPublicKeys } = await fixtureFor(EXACT_SCHEME_ID, NETWORK);
     expect(
-      await verifier.verify(payload, { ...requirements, scheme: "exact-canton" }, payerPublicKeys),
+      await verifier.verify(payload, { ...requirements, scheme: "exact-canton" }, { payerPublicKeys }),
     ).toEqual({ isValid: false, invalidReason: "unsupported_scheme", extensions: { reason: "scheme_mismatch" } });
   });
 
   it("refuses requirements naming another network, even when the payload is right", async () => {
     const { payload, requirements, payerPublicKeys } = await fixtureFor(EXACT_SCHEME_ID, NETWORK);
     expect(
-      await verifier.verify(payload, { ...requirements, network: MAINNET_NETWORK }, payerPublicKeys),
+      await verifier.verify(payload, { ...requirements, network: MAINNET_NETWORK }, { payerPublicKeys }),
     ).toEqual({ isValid: false, invalidReason: "invalid_network", extensions: { reason: "network_mismatch" } });
   });
 
@@ -1560,7 +1608,7 @@ describe("the ids the verifier answers to", () => {
   it("refuses a payload and requirements that disagree about the network", async () => {
     const { payload, requirements, payerPublicKeys } = await fixtureFor(EXACT_SCHEME_ID, NETWORK);
     expect(
-      await verifier.verify({ ...payload, accepted: { ...payload.accepted, network: MAINNET_NETWORK } }, requirements, payerPublicKeys),
+      await verifier.verify({ ...payload, accepted: { ...payload.accepted, network: MAINNET_NETWORK } }, requirements, { payerPublicKeys }),
     ).toEqual({ isValid: false, invalidReason: "invalid_network", extensions: { reason: "network_mismatch" } });
   });
 });

@@ -21,12 +21,38 @@ party id already carries the fingerprint.
 
 ### If you call the verifier
 
-`SchemeVerifier.verify` and `VerifierRegistry.verify` take a third argument,
-`payerPublicKeys: readonly string[]` — the payer party's PUBLIC signing keys,
-base64 Ed25519, which the CALLER resolves before calling. The payer is the
-transfer's sender, which `decodePayloadTransfer` reads without verifying
+`SchemeVerifier.verify` and `VerifierRegistry.verify` take a third argument: the
+scheme's own **context**, the facts a caller must resolve before verifying. For
+Canton `exact` that is `CantonVerifyContext`, `{ payerPublicKeys }` — the payer
+party's PUBLIC signing keys, which the CALLER reads from the ledger. The payer
+is the transfer's sender, which `decodePayloadTransfer` reads without verifying
 anything, so a facilitator decodes, looks the party up, then verifies. Core
 stays synchronous and reads nothing itself.
+
+A context object rather than a bare array because `SchemeVerifier` is
+scheme-agnostic and another scheme needs other facts. It is generic —
+`SchemeVerifier<TContext = unknown>` — so a registry still holds verifiers for
+different schemes side by side, while a concrete verifier type-checks its own
+callers. Reach for the bare `SchemeVerifier` and the context is `unknown`,
+which accepts anything: name the context type when you hold one verifier.
+
+### Which key signed
+
+A successful verify now answers `extensions.signedBy`: the fingerprint of the
+key the signature actually verified under.
+
+A Canton submission names one key per signature in `partySignatures.signedBy`,
+and until now a facilitator derived it from the payload's `publicKey`. That
+field is gone, and the payer's `::` suffix is NOT a substitute — it is the
+party's NAMESPACE fingerprint, which equals a signing key's only while the
+party publishes one. A party mid-rotation publishes two, so the suffix can name
+a key that did not sign: verify would pass and the ledger would refuse the
+submission, after the facilitator had already committed.
+
+Core knows which key verified, because it just searched for it. Handing it back
+costs nothing and keeps one answer to "which key signed" rather than two that
+can drift — which matters here, since Ed25519 validity is encoding-sensitive
+and a second verifier would be free to disagree.
 
 A list because that is the shape the sources have — a JWKS `keys[]`, Canton's
 `partySigningKeys.keys[]` — and because a party may publish **up to 20** signing

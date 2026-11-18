@@ -58,14 +58,37 @@ export function parseX402Request(input: unknown): X402Request<unknown, unknown> 
 }
 
 /**
+ * What the CALLER resolves before a Canton `exact` payment can be verified.
+ * The mirror of `extensions` on the way out: facts in, facts out, both
+ * scheme-shaped.
+ */
+export interface CantonVerifyContext {
+  /**
+   * The payer party's PUBLIC signing keys, STANDARD base64 Ed25519 — not
+   * base64url, which is what a JWKS `x` is: most keys spell differently in the
+   * two, and an undecodable one is silently just a key that did not sign.
+   *
+   * Read from the ledger by the caller, because the payload carries none and
+   * the payer is the transfer's sender ({@link decodePayloadTransfer}). A
+   * party may publish several and the payload does not say which signed, so
+   * any one verifying is the party verifying; none refuses the payment. Which
+   * one did verify comes back as `extensions.signedBy`.
+   */
+  payerPublicKeys: readonly string[];
+}
+
+/**
  * The pure verification contract every scheme implements. Core owns it as the
  * single source of truth; the facilitator and any client conform to it. Method
  * interface → type-only.
  *
- * The params are the widest envelope (`unknown` inner and `extra`), so a heterogeneous
- * registry of verifiers type-checks and each verifier narrows via its own guard.
+ * The payload and requirements are the widest envelope (`unknown` inner and
+ * `extra`), so a heterogeneous registry of verifiers type-checks and each
+ * verifier narrows via its own guard. `TContext` is the same idea for what the
+ * caller must resolve first — a registry holds `SchemeVerifier` (context
+ * `unknown`), while a concrete verifier still type-checks its own callers.
  */
-export interface SchemeVerifier {
+export interface SchemeVerifier<TContext = unknown> {
   readonly schemeId: string;
   /** The concrete network this verifier is bound to, e.g. `canton:devnet`. */
   readonly networkId: NetworkId;
@@ -74,19 +97,14 @@ export interface SchemeVerifier {
    * a malformed payload is a refusal. Pure: replay, policy and settlement stay
    * with the caller.
    *
-   * `payerPublicKeys` are the payer party's PUBLIC keys, STANDARD base64
-   * Ed25519 — not base64url, which is what a JWKS `x` is: most keys spell
-   * differently in the two, and an undecodable one is silently just a key that
-   * did not sign. The CALLER reads them from the ledger first — the payload
-   * carries none, and the payer is the transfer's sender
-   * ({@link decodePayloadTransfer}). A party may publish several and the
-   * payload does not say which signed, so any one verifying is the party
-   * verifying; none refuses the payment.
+   * `context` is whatever this scheme needs looked up first — for Canton
+   * `exact`, {@link CantonVerifyContext}. A verifier narrows it with its own
+   * guard, exactly as it does the payload.
    */
   verify(
     payload: X402PaymentPayload<unknown, unknown>,
     requirements: X402PaymentRequirements<unknown>,
-    payerPublicKeys: readonly string[],
+    context: TContext,
   ): Promise<VerifyResponse>;
 }
 

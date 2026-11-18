@@ -17,13 +17,15 @@ export interface VerifierRegistry {
   find(scheme: string, network: NetworkId): SchemeVerifier | undefined;
   /**
    * Dispatch a payment to the verifier for its requirements; `unsupported_scheme`
-   * or `invalid_network` if none. `payerPublicKeys` is passed through untouched — see
-   * {@link SchemeVerifier.verify}, which says where they come from.
+   * or `invalid_network` if none. `context` is passed through untouched — see
+   * {@link SchemeVerifier.verify}, which says what a scheme expects in it. The
+   * registry is heterogeneous, so it cannot know the shape; the caller builds
+   * the one the requirements' scheme asks for.
    */
   verify(
     payload: X402PaymentPayload<unknown, unknown>,
     requirements: X402PaymentRequirements<unknown>,
-    payerPublicKeys: readonly string[],
+    context: unknown,
   ): Promise<VerifyResponse>;
 }
 
@@ -47,7 +49,7 @@ export function createVerifierRegistry(verifiers: readonly SchemeVerifier[]): Ve
     find(scheme, network) {
       return map.get(keyOf(scheme, network));
     },
-    async verify(payload, requirements, payerPublicKeys) {
+    async verify(payload, requirements, context) {
       const verifier = map.get(keyOf(requirements.scheme, requirements.network));
       if (!verifier) {
         // The older code rides along in extensions.reason, as the verifier's
@@ -55,7 +57,7 @@ export function createVerifierRegistry(verifiers: readonly SchemeVerifier[]): Ve
         const invalidReason = schemes.has(requirements.scheme) ? "invalid_network" : "unsupported_scheme";
         return { isValid: false, invalidReason, extensions: { reason: "scheme_mismatch" } };
       }
-      return verifier.verify(payload, requirements, payerPublicKeys);
+      return verifier.verify(payload, requirements, context);
     },
   };
 }
