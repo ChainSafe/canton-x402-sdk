@@ -61,12 +61,6 @@ function isTransferExpired(executeBeforeMicros: bigint | undefined, now: number 
   return executeBeforeMicros <= BigInt(now) * 1000n + EXECUTE_BEFORE_MARGIN_MICROS;
 }
 
-// ─── payload encodings ──────────────────────────────────────────────────────
-// The payload carries `preparedTxHash` as lower-case hex and `signature` as
-// base64, which are the spec's encodings. signHash / verifySignature stay in hex
-// because the facilitator's login flow calls them with hex too. The two
-// helpers below convert at the payload boundary, so the hex side never changes.
-
 /**
  * A refusal. `invalidReason` is the spec's code, the one a client written
  * against the spec matches on. `extensions.reason` is the code this verifier
@@ -292,8 +286,8 @@ async function verifyCantonExact(
   // 7-13. the payer's own key must prove this exact transaction.
   const proof = await checkProof(inner, payer, preparedBase64);
   if (proof) return proof;
-  // 14. The signed transfer must actually move what the quoted demand.
-  //     This is the payload's one binding to the quoted: the signature
+  // 14. The signed transfer must actually move what the quote demands.
+  //     This is the payload's one binding to the quote: the signature
   //     covers the prepared transaction, so checking receiver/instrument/amount
   //     rejects a valid signature over a divergent transfer (e.g. to another
   //     party, or a smaller amount).
@@ -301,7 +295,7 @@ async function verifyCantonExact(
   if (violation) return fail(VIOLATION_REASON[violation], "transfer_mismatch", payer, violation);
   // 15. the exercise must go through a real transfer factory, proved from the
   //     transaction's own input contracts. Placed after 14 because it reads
-  //     the admin that step has just held equal to the quoted', so the
+  //     the admin that step has just held equal to the quote's, so the
   //     two cannot disagree about which instrument this is.
   const factory = factoryViolation(transfer);
   if (factory) return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", payer, factory);

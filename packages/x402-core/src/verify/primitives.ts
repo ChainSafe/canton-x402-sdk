@@ -80,6 +80,11 @@ export function signHash(hashHex: string, privateKeyBase64: string): string {
   return bytesToHex(ed25519Sign(hexToBytes(hashHex), seed));
 }
 
+// ─── payload encodings ──────────────────────────────────────────────────────
+// The payload carries `preparedTxHash` as lower-case hex and `signature` as
+// base64, which are the spec's encodings. signHash / verifySignature stay in hex
+// because the facilitator's login flow calls them with hex too. The two
+// helpers below convert at the payload boundary, so the hex side never changes.
 
 /** 32 bytes as lower-case hex: the only form `preparedTxHash` takes. */
 export const PREPARED_TX_HASH = /^[0-9a-f]{64}$/;
