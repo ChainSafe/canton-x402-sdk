@@ -75,36 +75,41 @@ keyed on the transaction hash core recomputes from the signed bytes. What it
 refuses is a signed transaction presented twice, which is not what its name
 says.
 
-Three more settle codes go the same way, each to a code one of the specs
-already defines:
+Three more settle codes go, each to a code one of the specs already defines:
 
 | was | becomes |
 | --- | --- |
-| `execution_failed` | `invalid_exact_canton_execute_failed` — the scheme spec's own name for a definite ledger rejection |
-| `timeout` | `unexpected_settle_error`, with `timeout` in `errorDetails` |
+| `execution_failed` | `invalid_exact_canton_execute_failed` for a definite ledger rejection, the scheme spec's own name for one |
 | `bad_request` | `invalid_payload` for a malformed body; it was invented, and was never in this list on the verify side where it is also written |
+| `timeout` | nothing: since ChainSafe/canton-x402-facilitator#373 an unknown outcome is the non-terminal `settlement_pending`, so no facilitator sends it |
 
-`timeout` deliberately becomes `unexpected_settle_error` rather than
-`settlement_pending`, which keeps today's terminal behaviour exactly as it is.
-Whether an unreachable participant should instead be non-terminal is a real
-question the scheme spec has opinions about, and it belongs in its own change
-rather than inside a type narrowing.
+**A facilitator must migrate six codes,** the ones it still writes. Not all of
+them map one-for-one, because some are used for more than one cause:
 
-**A facilitator must migrate six codes.** `internal_error` and
-`facilitator_error` have one-for-one replacements in `unexpected_verify_error`
-and `unexpected_settle_error`. `nonce_replayed` does not: neither spec defines
-a replay refusal. A guard keyed on the transaction hash never sees a merchant
-reusing a reference; what it sees is the same signed transaction sent again,
-usually a retry after `settlement_pending`. The scheme spec's settle section
-says what that retry gets: while the submission is unresolved, the facilitator
-looks it up and answers `settlement_pending` again until it finds the outcome;
-one found rejected, or provably never recorded, is
-`invalid_exact_canton_execute_failed`; one found committed is answered with
-success once, and any later settle relays again and the ledger refuses the
-duplicate, which is `invalid_exact_canton_execute_failed` too. **Do not map it
-to a requirements or payload refusal.** The express middleware answers those
-with a fresh challenge, so a payer whose first transfer may still land would be
-asked to sign a second. That migration has to happen in the same change that adopts
-this core, which is required anyway for `verify`'s new signature — and it has
-to happen now, because after 1.0.0 a picklist member cannot be removed until
-2.0.
+| it writes | for | answer instead |
+| --- | --- | --- |
+| `bad_request` | a malformed body | `invalid_payload` |
+| `internal_error` | an unexpected fault in verify | `unexpected_verify_error` |
+| `internal_error` | the minimum-amount policy (`authorization_amount_too_low`, `invalid_amount`) | `invalid_payment_requirements`: a policy refusal of the quoted amount, not an unexpected error |
+| `facilitator_error` | an unexpected fault in settle | `unexpected_settle_error` |
+| `execution_failed` | a definite ledger rejection | `invalid_exact_canton_execute_failed` |
+| `execution_failed` | `settlement_currency_unsupported` | `invalid_payment_requirements`: the merchant's configuration is at fault, and `execute_failed` would tell the payer to sign again |
+| `unauthorized` | a verify `missing_public_key`, mapped onto settle | nothing to map: core now answers `invalid_exact_canton_signature_invalid`, which passes through as a settle reason |
+| `nonce_replayed` | the same signed transaction presented again | see below |
+
+`nonce_replayed` has no replacement code, because neither spec defines a replay
+refusal. A guard keyed on the transaction hash never sees a merchant reusing a
+reference; what it sees is the same signed transaction sent again, usually a
+retry after `settlement_pending`. The scheme spec's settle section says what
+that retry gets: while the submission is unresolved, the facilitator looks it up
+and answers `settlement_pending` again until it finds the outcome; one found
+rejected, or provably never recorded, is `invalid_exact_canton_execute_failed`;
+one found committed is answered with success once, and any later settle relays
+again and the ledger refuses the duplicate, which is
+`invalid_exact_canton_execute_failed` too. **Do not map it to a requirements or
+payload refusal.** The express middleware answers those with a fresh challenge,
+so a payer whose first transfer may still land would be asked to sign a second.
+
+That migration has to happen in the same change that adopts this core, which is
+required anyway for `verify`'s new signature — and it has to happen now,
+because after 1.0.0 a picklist member cannot be removed until 2.0.
