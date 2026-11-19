@@ -123,6 +123,23 @@ describe("gunzipPreparedTransaction", () => {
     expect(gunzipPreparedTransaction(payload, { maxCompressedBytes: member.length - 1 })).toBeNull();
   });
 
+  it("admits the transaction a Canton 3.7 payer actually builds", () => {
+    // Measured on Canton 3.7.3: inflated(n) = 25525 + 5086n, where the fixed
+    // overhead of a prepared transaction is about 25 KiB and an input costs
+    // 5086 bytes. Eight holdings is 66213, which the spec's recommended 64 KiB
+    // refused by 677 — the payment this bound was moved for.
+    const inflated = (holdings: number) => 25525 + 5086 * holdings;
+    expect(inflated(8)).toBeGreaterThan(64 * 1024);
+    // Nine is the most the COMPRESSED cap can carry (ten gzips past 8 KiB), so
+    // the bound is set to admit exactly that much and is expected not to
+    // promise room nothing can reach. Moving it means revisiting this.
+    for (const holdings of [8, 9]) {
+      const sized = new Uint8Array(inflated(holdings));
+      expect(gunzipPreparedTransaction(gzipPreparedTransaction(sized))).toEqual(sized);
+    }
+    expect(inflated(10)).toBeGreaterThan(DEFAULT_MAX_DECOMPRESSED_BYTES);
+  });
+
   it("refuses an over-long input before decoding it", () => {
     // Megabytes of valid base64: the length bound answers before any of it is read.
     const from = vi.spyOn(Buffer, "from");
