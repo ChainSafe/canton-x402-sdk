@@ -58,6 +58,20 @@ const REGISTRY_DIRECT = {
 };
 
 /**
+ * The holding a transfer may spend, per registry.
+ *
+ * Canton Coin's is an `Amulet`, which Rule 13 names, so a `LockedAmulet` is
+ * refused. A registry token's is the holding of the same Utility Registry
+ * whose transfer rule the delivery check requires. Its layout is known from
+ * one real USDCx transfer.
+ */
+const AMULET_HOLDING = { moduleName: "Splice.Amulet", entityName: "Amulet" };
+const REGISTRY_HOLDING = {
+  moduleName: "Utility.Registry.Holding.V0.Holding",
+  entityName: "Holding",
+};
+
+/**
  * The `extensions.detail` codes each refusal produces.
  *
  * Declared as literal unions rather than `string` for the reason
@@ -67,6 +81,17 @@ const REGISTRY_DIRECT = {
  */
 type CreateDetail = "create_unissued";
 type FactoryDetail = "factory_unresolved" | "factory_interface";
+type InputsDetail =
+  | "inputs_none"
+  | "inputs_repeated"
+  | "inputs_unresolved"
+  | "inputs_template"
+  | "inputs_signatories"
+  | "inputs_owner"
+  | "inputs_admin"
+  | "inputs_instrument"
+  | "inputs_amount"
+  | "inputs_short";
 type DeliveryDetail =
   | "no_direct_delivery"
   | "delivery_admin"
@@ -340,5 +365,111 @@ export function factoryViolation(transfer: DecodedTransfer): FactoryDetail | nul
   // requires the factory to validate against its own admin. That link is the
   // ledger's to enforce and holds only because vetted packages implement the
   // MUST — it cannot be checked from the bytes, so nothing here tries.
+  return null;
+}
+
+type HoldingRecord = NonNullable<
+  NonNullable<DecodedTransfer["inputs"]>[number]["contract"]
+>["argument"];
+
+// A holding's fields, each bound through `recordField` as the engine binds it
+// and read at its declared type. A field written at another type reads as
+// absent, so a Party spelled as Text is refused rather than compared.
+function partyAt(
+  record: HoldingRecord | undefined,
+  label: string,
+  index: number,
+): string | undefined {
+  const value = record && recordField(record, label, index);
+  return value && "party" in value ? value.party : undefined;
+}
+
+function textAt(
+  record: HoldingRecord | undefined,
+  label: string,
+  index: number,
+): string | undefined {
+  const value = record && recordField(record, label, index);
+  return value && "text" in value ? value.text : undefined;
+}
+
+function numericAt(
+  record: HoldingRecord | undefined,
+  label: string,
+  index: number,
+): string | undefined {
+  const value = record && recordField(record, label, index);
+  return value && "numeric" in value ? value.numeric : undefined;
+}
+
+function recordAt(
+  record: HoldingRecord | undefined,
+  label: string,
+  index: number,
+): HoldingRecord | undefined {
+  const value = record && recordField(record, label, index);
+  return value && "record" in value ? value.record : undefined;
+}
+
+/**
+ * Why the transfer's inputs cannot pay for it, or null (spec Rule 13).
+ *
+ * Every declared input must be exactly one input contract of this transaction:
+ * a holding of the quoted instrument, owned by the sender and signed by exactly
+ * the instrument's admin and the sender. Together they must cover the amount.
+ * Without this a transfer that spends nothing, or someone else's holdings,
+ * verified as valid and failed only when the ledger ran it.
+ *
+ * The arm is chosen by the instrument, as delivery's is. A Canton Coin
+ * holding's amount is its `initialAmount`, since a transfer charges no holding
+ * fee on its inputs (CIP-0078), so the rest of `amount` is not read.
+ *
+ * Not checked: whether an input is still unspent, and whether its disclosure
+ * is genuine. The disclosure is the payer's, as the factory's is, and the
+ * ledger authenticates each input against its id and refuses a spent one when
+ * the transfer executes.
+ */
+export function inputsViolation(transfer: DecodedTransfer): InputsDetail | null {
+  const inputs = transfer.inputs ?? [];
+  if (inputs.length === 0) return "inputs_none";
+  // A holding counted twice would pay for itself twice.
+  if (new Set(inputs.map((input) => input.contractId)).size !== inputs.length)
+    return "inputs_repeated";
+
+  const { admin, id } = transfer.instrumentId;
+  const sender = transfer.sender;
+  const amulet = id === AMULET_INSTRUMENT_ID;
+  const want = new Set([admin, sender]);
+  let total = 0n;
+  // Every input is checked and none is skipped: one that fails refuses the
+  // payment, even when the others would cover it.
+  for (const input of inputs) {
+    const holding = input.contract;
+    if (!holding) return "inputs_unresolved";
+    if (!sameTemplate(holding.templateId, amulet ? AMULET_HOLDING : REGISTRY_HOLDING))
+      return "inputs_template";
+    // Exactly these two, compared as sets, as the preapproval's signatories are.
+    const signatories = new Set(holding.signatories);
+    if (signatories.size !== want.size) return "inputs_signatories";
+    if (![...want].every((p) => signatories.has(p))) return "inputs_signatories";
+
+    const record = holding.argument;
+    // Amulet is {dso, owner, amount: {initialAmount, ...}}. The registry's
+    // Holding is {operator, provider, registrar, owner, instrument: {source,
+    // id, scheme}, label, amount}.
+    if (partyAt(record, "owner", amulet ? 1 : 3) !== sender) return "inputs_owner";
+    if (partyAt(record, amulet ? "dso" : "registrar", amulet ? 0 : 2) !== admin)
+      return "inputs_admin";
+    if (!amulet && textAt(recordAt(record, "instrument", 4), "id", 1) !== id)
+      return "inputs_instrument";
+    const amount = amulet
+      ? numericAt(recordAt(record, "amount", 2), "initialAmount", 0)
+      : numericAt(record, "amount", 6);
+    const atomic = amount === undefined ? null : ledgerToAtomic(amount, WIRE_DECIMALS);
+    if (atomic === null) return "inputs_amount";
+    total += atomic;
+  }
+  const needed = ledgerToAtomic(transfer.amount, WIRE_DECIMALS);
+  if (needed === null || total < needed) return "inputs_short";
   return null;
 }
