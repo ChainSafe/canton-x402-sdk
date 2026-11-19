@@ -179,7 +179,40 @@ export interface DecodedTransfer {
     templateId: { packageId: string; moduleName: string; entityName: string };
     signatories: readonly string[];
   }[];
+  /**
+   * The holdings the transfer says it spends (`inputHoldingCids`), in the
+   * order it declares them.
+   *
+   * `contract` is the input contract the id names, present only when exactly
+   * one names it, as for an exercise's target. Its `argument` is the
+   * disclosure's whole record, nested records included, with each leaf kept at
+   * its Daml type so a reader can hold a field to the type it is declared at.
+   *
+   * Absent when the transfer declares none, and when the field is not a list
+   * of contract ids: either way it names nothing it spends.
+   */
+  inputs?: readonly {
+    contractId: string;
+    contract?: {
+      templateId: { packageId: string; moduleName: string; entityName: string };
+      signatories: readonly string[];
+      argument: readonly ContractField[];
+    };
+  }[];
 }
+
+/**
+ * One field of a disclosed contract's record. A leaf of another kind than
+ * these keeps its label and position with no value.
+ */
+type ContractField = {
+  label: string;
+  value?:
+    | { party: string }
+    | { text: string }
+    | { numeric: string }
+    | { record: readonly ContractField[] };
+};
 
 /**
  * The metadata key the scheme reserves for the merchant's memo (Rule 12).
@@ -232,6 +265,21 @@ function textOf(value: VendorValue | undefined): string | undefined {
 function numericOf(value: VendorValue | undefined): string | undefined {
   const sum = value?.sum;
   return sum?.oneofKind === "numeric" ? (sum.numeric as string) : undefined;
+}
+
+/**
+ * A List of ContractId. One element of another kind refuses the whole list
+ * rather than being skipped, so no id the payer wrote is left unread.
+ */
+function contractIdsOf(value: VendorValue | undefined): string[] | undefined {
+  const sum = value?.sum;
+  if (sum?.oneofKind !== "list") return undefined;
+  const ids: string[] = [];
+  for (const element of (sum.list as { elements: VendorValue[] }).elements) {
+    if (element.sum?.oneofKind !== "contractId") return undefined;
+    ids.push(element.sum.contractId as string);
+  }
+  return ids;
 }
 
 /**
@@ -352,7 +400,10 @@ function readDelivered(
  * an admin a facilitator has pinned to the real DSO means a transfer aimed at
  * another issuer's factory is refused at verify rather than at execution.
  */
-function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | null {
+function readTransfer(
+  chosenValue: VendorValue | undefined,
+  inputContracts: ReadonlyMap<string, VendorCreate | null>,
+): DecodedTransfer | null {
   const arg = fieldsOf(chosenValue);
   if (!arg) return null;
   const expectedAdmin = partyOf(recordField(arg, "expectedAdmin", 0));
@@ -368,6 +419,13 @@ function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | n
   // Declaration order after the four above: requestedAt, executeBefore,
   // inputHoldingCids, meta.
   const executeBeforeMicros = micros(recordField(transfer, "executeBefore", 5));
+  // A field 6 that is not a list of contract ids reads as no inputs, as a
+  // mistyped `executeBefore` or `meta` reads as absent. The verifier then
+  // refuses it naming the payer, rather than as an undecodable blob.
+  const inputs = readInputs(
+    contractIdsOf(recordField(transfer, "inputHoldingCids", 6)) ?? [],
+    inputContracts,
+  );
   // `meta` is a Metadata RECORD whose single field `values` holds the TextMap —
   // not a TextMap directly.
   const meta = fieldsOf(recordField(transfer, "meta", 7));
@@ -375,7 +433,49 @@ function readTransfer(chosenValue: VendorValue | undefined): DecodedTransfer | n
 
   if (!sender || !receiver || !amount || !id || !admin) return null;
   if (!expectedAdmin || expectedAdmin !== admin) return null;
-  return { sender, receiver, amount, instrumentId: { id, admin }, executeBeforeMicros, memo };
+  return {
+    sender,
+    receiver,
+    amount,
+    instrumentId: { id, admin },
+    executeBeforeMicros,
+    memo,
+    ...(inputs.length === 0 ? {} : { inputs }),
+  };
+}
+
+/**
+ * Each declared input with the contract its id names.
+ *
+ * A repeated id reuses the entry read the first time, so a payer cannot have
+ * one large record walked once per repeat. Refusing the repeat is the rule's.
+ */
+function readInputs(
+  ids: readonly string[],
+  inputContracts: ReadonlyMap<string, VendorCreate | null>,
+): NonNullable<DecodedTransfer["inputs"]>[number][] {
+  const read = new Map<string, NonNullable<DecodedTransfer["inputs"]>[number]>();
+  return ids.map((contractId) => {
+    let input = read.get(contractId);
+    if (input === undefined) {
+      const create = inputContracts.get(contractId);
+      const argument =
+        create?.templateId && contractRecord(create.argument as VendorValue | undefined);
+      input =
+        create?.templateId && argument
+          ? {
+              contractId,
+              contract: {
+                templateId: create.templateId,
+                signatories: create.signatories,
+                argument,
+              },
+            }
+          : { contractId };
+      read.set(contractId, input);
+    }
+    return input;
+  });
 }
 
 
@@ -399,6 +499,60 @@ function scalarFields(value: VendorValue | undefined): readonly { label: string;
     const leaf = anyScalar(f.value);
     return leaf === undefined ? { label: f.label } : { label: f.label, value: leaf };
   });
+}
+
+/**
+ * A disclosed record with each leaf kept at its Daml type, nested records
+ * included.
+ *
+ * This reader keeps each leaf's kind (Party, Text, Numeric, or a nested
+ * record), so a rule can tell a Party from a Text. {@link scalarFields}, unlike
+ * it, renders party, text and numeric alike. A leaf of any other kind keeps
+ * its label alone. Every level is read through `fieldsOf`, and a repeated
+ * label at any depth refuses the whole record.
+ */
+function contractRecord(value: VendorValue | undefined): ContractField[] | undefined {
+  const fields = fieldsOf(value);
+  if (!fields) return undefined;
+  const out: ContractField[] = [];
+  for (const { label, value: leaf } of fields) {
+    const sum = leaf?.sum;
+    if (sum?.oneofKind === "record") {
+      const record = contractRecord(leaf);
+      if (!record) return undefined;
+      out.push({ label, value: { record } });
+    } else if (sum?.oneofKind === "party") {
+      out.push({ label, value: { party: sum.party as string } });
+    } else if (sum?.oneofKind === "text") {
+      out.push({ label, value: { text: sum.text as string } });
+    } else if (sum?.oneofKind === "numeric") {
+      out.push({ label, value: { numeric: sum.numeric as string } });
+    } else {
+      out.push({ label });
+    }
+  }
+  return out;
+}
+
+/**
+ * The input contracts by id, built once per decode. An id disclosed more than
+ * once maps to null and resolves to nothing, as `resolveTarget` refuses it, and
+ * the "" an absent id decodes as is never indexed.
+ *
+ * An index rather than a search per declared id: the declared list is the
+ * payer's, it is read before the signature is checked, and only the
+ * decompressed cap bounds it.
+ */
+function indexInputContracts(
+  inputContracts: readonly VendorInputContract[],
+): Map<string, VendorCreate | null> {
+  const index = new Map<string, VendorCreate | null>();
+  for (const { contract } of inputContracts) {
+    const create = contract.oneofKind === "v1" ? contract.v1 : undefined;
+    if (!create?.contractId) continue;
+    index.set(create.contractId, index.has(create.contractId) ? null : create);
+  }
+  return index;
 }
 
 /**
@@ -622,12 +776,12 @@ export function decodePreparedTransaction(preparedTransactionBase64: string): De
     const synchronizerId = decoded.metadata?.synchronizerId || undefined;
     const actAs = decoded.metadata?.submitterInfo?.actAs ?? [];
 
-    const { transferArg, exercised, consequences, creates } = walkNodes(
-      txn,
-      decoded.metadata?.inputContracts ?? [],
-    );
+    const inputContracts = decoded.metadata?.inputContracts ?? [];
+    const { transferArg, exercised, consequences, creates } = walkNodes(txn, inputContracts);
 
-    const transfer = transferArg ? readTransfer(transferArg) : null;
+    const transfer = transferArg
+      ? readTransfer(transferArg, indexInputContracts(inputContracts))
+      : null;
     if (!transfer) return null;
     // THE SUBMITTER IS THE SENDER, and nobody else.
     //

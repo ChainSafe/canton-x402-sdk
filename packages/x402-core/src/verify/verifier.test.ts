@@ -18,9 +18,12 @@ import {
 import { requirementsHash as requirementsHashOf } from "../hashing";
 import { HashingSchemeVersion } from "../types/payment";
 import {
+  damlValue,
   encodeNode,
   encodePreparedTransaction,
   encodePreparedTransactionGraph,
+  EXERCISED_CID,
+  holdingCid,
   stringField,
   wrap,
 } from "./prepared-tx.fixtures";
@@ -81,6 +84,14 @@ async function buildSignedFixture(
     creates?: EncodeOptions["creates"];
     /** The instrument quoted. Defaults to Canton Coin, which selects the preapproval arm. */
     instrumentId?: { id: string; admin: string };
+    /** The amount quoted, in atomic units. Defaults to 0.01 CC. */
+    amount?: string;
+    /** The holdings spent. Omitted means one honest holding for the whole amount. */
+    holdings?: EncodeOptions["holdings"];
+    /** `inputHoldingCids` said outright, in place of the holdings' ids. */
+    declaredInputs?: EncodeOptions["declaredInputs"];
+    /** `inputHoldingCids` as a raw value. */
+    rawInputHoldingCids?: EncodeOptions["rawInputHoldingCids"];
   } = {},
 ) {
   const executeBeforeSeconds = overrides.executeBeforeSeconds ?? 120;
@@ -94,7 +105,7 @@ async function buildSignedFixture(
   const requirements: CantonPaymentRequirements = {
     scheme: "exact",
     network: NETWORK,
-    amount: "100000000",
+    amount: overrides.amount ?? "100000000",
     asset: "CC",
     extra: {
       assetTransferMethod: "transfer-factory",
@@ -128,6 +139,13 @@ async function buildSignedFixture(
       ...(overrides.delivery === null ? {} : { delivery: overrides.delivery ?? {} }),
       ...(overrides.second === undefined ? {} : { second: overrides.second }),
       ...(overrides.creates === undefined ? {} : { creates: overrides.creates }),
+      holdings: overrides.holdings ?? [{}],
+      ...(overrides.declaredInputs === undefined
+        ? {}
+        : { declaredInputs: overrides.declaredInputs }),
+      ...(overrides.rawInputHoldingCids === undefined
+        ? {}
+        : { rawInputHoldingCids: overrides.rawInputHoldingCids }),
     },
   );
   const preparedTransaction = gzipped(protobuf);
@@ -1489,6 +1507,333 @@ describe("cantonExactVerifier", () => {
     });
   });
 
+  // Rule 13. The default fixture spends one honest holding for the whole
+  // amount (0.01), so each case below changes one thing about it. On Canton
+  // Coin it is laid out as a real Amulet is, its amount a whole
+  // ExpiringAmount whose round is an Int64.
+  describe("the input holdings (Rule 13)", () => {
+    const refusal = (payer: string, detail: string) => ({
+      isValid: false,
+      invalidReason: "invalid_exact_canton_insufficient_inputs",
+      payer,
+      extensions: { detail },
+    });
+    const usdx = { id: "USDX", admin: "usdx-issuer::1220issuer" };
+    const registry = {
+      instrumentId: usdx,
+      delivery: {
+        choiceId: "TransferRule_DirectTransfer",
+        moduleName: "Utility.Registry.V0.Rule.Transfer",
+        entityName: "TransferRule",
+      },
+    };
+    const verifyWith = async (overrides: Parameters<typeof buildSignedFixture>[0]) => {
+      const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture(overrides);
+      return { payer, result: await verifier.verify(payload, requirements, { payerPublicKeys }) };
+    };
+
+    it("refuses a transfer that declares no inputs", async () => {
+      // It spends nothing, so it pays with nothing, and fails at the ledger.
+      const { payer, result } = await verifyWith({ holdings: [] });
+      expect(result).toEqual(refusal(payer, "inputs_none"));
+    });
+
+    it("reads an inputHoldingCids holding anything but contract ids as none, rather than skipping", async () => {
+      // An honest, disclosed holding beside a Party. A decoder that skipped the
+      // bad element would read the holding alone and answer valid.
+      const { payer } = await buildSignedFixture();
+      const { result } = await verifyWith({
+        rawInputHoldingCids: damlValue.list([
+          damlValue.contractId(holdingCid(0)),
+          damlValue.party(payer),
+        ]),
+      });
+      expect(result).toEqual(refusal(payer, "inputs_none"));
+      // The control: the same list without the Party.
+      const honest = await verifyWith({
+        rawInputHoldingCids: damlValue.list([damlValue.contractId(holdingCid(0))]),
+      });
+      expect(honest.result).toEqual(verified(payer));
+    });
+
+    it("refuses a holding declared twice", async () => {
+      // Counted twice, half the amount would cover all of it.
+      const { payer, result } = await verifyWith({
+        holdings: [{ amount: "0.005" }],
+        declaredInputs: [holdingCid(0), holdingCid(0)],
+      });
+      expect(result).toEqual(refusal(payer, "inputs_repeated"));
+    });
+
+    it("refuses an input the transaction does not disclose", async () => {
+      const { payer, result } = await verifyWith({ holdings: [{ omitDisclosure: true }] });
+      expect(result).toEqual(refusal(payer, "inputs_unresolved"));
+    });
+
+    it("refuses an input that names no contract, though a disclosure is as blank", async () => {
+      // An absent id decodes as "", as an exercise's does, so it must match
+      // nothing rather than a disclosure that is equally blank.
+      const { payer, result } = await verifyWith({ holdings: [{ contractId: "" }] });
+      expect(result).toEqual(refusal(payer, "inputs_unresolved"));
+    });
+
+    it("refuses an undisclosed input even when the others cover the amount", async () => {
+      // Rule 13: a declared input that is not an input contract is rejected,
+      // never skipped.
+      const { payer, result } = await verifyWith({ holdings: [{}, { omitDisclosure: true }] });
+      expect(result).toEqual(refusal(payer, "inputs_unresolved"));
+    });
+
+    it("refuses an input disclosed twice under one id", async () => {
+      // Which of the two is spent is not decidable, as with the factory.
+      const { payer, result } = await verifyWith({
+        holdings: [{}, { contractId: holdingCid(0) }],
+        declaredInputs: [holdingCid(0)],
+      });
+      expect(result).toEqual(refusal(payer, "inputs_unresolved"));
+    });
+
+    it("refuses an input that is not a holding", async () => {
+      // The factory is an input contract too, so resolving is not enough.
+      const { payer, result } = await verifyWith({ holdings: [], declaredInputs: [EXERCISED_CID] });
+      expect(result).toEqual(refusal(payer, "inputs_template"));
+    });
+
+    it("refuses a holding of another template, by module or by entity", async () => {
+      // A LockedAmulet is refused as Rule 13 names the plain Amulet, even when
+      // its lock has expired.
+      for (const holding of [{ entityName: "LockedAmulet" }, { moduleName: "Splice.Wallet" }]) {
+        const { payer, result } = await verifyWith({ holdings: [holding] });
+        expect(result).toEqual(refusal(payer, "inputs_template"));
+      }
+    });
+
+    it("chooses the holding by the instrument, so neither arm takes the other's", async () => {
+      const onAmulet = await verifyWith({
+        holdings: [{ moduleName: "Utility.Registry.Holding.V0.Holding", entityName: "Holding" }],
+      });
+      expect(onAmulet.result).toEqual(refusal(onAmulet.payer, "inputs_template"));
+      const onRegistry = await verifyWith({
+        ...registry,
+        holdings: [{ moduleName: "Splice.Amulet", entityName: "Amulet" }],
+      });
+      expect(onRegistry.result).toEqual(refusal(onRegistry.payer, "inputs_template"));
+    });
+
+    it("refuses a holding not signed by exactly the admin and the sender", async () => {
+      // An extra signatory, the admin missing, and someone else's holding
+      // signed by them. The first two each pin one direction of the set
+      // equality.
+      const { payer } = await buildSignedFixture();
+      for (const holding of [
+        { signatories: ["DSO::1220dso", payer, "extra::1220x"] },
+        { signatories: [payer] },
+        { owner: "mallory::1220bad", signatories: ["DSO::1220dso", "mallory::1220bad"] },
+      ]) {
+        const { result } = await verifyWith({ holdings: [holding] });
+        expect(result).toEqual(refusal(payer, "inputs_signatories"));
+      }
+    });
+
+    it("refuses a holding whose owner is not the sender, or is not a Party", async () => {
+      const { payer } = await buildSignedFixture();
+      const other = await verifyWith({ holdings: [{ owner: "mallory::1220bad" }] });
+      expect(other.result).toEqual(refusal(payer, "inputs_owner"));
+      // The right party written as Text. A reader that rendered every scalar
+      // alike would compare it and pass.
+      const asText = await verifyWith({
+        holdings: [
+          {
+            argument: [
+              { label: "dso", value: damlValue.party("DSO::1220dso") },
+              { label: "owner", value: damlValue.text(payer) },
+              {
+                label: "amount",
+                value: damlValue.record([
+                  { label: "initialAmount", value: damlValue.numeric("0.01") },
+                ]),
+              },
+            ],
+          },
+        ],
+      });
+      expect(asText.result).toEqual(refusal(payer, "inputs_owner"));
+    });
+
+    it("binds a holding's fields the way the engine does", async () => {
+      const { payer } = await buildSignedFixture();
+      const dso = { label: "dso", value: damlValue.party("DSO::1220dso") };
+      const owner = { label: "owner", value: damlValue.party(payer) };
+      const amount = {
+        label: "amount",
+        value: damlValue.record([{ label: "initialAmount", value: damlValue.numeric("0.01") }]),
+      };
+      // One blank label puts the record in declaration order. A reader that
+      // looked labels up regardless would pass this, where `owner` sits at
+      // the index declared for `amount`.
+      const misplaced = await verifyWith({
+        holdings: [
+          { argument: [dso, amount, owner, { label: "", value: damlValue.party(payer) }] },
+        ],
+      });
+      expect(misplaced.result).toEqual(refusal(payer, "inputs_owner"));
+      // And the blank label is read by position, where a lookup by label
+      // would find no owner.
+      const positional = await verifyWith({
+        holdings: [{ argument: [dso, { ...owner, label: "" }, amount] }],
+      });
+      expect(positional.result).toEqual(verified(payer));
+    });
+
+    it("reads a holding with no labels at all by declaration order, on either arm", async () => {
+      // Every field, nested ones included, is then found at its index alone.
+      const amulet = await verifyWith({ holdings: [{ positional: true }] });
+      expect(amulet.result).toEqual(verified(amulet.payer));
+      const onRegistry = await verifyWith({ ...registry, holdings: [{ positional: true }] });
+      expect(onRegistry.result).toEqual(verified(onRegistry.payer));
+    });
+
+    it("refuses a holding under another admin, on either arm", async () => {
+      // The signatories stay right, so only the record's dso or registrar differs.
+      const amulet = await verifyWith({ holdings: [{ admin: "other-dso::1220other" }] });
+      expect(amulet.result).toEqual(refusal(amulet.payer, "inputs_admin"));
+      const onRegistry = await verifyWith({
+        ...registry,
+        holdings: [{ admin: "other-registrar::1220other" }],
+      });
+      expect(onRegistry.result).toEqual(refusal(onRegistry.payer, "inputs_admin"));
+    });
+
+    it("refuses a registry holding of another instrument", async () => {
+      const { payer, result } = await verifyWith({
+        ...registry,
+        holdings: [{ instrumentId: "OTHER" }],
+      });
+      expect(result).toEqual(refusal(payer, "inputs_instrument"));
+    });
+
+    it("refuses a registry holding whose instrument.id is not Text", async () => {
+      // The quoted id written as a Party. A reader that took any scalar would
+      // compare it and pass.
+      const { payer } = await buildSignedFixture();
+      const holding = (id: Uint8Array) => ({
+        argument: [
+          { label: "operator", value: damlValue.party("operator::1220op") },
+          { label: "provider", value: damlValue.party("provider::1220pv") },
+          { label: "registrar", value: damlValue.party(usdx.admin) },
+          { label: "owner", value: damlValue.party(payer) },
+          {
+            label: "instrument",
+            value: damlValue.record([
+              { label: "source", value: damlValue.party(usdx.admin) },
+              { label: "id", value: id },
+              { label: "scheme", value: damlValue.text("RegistrarInternalScheme") },
+            ]),
+          },
+          { label: "label", value: damlValue.text("") },
+          { label: "amount", value: damlValue.numeric("0.01") },
+        ],
+      });
+      const asParty = await verifyWith({
+        ...registry,
+        holdings: [holding(damlValue.party(usdx.id))],
+      });
+      expect(asParty.result).toEqual(refusal(payer, "inputs_instrument"));
+      // The control: the same record with the id as Text.
+      const asText = await verifyWith({ ...registry, holdings: [holding(damlValue.text(usdx.id))] });
+      expect(asText.result).toEqual(verified(payer));
+    });
+
+    it("refuses an amount that is not a ledger amount", async () => {
+      // More precision than the ledger holds, a negative amount, and an amount
+      // written as Text.
+      const { payer } = await buildSignedFixture();
+      for (const holding of [
+        { amount: "0.01000000001" },
+        { amount: "-1.0" },
+        {
+          argument: [
+            { label: "dso", value: damlValue.party("DSO::1220dso") },
+            { label: "owner", value: damlValue.party(payer) },
+            {
+              label: "amount",
+              value: damlValue.record([{ label: "initialAmount", value: damlValue.text("0.01") }]),
+            },
+          ],
+        },
+      ]) {
+        const { result } = await verifyWith({ holdings: [holding] });
+        expect(result).toEqual(refusal(payer, "inputs_amount"));
+      }
+    });
+
+    it("accepts inputs that sum to exactly the amount, however they are spelled", async () => {
+      for (const holdings of [
+        [{ amount: "0.0100000000" }],
+        [{ amount: "0.004" }, { amount: "0.006" }],
+      ]) {
+        const { payer, result } = await verifyWith({ holdings });
+        expect(result).toEqual(verified(payer));
+      }
+    });
+
+    it("sums the inputs exactly, past what a float holds", async () => {
+      // About 2e19 atomic units, far beyond 2^53. Added as floats, in atomic
+      // units or in CC, these two fall one step short of the amount they sum
+      // to exactly.
+      const holdings = [{ amount: "1000000000.0000000001" }, { amount: "1000000000.009" }];
+      const exact = await verifyWith({ amount: "20000000000090000001", holdings });
+      expect(exact.result).toEqual(verified(exact.payer));
+      const short = await verifyWith({ amount: "20000000000090000002", holdings });
+      expect(short.result).toEqual(refusal(short.payer, "inputs_short"));
+    });
+
+    it("refuses inputs short of the amount by one atomic unit", async () => {
+      for (const holdings of [
+        [{ amount: "0.0099999999" }],
+        [{ amount: "0.004" }, { amount: "0.0059999999" }],
+      ]) {
+        const { payer, result } = await verifyWith({ holdings });
+        expect(result).toEqual(refusal(payer, "inputs_short"));
+      }
+    });
+
+    it("accepts a registry holding that covers the amount, and refuses one that does not", async () => {
+      const honest = await verifyWith({ ...registry, holdings: [{}] });
+      expect(honest.result).toEqual(verified(honest.payer));
+      const short = await verifyWith({ ...registry, holdings: [{ amount: "0.005" }] });
+      expect(short.result).toEqual(refusal(short.payer, "inputs_short"));
+    });
+
+    it("answers an expired transfer as expired, whatever it spends", async () => {
+      // Step 18 runs after the deadline, in the spec's order.
+      const { payer, result } = await verifyWith({ executeBeforeSeconds: 1, holdings: [] });
+      expect(result).toEqual({
+        isValid: false,
+        invalidReason: "invalid_exact_canton_expired",
+        payer,
+      });
+    });
+
+    it("answers a wrong amount as amount_mismatch, whatever it spends", async () => {
+      // And after the binding to the quote, whose amount and instrument it reads.
+      const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture({
+        holdings: [],
+      });
+      expect(
+        await verifier.verify(
+          payload,
+          { ...requirements, amount: "100000001" },
+          { payerPublicKeys },
+        ),
+      ).toEqual({
+        isValid: false,
+        invalidReason: "invalid_exact_canton_amount_mismatch",
+        payer,
+        extensions: { detail: "amount" },
+      });
+    });
+  });
 });
 
 describe("createVerifierRegistry", () => {

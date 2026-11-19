@@ -4,7 +4,7 @@
 // against lives elsewhere: Ed25519 verification in ./primitives (the key
 // fingerprint is NOT used here any more — see step 7-8), the binding to the
 // merchant's quote in
-// ./transfer-binding, the factory and delivery rules in ./transfer-rules, and
+// ./transfer-binding, the factory, delivery and input rules in ./transfer-rules, and
 // the canton-payload shape guards in ../types. Pure and stateless — the
 // stateful guards (replay) and on-chain execution stay in the facilitator,
 // which composes this verifier's result.
@@ -31,6 +31,7 @@ import { transferViolation, type TransferViolation } from "./transfer-binding";
 import {
   deliveryViolation,
   factoryViolation,
+  inputsViolation,
   senderSignedCreateViolation,
 } from "./transfer-rules";
 import {
@@ -351,6 +352,13 @@ async function verifyCantonExact(
   //     by leaving the field out.
   if (isTransferExpired(transfer.executeBeforeMicros)) {
     return fail("invalid_exact_canton_expired", payer);
+  }
+  // 18. the inputs must be the payer's own holdings of this instrument, and
+  //     cover the amount (Rule 13). After 14, because it reads the admin, the
+  //     instrument and the amount that step has held equal to the quote's.
+  const inputs = inputsViolation(transfer);
+  if (inputs) {
+    return fail("invalid_exact_canton_insufficient_inputs", payer, inputs);
   }
   // `signedBy` is the fingerprint of the key that verified, which is what a
   // Canton submission must name beside this signature. Core found it in step

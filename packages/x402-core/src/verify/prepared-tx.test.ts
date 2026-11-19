@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { decodePreparedTransaction, type DecodedTransfer } from "./prepared-tx";
 import {
+  damlValue,
   encodeChoiceArgument,
   encodeNode,
   encodePreparedTransaction,
   DECOY_CID,
   EXERCISED_CID,
+  holdingCid,
   stringField,
   wrap,
   type EncodeOptions,
@@ -357,6 +359,119 @@ describe("which disclosure the exercised contract resolves to", () => {
     const exercised = decodePreparedTransaction(blob)?.exercisedContract;
     expect(exercised?.contractId).toBe(EXERCISED_CID);
     expect(exercised?.signatories).toEqual([TRANSFER.instrumentId.admin]);
+  });
+});
+
+describe("the inputs the transfer declares", () => {
+  // Asking the encoder for inputs writes the trailing fields, so field 6 is on
+  // the wire in every case here, and each refusal has a control beside it.
+  const decode = (opts: EncodeOptions) =>
+    decodePreparedTransaction(encodePreparedTransaction(TRANSFER, opts));
+  const { admin } = TRANSFER.instrumentId;
+
+  it.each([false, true])(
+    "reads each input with its contract, leaves typed and records nested, positional=%s",
+    (positional) => {
+      expect(decode({ holdings: [{}], positional })?.inputs).toEqual([
+        {
+          contractId: holdingCid(0),
+          contract: {
+            templateId: {
+              packageId: "f".repeat(64),
+              moduleName: "Splice.Amulet",
+              entityName: "Amulet",
+            },
+            signatories: [admin, TRANSFER.sender],
+            argument: [
+              { label: "dso", value: { party: admin } },
+              { label: "owner", value: { party: TRANSFER.sender } },
+              {
+                label: "amount",
+                value: {
+                  record: [
+                    { label: "initialAmount", value: { numeric: TRANSFER.amount } },
+                    // The round's Int64 is a leaf of another kind: kept by its
+                    // label, with no value, and the record around it still read.
+                    { label: "createdAt", value: { record: [{ label: "number" }] } },
+                    {
+                      label: "ratePerRound",
+                      value: { record: [{ label: "rate", value: { numeric: "0.0038051800" } }] },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      ]);
+    },
+  );
+
+  it("reports no inputs for an empty list", () => {
+    const got = decode({ holdings: [] });
+    expect(got).not.toBeNull();
+    expect(got).not.toHaveProperty("inputs");
+  });
+
+  it("reports no inputs when the field is not a list of contract ids", () => {
+    // One element of another kind refuses the whole list, so an honest id
+    // beside it is not read either. The transfer still decodes, so the
+    // verifier can refuse it naming the payer.
+    for (const raw of [
+      damlValue.contractId(holdingCid(0)),
+      damlValue.list([damlValue.contractId(holdingCid(0)), damlValue.party(TRANSFER.sender)]),
+    ]) {
+      const got = decode({ holdings: [{}], rawInputHoldingCids: raw });
+      expect(got).not.toBeNull();
+      expect(got).not.toHaveProperty("inputs");
+    }
+    // The control: the same list without the Party.
+    const honest = decode({
+      holdings: [{}],
+      rawInputHoldingCids: damlValue.list([damlValue.contractId(holdingCid(0))]),
+    });
+    expect(honest?.inputs?.[0].contract).toBeDefined();
+  });
+
+  it("gives no contract for an id no input contract names, or two do", () => {
+    expect(decode({ holdings: [{ omitDisclosure: true }] })?.inputs).toEqual([
+      { contractId: holdingCid(0) },
+    ]);
+    expect(
+      decode({ holdings: [{}, { contractId: holdingCid(0) }], declaredInputs: [holdingCid(0)] })
+        ?.inputs,
+    ).toEqual([{ contractId: holdingCid(0) }]);
+  });
+
+  it("gives no contract for a holding whose labels repeat, at any depth", () => {
+    const owner = { label: "owner", value: damlValue.party(TRANSFER.sender) };
+    const amount = (fields: { label: string; value: Uint8Array }[]) => ({
+      label: "amount",
+      value: damlValue.record(fields),
+    });
+    const initial = { label: "initialAmount", value: damlValue.numeric(TRANSFER.amount) };
+    const dso = { label: "dso", value: damlValue.party(admin) };
+    for (const argument of [
+      [dso, owner, owner, amount([initial])],
+      [dso, owner, amount([initial, initial])],
+    ]) {
+      expect(decode({ holdings: [{ argument }] })?.inputs).toEqual([{ contractId: holdingCid(0) }]);
+    }
+    // The control: the same record with its labels distinct.
+    expect(
+      decode({ holdings: [{ argument: [dso, owner, amount([initial])] }] })?.inputs?.[0].contract,
+    ).toBeDefined();
+  });
+
+  it("reads a repeated id once", () => {
+    // The rule refuses the repeat; reading it once more per repeat would let a
+    // payer have one large record walked as many times as it likes first.
+    const inputs = decode({
+      holdings: [{}],
+      declaredInputs: [holdingCid(0), holdingCid(0)],
+    })?.inputs;
+    expect(inputs).toHaveLength(2);
+    expect(inputs?.[1]).toBe(inputs?.[0]);
   });
 });
 

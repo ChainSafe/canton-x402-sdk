@@ -27,12 +27,16 @@ export function stringField(field: number, s: string): Uint8Array {
 }
 
 /** A Daml `Value` holding a scalar string in the given oneof field. */
-function scalarValue(field: 6 | 7 | 8, s: string): Uint8Array {
+function scalarValue(field: 6 | 7 | 8 | 9, s: string): Uint8Array {
   return Writer.create().uint32(tag(field, WIRE_LEN)).string(s).finish();
 }
 const party = (s: string) => scalarValue(7, s);
 const numeric = (s: string) => scalarValue(6, s);
 const text = (s: string) => scalarValue(8, s);
+/** A contract id is field 9, and HEX, because the hasher reads it with `hexToBytes`. */
+const contractId = (cid: string) => scalarValue(9, cid);
+/** A Daml `Value` holding an `Int64`: field 3, a zigzag VARINT (wire type 0). */
+const int64 = (n: number) => Writer.create().uint32(tag(3, 0)).sint64(n).finish();
 
 /** A Daml `Value` holding a `Time`: field 5, SFIXED64, eight little-endian bytes. */
 function timestamp(micros: bigint): Uint8Array {
@@ -48,6 +52,13 @@ function timestamp(micros: bigint): Uint8Array {
 
 /** A Daml `Value` holding an empty `List`. */
 const emptyList = Writer.create().uint32(tag(11, WIRE_LEN)).bytes(new Uint8Array()).finish();
+
+/** A Daml `Value` holding a `List{1: repeated Value elements}`. */
+function listValue(elements: readonly Uint8Array[]): Uint8Array {
+  const list = Writer.create();
+  for (const element of elements) list.uint32(tag(1, WIRE_LEN)).bytes(element);
+  return Writer.create().uint32(tag(11, WIRE_LEN)).bytes(list.finish()).finish();
+}
 
 /** A Daml `Value` holding a `TextMap{1: repeated Entry{1: key, 2: value}}`. */
 function textMap(entries: [string, Uint8Array][]): Uint8Array {
@@ -86,6 +97,19 @@ function recordValue(
   }
   return Writer.create().uint32(tag(14, WIRE_LEN)).bytes(record.finish()).finish();
 }
+
+/**
+ * Daml values, for a test that writes a holding's record or the declared
+ * inputs itself, e.g. a field at the wrong type.
+ */
+export const damlValue = {
+  party,
+  text,
+  numeric,
+  contractId,
+  list: listValue,
+  record: (fields: Field[]) => recordValue(fields, false),
+};
 
 /** Wrap `inner` bytes as a single length-delimited field. */
 export function wrap(field: number, inner: Uint8Array): Uint8Array {
@@ -238,6 +262,43 @@ export interface EncodeOptions {
    */
   memoEntries?: [string, Uint8Array][];
   /**
+   * The holdings the transfer spends: each declared in `inputHoldingCids` and
+   * disclosed as an input contract, as a real payment does.
+   *
+   * OFF by default, as `factory` and `delivery` are, so the decoder's own
+   * tests keep the bytes they had. `{}` is one honest holding of the
+   * instrument for the transfer's amount: an `Amulet` for Canton Coin, the
+   * Utility Registry's `Holding` for anything else, owned by the sender and
+   * signed by the admin and the sender. The `Amulet`'s amount is a whole
+   * `ExpiringAmount`, round and rate included, as a LocalNet capture's is.
+   * Each field changes only itself.
+   */
+  holdings?: readonly {
+    /** Defaults to {@link holdingCid} of the holding's position. */
+    contractId?: string;
+    moduleName?: string;
+    entityName?: string;
+    signatories?: readonly string[];
+    /** The record's `owner`. */
+    owner?: string;
+    /** The record's `dso` (Canton Coin) or `registrar` (registry). */
+    admin?: string;
+    /** `amount.initialAmount` (Canton Coin) or `amount` (registry). */
+    amount?: string;
+    /** The registry record's `instrument.id`. */
+    instrumentId?: string;
+    /** The disclosure's record said outright, for a field at the wrong type or position. */
+    argument?: readonly { label: string; value: Uint8Array }[];
+    /** The record and its nested records without labels, so they bind by declaration order. */
+    positional?: boolean;
+    /** Declared, but not disclosed. */
+    omitDisclosure?: boolean;
+  }[];
+  /** `inputHoldingCids` said outright, in place of the holdings' own ids. */
+  declaredInputs?: readonly string[];
+  /** `inputHoldingCids` as a raw value, for one that is not a list of contract ids. */
+  rawInputHoldingCids?: Uint8Array;
+  /**
    * The evidence the factory check reads: the exercised contract's id,
    * template and interface on the Exercise node, and the matching
    * `Metadata.input_contracts` entry.
@@ -384,11 +445,24 @@ export function encodeChoiceArgument(
     relabel,
   );
   // The real transfer always carries the trailing fields; fixtures opt in so
-  // the ones written before them still encode byte-identically.
+  // the ones written before them still encode byte-identically. Asking for
+  // inputs opts in too, or a test of them would pass with field 6 unwritten.
+  const declaresInputs =
+    opts.holdings !== undefined ||
+    opts.declaredInputs !== undefined ||
+    opts.rawInputHoldingCids !== undefined;
   const trailing =
-    transfer.executeBeforeMicros !== undefined || transfer.memo !== undefined || opts.memoEntries !== undefined;
+    transfer.executeBeforeMicros !== undefined ||
+    transfer.memo !== undefined ||
+    opts.memoEntries !== undefined ||
+    declaresInputs;
   const memoEntries: [string, Uint8Array][] =
     opts.memoEntries ?? (transfer.memo === undefined ? [] : [["x402.memo", text(transfer.memo)]]);
+  const declared =
+    opts.declaredInputs ?? (opts.holdings ?? []).map((h, i) => h.contractId ?? holdingCid(i));
+  const inputHoldingCids =
+    opts.rawInputHoldingCids ??
+    (declared.length === 0 ? emptyList : listValue(declared.map(contractId)));
 
   const transferRecord = recordValue(
     [
@@ -409,7 +483,7 @@ export function encodeChoiceArgument(
         ? [
             { label: "requestedAt", value: timestamp(0n) },
             { label: "executeBefore", value: timestamp(transfer.executeBeforeMicros ?? 0n) },
-            { label: "inputHoldingCids", value: emptyList },
+            { label: "inputHoldingCids", value: inputHoldingCids },
             {
               label: "meta",
               value: recordValue([{ label: "values", value: textMap(memoEntries) }], positional, blank, relabel),
@@ -449,6 +523,10 @@ export const EXERCISED_CID = FACTORY_CID;
 
 /** A second disclosure's id, for fixtures that need the match not to be first. */
 export const DECOY_CID = "00cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
+
+/** The id of the i-th holding a fixture spends, unless the holding names its own. */
+export const holdingCid = (i: number): string =>
+  `00a1${i.toString(16).padStart(2, "0")}${"ee".repeat(30)}`;
 
 /**
  * The template a fixture's exercise carries by default. Canton Coin's, because
@@ -806,6 +884,79 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
       );
     }
   }
+  // The holdings the transfer spends, disclosed as real ones are, with the
+  // field layouts real captures carry.
+  const amulet = transfer.instrumentId.id === "Amulet";
+  (opts.holdings ?? []).forEach((h, i) => {
+    if (h.omitDisclosure) return;
+    const owner = party(h.owner ?? transfer.sender);
+    const admin = party(h.admin ?? transfer.instrumentId.admin);
+    const amount = numeric(h.amount ?? transfer.amount);
+    const positional = h.positional ?? false;
+    const argument =
+      h.argument ??
+      (amulet
+        ? [
+            { label: "dso", value: admin },
+            { label: "owner", value: owner },
+            {
+              // Splice.Fees:ExpiringAmount. The round it was created in is a
+              // Splice.Types:Round {number: Int64}, a leaf the reader keeps
+              // by its label alone.
+              label: "amount",
+              value: recordValue(
+                [
+                  { label: "initialAmount", value: amount },
+                  {
+                    label: "createdAt",
+                    value: recordValue([{ label: "number", value: int64(176) }], positional),
+                  },
+                  {
+                    label: "ratePerRound",
+                    value: recordValue(
+                      [{ label: "rate", value: numeric("0.0038051800") }],
+                      positional,
+                    ),
+                  },
+                ],
+                positional,
+              ),
+            },
+          ]
+        : [
+            { label: "operator", value: party("operator::1220op") },
+            { label: "provider", value: party("provider::1220pv") },
+            { label: "registrar", value: admin },
+            { label: "owner", value: owner },
+            {
+              label: "instrument",
+              value: recordValue(
+                [
+                  { label: "source", value: party(transfer.instrumentId.admin) },
+                  { label: "id", value: text(h.instrumentId ?? transfer.instrumentId.id) },
+                  { label: "scheme", value: text("RegistrarInternalScheme") },
+                ],
+                positional,
+              ),
+            },
+            { label: "label", value: text("") },
+            { label: "amount", value: amount },
+          ]);
+    metadata.uint32(tag(7, WIRE_LEN)).bytes(
+      encodeInputContract(
+        h.contractId ?? holdingCid(i),
+        encodeIdentifier({
+          moduleName:
+            h.moduleName ?? (amulet ? "Splice.Amulet" : "Utility.Registry.Holding.V0.Holding"),
+          entityName: h.entityName ?? (amulet ? "Amulet" : "Holding"),
+        }),
+        h.signatories ?? [transfer.instrumentId.admin, transfer.sender],
+        amulet ? FACTORY_PACKAGE_NAME : "utility-registry-holding-v0",
+        argument,
+        positional ? new Set(argument.map((f) => f.label)) : undefined,
+      ),
+    );
+  });
   // The preapproval the delivery spends, disclosed as a real one is: its
   // record names the trio, and the verifier reads the receiver out of it.
   if (delivery !== undefined && !delivery.omitDisclosure) {
