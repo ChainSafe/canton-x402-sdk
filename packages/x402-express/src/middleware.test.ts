@@ -2961,7 +2961,12 @@ describe("a settlement whose outcome is not known yet (settlement_pending)", () 
     // body, and no reference minted for one.
     expect(res.headers["payment-required"]).toBeUndefined();
     expect(res.body.accepts).toBeUndefined();
-    expect(res.body).toMatchObject({ error: "settlement_pending", transaction: "h" });
+    // The body names the transfer and its network, as the answer it repeats does.
+    expect(res.body).toMatchObject({
+      error: "settlement_pending",
+      transaction: "h",
+      network: "canton:x",
+    });
     expect(booked).toEqual([]);
     expect(served).not.toHaveBeenCalled();
     // Not a rejection: the payment may still land, so no undo is owed.

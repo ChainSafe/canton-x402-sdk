@@ -40,7 +40,8 @@ reads. After 1.0.0, renaming a field or making one required waits for 2.0.
 settle's 402, and the `details` `onReject` receives, now come from
 `extensions.detail`, or from `errorMessage` when the answer names no cause.
 They used to come from `errorDetails`, which a facilitator still writing it now
-leaves unread.
+leaves unread. A pending 402's body names the `network` beside the
+`transaction`.
 
 ### What a facilitator changes
 
