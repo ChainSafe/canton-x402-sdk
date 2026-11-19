@@ -723,14 +723,21 @@ describe("paymentRequired", () => {
     expect(res.body.accepts[0].extra.memo).not.toBe("spent-memo");
   });
 
-  it("settles when settle mode is enabled and sets X-PAYMENT-RESPONSE", async () => {
+  it("settles when settle mode is enabled and sends the answer in PAYMENT-RESPONSE", async () => {
     const fetchMock = stubFacilitator();
     const res = await request(makeApp({ settle: true }))
       .get("/paid")
       .set("PAYMENT-SIGNATURE", paymentHeader());
     expect(res.status).toBe(200);
     expect(res.body.settled).toBe(true);
-    expect(res.headers["x-payment-response"]).toBe("upd-1");
+    expect(decodePaymentResponseHeader(res.headers["payment-response"])).toEqual({
+      success: true,
+      network: "canton:x",
+      transaction: "upd-1",
+      payer: "alice::x",
+    });
+    // The pre-spec header, gone.
+    expect(res.headers["x-payment-response"]).toBeUndefined();
     expect(
       fetchMock.mock.calls.map((c) => String(c[0])).some((u) => u.includes("/v2/settle")),
     ).toBe(true);
@@ -1117,6 +1124,27 @@ describe("paymentRequired", () => {
         reason: "execution_failed",
         details: "boom",
       });
+    });
+
+    it("sends a failed settle's answer in PAYMENT-RESPONSE beside a fresh challenge", async () => {
+      const failed = { success: false, errorReason: "execution_failed", errorDetails: "boom" };
+      stubFacilitator({ settle: failed });
+      const res = await request(makeApp({ settle: true }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader());
+      expect(res.status).toBe(402);
+      expect(decodePaymentResponseHeader(res.headers["payment-response"])).toEqual(failed);
+      expect(res.headers["payment-required"]).toBeDefined();
+      expect(res.headers["x-payment-response"]).toBeUndefined();
+    });
+
+    it("sends no PAYMENT-RESPONSE for a refusal before settle", async () => {
+      stubFacilitator({ verify: { isValid: false, invalidReason: "bad_signature" } });
+      const res = await request(makeApp({ settle: true }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader());
+      expect(res.status).toBe(402);
+      expect(res.headers["payment-response"]).toBeUndefined();
     });
 
     it("reports a policy rejection", async () => {
@@ -2900,7 +2928,12 @@ describe("a settlement whose outcome is not known yet (settlement_pending)", () 
       .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-0" } }));
     expect(res.status).toBe(402);
     expect(facilitator.settles()).toBe(1);
+    // A failure: a fresh challenge, with the answer beside it as any failed
+    // settle carries it.
     expect(res.headers["payment-required"]).toBeDefined();
-    expect(res.headers["payment-response"]).toBeUndefined();
+    expect(decodePaymentResponseHeader(res.headers["payment-response"])).toEqual({
+      success: false,
+      errorReason: "settlement_pending",
+    });
   });
 });
