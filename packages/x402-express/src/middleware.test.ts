@@ -77,6 +77,19 @@ function stubFacilitator(over?: { verify?: unknown; settle?: unknown }) {
   return fetchMock;
 }
 
+/**
+ * A ledger rejection as a facilitator answers it, with 200. The message and the
+ * cause differ, so a test can tell which one the middleware reads.
+ */
+const SETTLE_REFUSED = {
+  success: false,
+  errorReason: "invalid_exact_canton_execute_failed",
+  transaction: "",
+  network: "canton:x",
+  errorMessage: "ledger said no",
+  extensions: { detail: "boom" },
+};
+
 function makeApp(opts: Partial<PaymentRequiredOptions> = {}): Express {
   const app = express();
   app.use("/paid", paymentRequired({ ...baseOptions, ...opts }));
@@ -1021,9 +1034,7 @@ describe("paymentRequired", () => {
     it("names the payment a refusal is about, so preSettle's work can be undone", async () => {
       // The docs invite reserving stock in preSettle. When settle fails after
       // that, this is what says which order to release.
-      stubFacilitator({
-        settle: { success: false, errorReason: "execution_failed", errorDetails: "boom" },
-      });
+      stubFacilitator({ settle: SETTLE_REFUSED });
       const onReject = vi.fn();
       await request(makeApp({ settle: true, onReject }))
         .get("/paid")
@@ -1110,24 +1121,62 @@ describe("paymentRequired", () => {
       expect(payment?.payer).toBe("alice::x");
     });
 
-    it("reports a settle rejection", async () => {
-      stubFacilitator({
-        settle: { success: false, errorReason: "execution_failed", errorDetails: "boom" },
-      });
+    it("reports a settle rejection, with the cause in extensions.detail as its details", async () => {
+      stubFacilitator({ settle: SETTLE_REFUSED });
       const onReject = vi.fn();
       const res = await request(makeApp({ settle: true, onReject }))
         .get("/paid")
         .set("PAYMENT-SIGNATURE", paymentHeader());
       expect(res.status).toBe(402);
+      expect(res.body.details).toBe("boom");
       expect(onReject.mock.calls[0][0]).toMatchObject({
         status: 402,
-        reason: "execution_failed",
+        reason: "invalid_exact_canton_execute_failed",
         details: "boom",
       });
     });
 
+    it("falls back to a settle rejection's errorMessage when it names no cause", async () => {
+      // With no cause named, the facilitator's text is the only reason the
+      // payer sees. Showing it is fine; matching on it is what x402 v2 §9
+      // rules out.
+      const { extensions: _omit, ...noCause } = SETTLE_REFUSED;
+      stubFacilitator({ settle: noCause });
+      const onReject = vi.fn();
+      const res = await request(makeApp({ settle: true, onReject }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader());
+      expect(res.status).toBe(402);
+      expect(res.body.details).toBe("ledger said no");
+      expect(onReject.mock.calls[0][0]).toMatchObject({
+        reason: "invalid_exact_canton_execute_failed",
+        details: "ledger said no",
+      });
+    });
+
+    it("reads a settle rejection's extensions.detail only when it is a string", async () => {
+      stubFacilitator({ settle: { ...SETTLE_REFUSED, extensions: { detail: { code: 1 } } } });
+      const res = await request(makeApp({ settle: true }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader());
+      expect(res.status).toBe(402);
+      expect(res.body.details).toBe("ledger said no");
+    });
+
+    it("reads a settle rejection's errorMessage only when it is a string", async () => {
+      const { extensions: _omit, ...noCause } = SETTLE_REFUSED;
+      stubFacilitator({ settle: { ...noCause, errorMessage: { code: 3 } } });
+      const onReject = vi.fn();
+      const res = await request(makeApp({ settle: true, onReject }))
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader());
+      expect(res.status).toBe(402);
+      expect(res.body).not.toHaveProperty("details");
+      expect(onReject.mock.calls[0][0].details).toBeUndefined();
+    });
+
     it("sends a failed settle's answer in PAYMENT-RESPONSE beside a fresh challenge", async () => {
-      const failed = { success: false, errorReason: "execution_failed", errorDetails: "boom" };
+      const failed = SETTLE_REFUSED;
       stubFacilitator({ settle: failed });
       const res = await request(makeApp({ settle: true }))
         .get("/paid")
@@ -2912,7 +2961,12 @@ describe("a settlement whose outcome is not known yet (settlement_pending)", () 
     // body, and no reference minted for one.
     expect(res.headers["payment-required"]).toBeUndefined();
     expect(res.body.accepts).toBeUndefined();
-    expect(res.body).toMatchObject({ error: "settlement_pending", transaction: "h" });
+    // The body names the transfer and its network, as the answer it repeats does.
+    expect(res.body).toMatchObject({
+      error: "settlement_pending",
+      transaction: "h",
+      network: "canton:x",
+    });
     expect(booked).toEqual([]);
     expect(served).not.toHaveBeenCalled();
     // Not a rejection: the payment may still land, so no undo is owed.
@@ -2921,7 +2975,8 @@ describe("a settlement whose outcome is not known yet (settlement_pending)", () 
   });
 
   it("a pending answer that names no transaction is a plain failure, not retried", async () => {
-    const facilitator = scriptedSettle({ success: false, errorReason: "settlement_pending" });
+    const unnamed = { ...PENDING, transaction: "" };
+    const facilitator = scriptedSettle(unnamed);
     const { app } = pendingApp([]);
     const res = await request(app)
       .get("/paid")
@@ -2931,9 +2986,33 @@ describe("a settlement whose outcome is not known yet (settlement_pending)", () 
     // A failure: a fresh challenge, with the answer beside it as any failed
     // settle carries it.
     expect(res.headers["payment-required"]).toBeDefined();
-    expect(decodePaymentResponseHeader(res.headers["payment-response"])).toEqual({
-      success: false,
-      errorReason: "settlement_pending",
-    });
+    expect(decodePaymentResponseHeader(res.headers["payment-response"])).toEqual(unnamed);
+  });
+
+  it("a pending answer that names no network is a plain failure, not retried", async () => {
+    // x402 v2 §9 asks a pending answer for both, so the caller can look the
+    // transfer up; one without the network is read as a failure.
+    const { network: _omit, ...noNetwork } = PENDING;
+    for (const answer of [{ ...PENDING, network: "" }, noNetwork]) {
+      const facilitator = scriptedSettle(answer);
+      const booked: string[] = [];
+      const { app, served, onReject } = pendingApp(booked);
+      const res = await request(app)
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-0" } }));
+      expect(res.status, JSON.stringify(answer)).toBe(402);
+      expect(facilitator.settles()).toBe(1);
+      // A fresh challenge, with a reference minted for it: what a failure
+      // answers, and what a pending answer never does.
+      expect(res.headers["payment-required"]).toBeDefined();
+      expect(res.body.accepts).toHaveLength(1);
+      expect(booked).toHaveLength(1);
+      expect(served).not.toHaveBeenCalled();
+      // The answer still travels beside it. One with no network at all is not
+      // one the decoder takes, so check the header is there, not its content.
+      expect(res.headers["payment-response"]).toBeDefined();
+      await new Promise((r) => setImmediate(r));
+      expect(onReject).toHaveBeenCalledOnce();
+    }
   });
 });

@@ -11,6 +11,7 @@ import {
   isCantonPaymentRequiredResponse,
   SettleErrorReasonSchema,
   SettleResponseSchema,
+  SupportedResponseSchema,
   VerifyInvalidReasonSchema,
   VerifyResponseSchema,
 } from "../index";
@@ -319,7 +320,13 @@ describe("reason codes", () => {
     "unsupported_scheme",
   ];
   const verifies = (invalidReason: string) => v.is(VerifyResponseSchema, { isValid: false, invalidReason });
-  const settles = (errorReason: string) => v.is(SettleResponseSchema, { success: false, errorReason });
+  const settles = (errorReason: string) =>
+    v.is(SettleResponseSchema, {
+      success: false,
+      errorReason,
+      transaction: "",
+      network: "canton:devnet",
+    });
 
   it("keeps a settle failure's transaction, network and payer, so a pending answer names its transfer", () => {
     const pending = {
@@ -403,5 +410,94 @@ describe("reason codes", () => {
   it("refuses a code neither spec nor this SDK defines", () => {
     expect(verifies("invalid_exact_evm_payload_signature")).toBe(false);
     expect(settles("made_up")).toBe(false);
+  });
+});
+
+describe("facilitator answers, in the shape x402 v2 gives them", () => {
+  const refused = {
+    success: false,
+    errorReason: "invalid_exact_canton_execute_failed",
+    transaction: "",
+    network: "canton:devnet",
+  };
+  const settled = { success: true, network: "canton:devnet", transaction: "1220update" };
+
+  it("requires a failed settle's transaction and network, empty when nothing was relayed", () => {
+    expect(v.is(SettleResponseSchema, refused)).toBe(true);
+    const { transaction: _t, ...noTransaction } = refused;
+    const { network: _n, ...noNetwork } = refused;
+    expect(v.is(SettleResponseSchema, noTransaction)).toBe(false);
+    expect(v.is(SettleResponseSchema, noNetwork)).toBe(false);
+  });
+
+  it("keeps a failed settle's errorMessage, extensions and payer", () => {
+    const full = {
+      ...refused,
+      errorMessage: "the ledger refused the transfer",
+      payer: "alice::1220beef",
+      extensions: { detail: "boom" },
+    };
+    expect(v.parse(SettleResponseSchema, full)).toEqual(full);
+  });
+
+  it("takes a success without a payer, keeps its amount, and drops the fields the spec does not define", () => {
+    expect(v.parse(SettleResponseSchema, settled)).toEqual(settled);
+    const withAmount = { ...settled, amount: "500000000" };
+    expect(v.parse(SettleResponseSchema, { ...withAmount, completionOffset: "42" })).toEqual(
+      withAmount,
+    );
+    expect(v.parse(SettleResponseSchema, { ...refused, errorDetails: "boom" })).toEqual(refused);
+  });
+
+  it("keeps a verify answer's extra, and an invalid one's invalidMessage", () => {
+    const ok = { isValid: true, payer: "alice::1220beef", extra: { note: "x" } };
+    const bad = {
+      isValid: false,
+      invalidReason: "invalid_exact_canton_amount_mismatch",
+      invalidMessage: "the transfer moves another amount",
+      extra: { note: "x" },
+    };
+    expect(v.parse(VerifyResponseSchema, ok)).toEqual(ok);
+    expect(v.parse(VerifyResponseSchema, bad)).toEqual(bad);
+  });
+
+  describe("/supported", () => {
+    // The example in x402 v2 §7.3, as written there.
+    const example = {
+      kinds: [
+        { x402Version: 2, scheme: "exact", network: "eip155:84532" },
+        { x402Version: 2, scheme: "exact", network: "eip155:8453" },
+        { x402Version: 2, scheme: "exact", network: "eip155:43113" },
+        { x402Version: 2, scheme: "exact", network: "eip155:43114" },
+      ],
+      extensions: [],
+      signers: {
+        "eip155:*": ["0x1234567890abcdef1234567890abcdef12345678"],
+        "solana:*": ["CKPKJWNdJEqa81x7CkZ14BVPiY6y16Sxs7owznqtWYp5"],
+      },
+    };
+
+    it("parses the spec's example as it is", () => {
+      // toEqual, not just a pass: a record schema would take `extensions: []`
+      // too, and turn it into `{}`.
+      expect(v.parse(SupportedResponseSchema, example)).toEqual(example);
+      const withIds = { ...example, extensions: ["bazaar"] };
+      expect(v.parse(SupportedResponseSchema, withIds)).toEqual(withIds);
+    });
+
+    it("requires extensions as a list of ids and signers as lists of addresses, as §7.3.1 does", () => {
+      const { extensions: _e, ...noExtensions } = example;
+      const { signers: _s, ...noSigners } = example;
+      for (const bad of [
+        { kinds: [] },
+        noExtensions,
+        noSigners,
+        { ...example, extensions: {} },
+        { ...example, signers: { "canton:*": "x402-facilitator::1220fee" } },
+        { ...example, signers: { "canton:*": [42] } },
+      ]) {
+        expect(v.is(SupportedResponseSchema, bad), JSON.stringify(bad)).toBe(false);
+      }
+    });
   });
 });

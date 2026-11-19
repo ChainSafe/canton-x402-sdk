@@ -121,9 +121,11 @@ export function encodePaymentResponseHeader(response: SettleResponse): string {
  *
  * Throws on bad base64 / JSON, on nesting past {@link MAX_PAYMENT_DEPTH}, or
  * when the value is not a settle answer: a boolean `success`, `transaction` and
- * `network` strings on a success, an `errorReason` string on a failure, and
- * `transaction`, `network` and `payer` strings where present. The reason is not checked against the codes this SDK knows, so an
- * answer from a newer facilitator still reads.
+ * `network` strings on every answer (`transaction` may be empty), an
+ * `errorReason` string on a failure, `payer`, `errorMessage` and `amount`
+ * strings where present, and `extensions` an object where present. The reason
+ * is not checked against the codes this SDK knows, and fields it does not know
+ * pass through, so an answer from a newer facilitator still reads.
  */
 export function decodePaymentResponseHeader(headerValue: string): SettleResponse {
   let raw: string;
@@ -142,22 +144,32 @@ export function decodePaymentResponseHeader(headerValue: string): SettleResponse
     throw new Error(`PAYMENT-RESPONSE header nests deeper than ${MAX_PAYMENT_DEPTH} levels`);
   }
   if (!isSettleAnswer(parsed)) {
-    throw new Error("PAYMENT-RESPONSE header is not a settle answer (success, errorReason)");
+    throw new Error(
+      "PAYMENT-RESPONSE header is not a settle answer (success, transaction, network, errorReason)",
+    );
   }
   return parsed as SettleResponse;
 }
 
-/** The envelope of a settle answer, checked field by field. */
+/**
+ * The envelope of a settle answer, checked field by field: every field the
+ * returned type requires, and the type of each optional one it names, so the
+ * type does not promise what the header did not carry.
+ */
 function isSettleAnswer(value: unknown): boolean {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  if (!isPlainObject(value)) return false;
   const r = value as Record<string, unknown>;
   if (typeof r.success !== "boolean") return false;
-  if (r.success && (typeof r.transaction !== "string" || typeof r.network !== "string"))
-    return false;
+  if (typeof r.transaction !== "string" || typeof r.network !== "string") return false;
   if (!r.success && typeof r.errorReason !== "string") return false;
-  return ["transaction", "network", "payer"].every(
+  if (r.extensions !== undefined && !isPlainObject(r.extensions)) return false;
+  return ["payer", "errorMessage", "amount"].every(
     (k) => r[k] === undefined || typeof r[k] === "string",
   );
+}
+
+function isPlainObject(value: unknown): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

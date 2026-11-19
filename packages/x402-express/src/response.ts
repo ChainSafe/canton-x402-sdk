@@ -163,9 +163,12 @@ function respond402<TRequirements extends X402PaymentRequirements<unknown>>(
  */
 function respondPending(res: Response, response: SettleResponseError): void {
   res.setHeader("PAYMENT-RESPONSE", encodePaymentResponseHeader(response));
-  res
-    .status(402)
-    .json({ x402Version: 2, error: response.errorReason, transaction: response.transaction });
+  res.status(402).json({
+    x402Version: 2,
+    error: response.errorReason,
+    transaction: response.transaction,
+    network: response.network,
+  });
 }
 
 function errMsg(err: unknown): string {

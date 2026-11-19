@@ -9,8 +9,9 @@
 answer.
 
 - On a successful settle, `PAYMENT-RESPONSE` carries the facilitator's whole
-  answer (`success`, `transaction`, `network`, `payer`), base64-encoded JSON.
-  `decodePaymentResponseHeader` from `@chainsafe/x402-core` reads it.
+  answer (`success`, `transaction`, `network`, and `payer` when it names one),
+  base64-encoded JSON. `decodePaymentResponseHeader` from `@chainsafe/x402-core`
+  reads it.
 - A failed settle sends its answer in `PAYMENT-RESPONSE` too, on the 402 beside
   the fresh challenge, so a payer can read why it failed. A refusal before
   settle sends no `PAYMENT-RESPONSE`, since nothing was settled.
