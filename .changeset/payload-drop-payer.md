@@ -19,10 +19,9 @@ Rule 8): it sits inside what was signed, where `payer` was a claim beside it.
     "publicKey": "…",
 ```
 
-Verify still checks the signature against `publicKey`, and the key's
-fingerprint must now match the `::` suffix of the transfer's sender, so a
-transfer naming another party as sender is `bad_fingerprint`. `publicKey` stays
-until the facilitator can read the payer party's keys from the ledger.
+Verify still checks the signature against the payer's key, and a transfer
+naming another party as sender is refused because that party's keys are the
+ones the signature is checked against.
 
 The verifier decodes the transfer right after the shape check and the graph
 guard, and reports its sender as `payer` on every result from there on.
@@ -39,8 +38,8 @@ it does not change the payer reported.
 `req.x402.payer` in `@chainsafe/x402-express` is the facilitator's
 `verify.payer`, or the transfer's sender read from the payload when the
 facilitator leaves it out (`payer` is optional in a verify response). If
-neither is there, the middleware refuses with `transfer_mismatch` before
-settling.
+neither is there, the middleware refuses with
+`invalid_exact_canton_malformed_payload` before settling.
 
 `@chainsafe/x402-client` is major because the payload type reaches its
 signatures: `FacilitatorClient.verify` and `settle` take it.

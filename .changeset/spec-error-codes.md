@@ -7,9 +7,8 @@ Verification refuses with the error reason codes the specs define.
 
 `invalidReason` is now the Canton `exact` scheme spec's code, the one a client
 written against the spec matches on: `invalid_exact_canton_amount_mismatch`
-rather than `transfer_mismatch` with detail `amount`, and so on. The code it
-answered with before moves to `extensions.reason`, and `extensions.detail`
-still names what diverged.
+rather than `transfer_mismatch` with detail `amount`, and so on, and
+`extensions.detail` names which of that code's causes it was.
 
 | before | now |
 | --- | --- |
@@ -24,15 +23,18 @@ still names what diverged.
 | `transfer_expired` | `invalid_exact_canton_expired` |
 
 The verifier registry answers an unregistered pair with `unsupported_scheme`,
-or `invalid_network` when it has the scheme on other networks, with
-`scheme_mismatch` in `extensions.reason` either way, as before.
+or `invalid_network` when it has the scheme on other networks. It used to
+annotate both `scheme_mismatch`, which is exactly why the pair could not be
+told apart from the extension; now the code says it and there is no extension.
 
 `VerifyInvalidReason` and `SettleErrorReason` take every code the scheme spec
-and the x402 v2 spec define, and keep the older ones, so an answer from a
-facilitator on an older core still parses. Dropping those is a separate change.
+and the x402 v2 spec define, plus `invalid_exact_canton_synchronizer_mismatch`,
+and nothing else. The older codes in the left column are no longer accepted, so
+an answer from a facilitator on a published 0.1.x carrying one of them no
+longer parses.
 
 The Express middleware passes `invalidReason` through as the 402's `error`, so
-a merchant that matches on it, or on `onReject`'s `reason`, sees the new codes.
-The older one is in `onReject`'s `extensions.reason`. The middleware's own
+a merchant that matches on it, or on `onReject`'s `reason`, sees the new codes,
+with the cause in `onReject`'s `extensions.detail`. The middleware's own
 refusal of a transfer it cannot decode now says
 `invalid_exact_canton_malformed_payload` too.

@@ -80,7 +80,7 @@ A payer whose key cannot be resolved was previously refused at the envelope, as
 `invalid_exact_canton_missing_proof` with **no payer**, because the missing key
 was a missing proof. There is no key in the payload to miss now, so the refusal
 happens after the transfer decodes: `invalid_exact_canton_signature_invalid`,
-**naming the payer**, with `missing_public_key` still in `extensions.reason`.
+**naming the payer**, with `no_payer_key` in `extensions.detail`.
 That matches the reference implementation, which answers `signature_invalid`
 when its own key lookup returns nothing.
 

@@ -29,9 +29,8 @@ payload that still carries one is not refused: the field is ignored.
 `requirementsHashMatches` is removed from `@chainsafe/x402-core`.
 
 `requirementsHash()` itself stays exported, as a stable hash of one
-`PaymentRequirements`. `requirements_hash_mismatch` stays in the verify and
-settle reason lists, so a response from a facilitator that still sends it
-parses, but this package's verifier no longer returns it.
+`PaymentRequirements`. Nothing answers `requirements_hash_mismatch` any more,
+and it is not in the reason lists at 1.0.0.
 
 `@chainsafe/x402-client` and `@chainsafe/x402-express` are major because the
 payload type reaches their signatures: `FacilitatorClient.verify` and `settle`

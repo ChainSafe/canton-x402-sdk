@@ -638,7 +638,7 @@ describe("paymentRequired", () => {
     });
     expect(onReject.mock.calls[0][0]).toMatchObject({
       reason: "invalid_exact_canton_malformed_payload",
-      extensions: { reason: "transfer_mismatch", detail: "undecodable" },
+      extensions: { detail: "undecodable" },
     });
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/v2/settle"))).toBe(false);
     // The real decoder ran on the payload's transaction and found no transfer in it.
@@ -666,7 +666,7 @@ describe("paymentRequired", () => {
       verify: {
         isValid: false,
         invalidReason: "invalid_exact_canton_amount_mismatch",
-        extensions: { reason: "transfer_mismatch", detail: "amount" },
+        extensions: { detail: "amount" },
       },
     });
     const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
@@ -2142,13 +2142,17 @@ describe("paymentRequired: configuring from /v2/supported", () => {
 
     it("goes on a rejection's 402 too, with its code; details stay in the body", async () => {
       stubFacilitator({
-        verify: { isValid: false, invalidReason: "transfer_mismatch", extensions: { detail: "amount" } },
+        verify: {
+          isValid: false,
+          invalidReason: "invalid_exact_canton_amount_mismatch",
+          extensions: { detail: "amount" },
+        },
       });
       const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
       expect(res.status).toBe(402);
-      expect(res.body).toMatchObject({ error: "transfer_mismatch", details: "amount" });
+      expect(res.body).toMatchObject({ error: "invalid_exact_canton_amount_mismatch", details: "amount" });
       const sent = header(res);
-      expect(sent.error).toBe("transfer_mismatch");
+      expect(sent.error).toBe("invalid_exact_canton_amount_mismatch");
       expect(sent).not.toHaveProperty("details");
       const { details: _omit, ...spec } = res.body;
       expect(sent).toEqual(spec);

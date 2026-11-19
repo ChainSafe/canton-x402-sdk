@@ -11,7 +11,7 @@ export const MAX_PREPARED_TRANSACTION_INPUT_CONTRACTS = 1_024;
 
 export type PreparedTransactionGuardFailure =
   | "size_limit"
-  | "undecodable"
+  | "structure_undecodable"
   | "node_limit"
   | "node_seed_limit"
   | "input_contract_limit"
@@ -85,11 +85,11 @@ export function guardPreparedTransaction(
   try {
     decoded = decodePreparedTransaction(preparedTransaction, { readUnknownField: "throw" });
   } catch {
-    return { ok: false, reason: "undecodable" };
+    return { ok: false, reason: "structure_undecodable" };
   }
 
   const transaction = decoded.transaction;
-  if (!transaction) return { ok: false, reason: "undecodable" };
+  if (!transaction) return { ok: false, reason: "structure_undecodable" };
   if (transaction.nodes.length > MAX_PREPARED_TRANSACTION_NODES) {
     return { ok: false, reason: "node_limit" };
   }

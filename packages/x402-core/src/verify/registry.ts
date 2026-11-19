@@ -52,10 +52,9 @@ export function createVerifierRegistry(verifiers: readonly SchemeVerifier[]): Ve
     async verify(payload, requirements, context) {
       const verifier = map.get(keyOf(requirements.scheme, requirements.network));
       if (!verifier) {
-        // The older code rides along in extensions.reason, as the verifier's
-        // do. It was scheme_mismatch for both.
+        // Nothing to put in `extensions`: the code is the whole answer.
         const invalidReason = schemes.has(requirements.scheme) ? "invalid_network" : "unsupported_scheme";
-        return { isValid: false, invalidReason, extensions: { reason: "scheme_mismatch" } };
+        return { isValid: false, invalidReason };
       }
       return verifier.verify(payload, requirements, context);
     },

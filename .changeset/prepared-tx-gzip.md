@@ -14,7 +14,8 @@ The verifier reads it only as exactly one gzip member with no optional header
 fields, at most 8 KiB compressed and 72 KiB decompressed. Concatenated members,
 bytes after the member, bytes between the deflate stream and the trailer, and a
 trailer that does not match are refused, and a decompression bomb stops at the
-bound. Anything else is `transfer_mismatch` with detail `undecodable`.
+bound. Anything else is `invalid_exact_canton_malformed_payload` with detail
+`undecodable`.
 
 New in `@chainsafe/x402-core`: `gzipPreparedTransaction` and
 `gunzipPreparedTransaction`, with `DEFAULT_MAX_COMPRESSED_BYTES` and

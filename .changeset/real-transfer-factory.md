@@ -19,7 +19,8 @@ input contracts, and the contract it names must be:
 - exercised through the Token Standard `TransferFactory` interface
   (`factory_interface`).
 
-Both refuse as `invalid_exact_canton_malformed_payload` / `transfer_mismatch`.
+Both refuse as `invalid_exact_canton_malformed_payload`, with the cause in
+`extensions.detail`.
 
 **`expectedAdmin` is held to the instrument's admin.** The choice argument is
 `{ expectedAdmin, transfer }`. The two name different things — `expectedAdmin`

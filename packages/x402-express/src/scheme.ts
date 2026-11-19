@@ -239,7 +239,7 @@ export interface SchemeAdapter<
    * {@link SchemeAdapter.payerOf} can name the payer. The scheme's, because the
    * spec's codes are per-scheme: canton-exact answers
    * `invalid_exact_canton_malformed_payload`, and another scheme has its own.
-   * Defaults to the protocol-level `transfer_mismatch`.
+   * Defaults to the x402 v2 general `invalid_payload`.
    */
   unreadablePayerReason?: string;
   /**

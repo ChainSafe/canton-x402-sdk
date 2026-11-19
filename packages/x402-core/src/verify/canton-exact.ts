@@ -68,16 +68,19 @@ function isTransferExpired(executeBeforeMicros: bigint | undefined, now: number 
 
 /**
  * A refusal. `invalidReason` is the spec's code, the one a client written
- * against the spec matches on. `extensions.reason` is the code this verifier
- * answered with before, kept beside it until those are dropped, and
- * `extensions.detail` says what diverged where there is more to say.
+ * against the spec matches on, and `extensions.detail` says WHICH of that
+ * code's causes this was — present only where the code alone is ambiguous,
+ * absent where it is not.
+ *
+ * There is no `extensions.reason` any more. It carried the code this verifier
+ * answered with before the spec's table, and for most codes it restated them:
+ * `invalid_network` was annotated `network_mismatch`, `unsupported_scheme` was
+ * `scheme_mismatch`. Nothing ever read it. What it did carry — four distinct
+ * causes under `signature_invalid` — moved to `detail`, which is where the
+ * other causes already were.
  */
 function fail(
   invalidReason: VerifyInvalidReason,
-  // Named apart from `invalidReason` because the two are the SAME type and sit
-  // next to each other: transposing them at a call site compiles and changes
-  // the wire response. The name is all that distinguishes them here.
-  extensionReason: VerifyInvalidReason,
   payer?: string,
   detail?: string,
 ): VerifyResponseInvalid {
@@ -85,7 +88,7 @@ function fail(
     isValid: false,
     invalidReason,
     ...(payer ? { payer } : {}),
-    extensions: { reason: extensionReason, ...(detail !== undefined ? { detail } : {}) },
+    ...(detail === undefined ? {} : { extensions: { detail } }),
   };
 }
 
@@ -154,7 +157,7 @@ async function checkProof(
   //      mid-rotation publishes two, and narrowing would refuse the honest
   //      payment that the other one signed.
   if (payerPublicKeys.length === 0) {
-    return fail("invalid_exact_canton_signature_invalid", "missing_public_key", payer);
+    return fail("invalid_exact_canton_signature_invalid", payer, "no_payer_key");
   }
   // 9. Validate the prepared-transaction hash and signature encodings.
   //    `signature` is canonical base64, while `preparedTxHash` is canonical
@@ -162,7 +165,7 @@ async function checkProof(
   //    so alternate spellings of the same bytes are refused.
   const signatureHex = signatureFromBase64(inner.signature);
   if (!PREPARED_TX_HASH.test(inner.preparedTxHash) || signatureHex === null) {
-    return fail("invalid_exact_canton_signature_invalid", "bad_signature", payer);
+    return fail("invalid_exact_canton_signature_invalid", payer, "malformed_encoding");
   }
 
   // 10. An absent hashingSchemeVersion means V2. The spec answers one this
@@ -171,7 +174,7 @@ async function checkProof(
     inner.hashingSchemeVersion ?? HashingSchemeVersion.V2;
 
   if (hashingSchemeVersion !== HashingSchemeVersion.V2) {
-    return fail("invalid_exact_canton_malformed_payload", "internal_error", payer);
+    return fail("invalid_exact_canton_malformed_payload", payer, "unsupported_hashing_scheme");
   }
 
   // 11. Derive the trusted hash from the validated prepared transaction.
@@ -182,13 +185,13 @@ async function checkProof(
       hashingSchemeVersion,
     );
   } catch {
-    return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", payer, "undecodable");
+    return fail("invalid_exact_canton_malformed_payload", payer, "undecodable");
   }
 
   // 12. The supplied hash must describe this exact transaction (Rule 3, so
   //     signature_invalid in the spec's terms).
   if (computedHash.toLowerCase() !== inner.preparedTxHash.toLowerCase()) {
-    return fail("invalid_exact_canton_signature_invalid", "prepared_transaction_hash_mismatch", payer);
+    return fail("invalid_exact_canton_signature_invalid", payer, "hash_mismatch");
   }
 
   // 13. Verify the payload's base64 signature against the trusted hash, under ANY
@@ -199,7 +202,7 @@ async function checkProof(
   //     the answer, not a by-product.
   const signingKey = payerPublicKeys.find((key) => verifySignature(computedHash, signatureHex, key));
   if (signingKey === undefined) {
-    return fail("invalid_exact_canton_signature_invalid", "bad_signature", payer);
+    return fail("invalid_exact_canton_signature_invalid", payer, "bad_signature");
   }
 
   return { signedBy: fingerprintForPublicKey(signingKey) };
@@ -240,22 +243,22 @@ function checkEnvelope(
   //    A payment with no `accepted`, or a pre-spec envelope that carries the
   //    scheme at the top level instead, names none.
   const accepted = isObj(payload.accepted) ? payload.accepted : undefined;
-  if (payload.x402Version !== 2) return fail("invalid_x402_version", "internal_error");
-  if (!accepted) return fail("unsupported_scheme", "scheme_mismatch");
+  if (payload.x402Version !== 2) return fail("invalid_x402_version");
+  if (!accepted) return fail("unsupported_scheme");
   if (accepted.scheme !== EXACT_SCHEME_ID || requirements.scheme !== EXACT_SCHEME_ID) {
-    return fail("unsupported_scheme", "scheme_mismatch");
+    return fail("unsupported_scheme");
   }
   // 2. network — accepted, requirements, and this verifier's binding must agree
   if (accepted.network !== requirements.network || requirements.network !== networkId) {
-    return fail("invalid_network", "network_mismatch");
+    return fail("invalid_network");
   }
   // 3. shapes — narrow the unknown inner/requirements before reading fields.
   //    `assetTransferMethod` is the same literal in both schemas, so once both
   //    pass, the payload's method and the requirements' agree.
   if (!isCantonPaymentRequirements(requirements)) {
-    return fail("invalid_payment_requirements", "internal_error");
+    return fail("invalid_payment_requirements");
   }
-  if (!isObj(payload.payload)) return fail("invalid_exact_canton_missing_proof", "internal_error");
+  if (!isObj(payload.payload)) return fail("invalid_exact_canton_missing_proof", undefined, "payload_missing");
   const raw = payload.payload;
   // Rule 2: a proof that is not there is missing_proof, one that is there but
   // not well-formed is malformed_payload. The payer's key is no longer among the
@@ -263,9 +266,9 @@ function checkEnvelope(
   // from the party's topology instead (#105), so its absence is the caller's to
   // answer and not a malformed payload.
   if (PROOF_FIELDS.some((field) => typeof raw[field] !== "string")) {
-    return fail("invalid_exact_canton_missing_proof", "internal_error");
+    return fail("invalid_exact_canton_missing_proof", undefined, "proof_fields_missing");
   }
-  if (!isCantonPaymentInner(raw)) return fail("invalid_exact_canton_malformed_payload", "internal_error");
+  if (!isCantonPaymentInner(raw)) return fail("invalid_exact_canton_malformed_payload", undefined, "payload_shape");
   return { inner: raw, requirements };
 }
 
@@ -296,25 +299,20 @@ async function verifyCantonExact(
   //    undecodable as a bad protobuf.
   const prepared = gunzipPreparedTransaction(inner.preparedTransaction);
   if (prepared === null) {
-    return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", undefined, "undecodable");
+    return fail("invalid_exact_canton_malformed_payload", undefined, "undecodable");
   }
   const preparedBase64 = bytesToBase64(prepared);
   // 5. Bound and validate the graph before anything walks it: the decoder
   //    below, and the upstream recursive hasher after it.
   const graph = guardPreparedTransaction(preparedBase64);
   if (!graph.ok) {
-    return fail(
-      "invalid_exact_canton_malformed_payload",
-      "invalid_prepared_transaction_structure",
-      undefined,
-      graph.reason,
-    );
+    return fail("invalid_exact_canton_malformed_payload", undefined, graph.reason);
   }
   // 6. The signed transfer. Its sender is the payer (spec Rule 8): the payload
   //    names none, so every result from here on reports this one.
   const transfer = decodePreparedTransaction(preparedBase64);
   if (!transfer) {
-    return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", undefined, "undecodable");
+    return fail("invalid_exact_canton_malformed_payload", undefined, "undecodable");
   }
   const payer = transfer.sender;
   // 7-13. the payer's own key must prove this exact transaction.
@@ -326,33 +324,33 @@ async function verifyCantonExact(
   //     rejects a valid signature over a divergent transfer (e.g. to another
   //     party, or a smaller amount).
   const violation = transferViolation(transfer, quoted);
-  if (violation) return fail(VIOLATION_REASON[violation], "transfer_mismatch", payer, violation);
+  if (violation) return fail(VIOLATION_REASON[violation], payer, violation);
   // 15. the exercise must go through a real transfer factory, proved from the
   //     transaction's own input contracts. Placed after 14 because it reads
   //     the admin that step has just held equal to the quote's, so the
   //     two cannot disagree about which instrument this is.
   const factory = factoryViolation(transfer);
-  if (factory) return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", payer, factory);
+  if (factory) return fail("invalid_exact_canton_malformed_payload", payer, factory);
   // 15b. no contract the SENDER signs may be created without the instrument's
   //      admin on it. Such a contract hands the payer's authority to whoever
   //      controls its choices, and nothing else here would notice: the quoted
   //      payment can be delivered perfectly while it is left behind.
   const created = senderSignedCreateViolation(transfer);
-  if (created) return fail("invalid_exact_canton_malformed_payload", "transfer_mismatch", payer, created);
+  if (created) return fail("invalid_exact_canton_malformed_payload", payer, created);
   // 16. the transfer must DELIVER, not leave a pending instruction. Which of
   //     the two a signed TransferFactory_Transfer does is visible only in its
   //     consequences, and relaying a pending one commits the payer's funds
   //     without paying the merchant.
   const delivery = deliveryViolation(transfer, quoted);
   if (delivery) {
-    return fail("invalid_exact_canton_preapproval_missing", "transfer_mismatch", payer, delivery);
+    return fail("invalid_exact_canton_preapproval_missing", payer, delivery);
   }
   // 17. the transfer must still be executable. An absent deadline counts as
   //     expired: `executeBefore` is not optional in a real transfer, and
   //     reading a missing one as "no deadline" would make the check skippable
   //     by leaving the field out.
   if (isTransferExpired(transfer.executeBeforeMicros)) {
-    return fail("invalid_exact_canton_expired", "transfer_expired", payer);
+    return fail("invalid_exact_canton_expired", payer);
   }
   // `signedBy` is the fingerprint of the key that verified, which is what a
   // Canton submission must name beside this signature. Core found it in step

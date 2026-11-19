@@ -9,5 +9,5 @@ or length longer than 5 bytes, a varint value longer than 10 bytes, invalid
 UTF-8, groups), reads only the node tree under the transaction's roots, and
 refuses repeated or non-canonical node ids, nodes outside that tree, and a
 transfer under a rollback node. Canton never produces any of these, so real
-transactions are unaffected; the verifier reports them as `transfer_mismatch`
-(`undecodable`).
+transactions are unaffected; the verifier reports them as
+`invalid_exact_canton_malformed_payload` (`undecodable`).

@@ -22,25 +22,25 @@ Unlike `maxTimeoutSeconds`, these reach the ledger. The payer folds
 verifier checks the transfer, not the quote.
 
 **Rule 10, deadline.** A transfer whose `executeBefore` has passed, or is
-within five seconds of it, is refused with the new `transfer_expired`. Settling
-is not instantaneous, so accepting one about to lapse buys the wasted relay the
-rule exists to avoid. An absent deadline counts as expired: a real transfer
-always carries one, and reading a missing field as "no deadline" would make the
-check skippable by leaving it out.
+within five seconds of it, is refused with `invalid_exact_canton_expired`.
+Settling is not instantaneous, so accepting one about to lapse buys the wasted
+relay the rule exists to avoid. An absent deadline counts as expired: a real
+transfer always carries one, and reading a missing field as "no deadline" would
+make the check skippable by leaving it out.
 
-`transfer_expired` is the only expiry left, and it says something narrower than
-the one it replaces: not that the quote went stale, but that the transfer the
-payer signed can no longer settle, so the client should prepare another against
-the quote it already has.
+`invalid_exact_canton_expired` is the only expiry left, and it says something
+narrower than the one it replaces: not that the quote went stale, but that the
+transfer the payer signed can no longer settle, so the client should prepare
+another against the quote it already has.
 
 **Rule 12, memo.** When the merchant quotes one, the transfer's metadata must
 carry the identical value under `x402.memo`, or the payment is
-`transfer_mismatch` with detail `memo`. A memo the merchant did not quote is refused
-too: `x402.memo` is the scheme's key, not the payer's namespace, so an unquoted
-transfer must carry none — a payer naming its own order there would otherwise
-be credited against it. Note that the wallet SDK's own `memo` parameter
-writes a different key (`splice.lfdecentralizedtrust.org/reason`), so both can
-be present without either standing in for the other.
+`invalid_exact_canton_memo_mismatch`. A memo the merchant did not quote is
+refused too: `x402.memo` is the scheme's key, not the payer's namespace, so an
+unquoted transfer must carry none — a payer naming its own order there would
+otherwise be credited against it. Note that the wallet SDK's own `memo`
+parameter writes a different key (`splice.lfdecentralizedtrust.org/reason`), so
+both can be present without either standing in for the other.
 
 **The decoder learned two wire shapes it was skipping.** A Daml `Time` is a
 protobuf SFIXED64 — wire type 1, eight little-endian bytes — not a varint and
@@ -102,8 +102,15 @@ still be paid at the price it quoted, so a merchant whose prices move should
 re-quote rather than rely on the protocol to stale them out.
 
 That removes `requirements_expired` (nothing can produce it), `isExpired`, and
-the middleware's `validForSeconds` and `nonce` options. `nonce_replayed`
-remains — the guard still exists, it just keys on the memo now.
+the middleware's `validForSeconds` and `nonce` options.
+
+**The memo is not the nonce under another name.** It binds in both directions —
+the transfer's `x402.memo` must equal the quoted value — but nothing enforces
+that a given memo is used once. The replay guard keys on the transaction hash
+instead, so it catches the same signed transaction presented twice and not a
+second transaction against the same quote, which the nonce's unique index did.
+A merchant reconciling by memo should know that two settlements can carry the
+same one.
 
 The facilitator keys its settlement store on `requirements.nonce` today and
 will need the same change; its replay column and the four migrations that touch

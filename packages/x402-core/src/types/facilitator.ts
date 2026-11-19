@@ -146,8 +146,8 @@ const SPEC_REASONS = [
 
 /**
  * Codes this implementation answers with that the scheme spec does not define.
- * Only one so far: the spec names `extra.synchronizerId` but binds no rule to
- * it, so there is no code to borrow.
+ * Only one: the spec names `extra.synchronizerId` but binds no rule to it, so
+ * there is no code to borrow.
  *
  * Kept out of SPEC_REASONS so that list stays the spec's table and nothing
  * else — a client written against the spec will not match on this. Both lists
@@ -163,38 +163,18 @@ export type CantonExactExtensionReason = (typeof CANTON_EXACT_EXTENSION_REASONS)
 export type SpecVerifyInvalidReason = (typeof SPEC_REASONS)[number];
 
 /**
- * Why a payment is invalid. The verifier answers with the spec's code, the one
- * a client written against the spec matches on, and carries the code it
- * answered with before in `extensions.reason`. Those older codes stay in the
- * union, below the spec's, so an answer from a facilitator on an older core
- * still parses; dropping them is a separate, breaking change.
+ * Why a payment is invalid: the spec's code, the one a client written against
+ * the spec matches on. Which of a code's causes it was goes in
+ * `extensions.detail`, not here.
+ *
+ * The specs' codes plus the one declared extension, and nothing else. The
+ * older codes were dropped before 1.0.0, so an answer from a facilitator on a
+ * published 0.1.x carrying one of them no longer parses. From 1.0.0 this list
+ * can only grow in a minor.
  */
 export const VerifyInvalidReasonSchema = v.picklist([
   ...SPEC_REASONS,
   ...CANTON_EXACT_EXTENSION_REASONS,
-  "scheme_mismatch",
-  "network_mismatch",
-  /**
-   * Nothing produces this any more: the payload carries no `requirementsHash`
-   * to check. It stays with the other older codes until they are dropped.
-   */
-  "requirements_hash_mismatch",
-  "bad_fingerprint",
-  "bad_signature",
-  "prepared_transaction_hash_mismatch",
-  "invalid_prepared_transaction_structure",
-  "nonce_replayed",
-  "missing_public_key",
-  /** The signed prepared transaction does not transfer what the requirements demand. */
-  "transfer_mismatch",
-  /**
-   * The signed transfer's own `executeBefore` has passed, is about to, or is
-   * missing — so it cannot settle, and the client should prepare another. The
-   * only expiry left: a quote no longer goes stale on its own, because the
-   * deadline that decides is the one inside what the payer signed.
-   */
-  "transfer_expired",
-  "internal_error",
 ]);
 export type VerifyInvalidReason = v.InferOutput<typeof VerifyInvalidReasonSchema>;
 
@@ -223,22 +203,10 @@ export const VerifyResponseSchema = v.variant("isValid", [
 ]);
 export type VerifyResponse = v.InferOutput<typeof VerifyResponseSchema>;
 
-/** Why a settle failed: the spec's codes, then this facilitator's own. */
+/** Why a settle failed: the same list as verify's, the specs' codes plus the one extension. */
 export const SettleErrorReasonSchema = v.picklist([
   ...SPEC_REASONS,
   ...CANTON_EXACT_EXTENSION_REASONS,
-  "bad_request",
-  "unauthorized",
-  "scheme_mismatch",
-  "network_mismatch",
-  /** As in {@link VerifyInvalidReasonSchema}: unproducible, kept with the older codes. */
-  "requirements_hash_mismatch",
-  "bad_fingerprint",
-  "bad_signature",
-  "nonce_replayed",
-  "execution_failed",
-  "timeout",
-  "facilitator_error",
 ]);
 export type SettleErrorReason = v.InferOutput<typeof SettleErrorReasonSchema>;
 
