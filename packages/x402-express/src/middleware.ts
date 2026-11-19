@@ -171,7 +171,7 @@ export function paymentRequired<
         // Worded as the scheme's verifier words an undecodable transfer: the
         // code, and `extensions.detail` naming which of its causes this was.
         throw new PaymentRejection(
-          scheme.unreadablePayerReason ?? "transfer_mismatch",
+          scheme.unreadablePayerReason ?? "invalid_payload",
           "undecodable",
           { detail: "undecodable" },
         );

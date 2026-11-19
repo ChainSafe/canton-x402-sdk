@@ -224,7 +224,8 @@ describe("paymentRequired with a non-canton scheme", () => {
       .get("/paid")
       .set("PAYMENT-SIGNATURE", voucherHeader({}, undefined, { payload: { code: "NOT-A-VOUCHER" } }));
     expect(res.status).toBe(402);
-    expect(res.body.error).toBe("transfer_mismatch");
+    // The voucher adapter names no code of its own, so the v2 general one.
+    expect(res.body.error).toBe("invalid_payload");
     // Refused before settle, so nothing was captured for a request we then failed.
     for (const [url] of fetchMock.mock.calls) expect(String(url)).not.toContain("/v2/settle");
   });

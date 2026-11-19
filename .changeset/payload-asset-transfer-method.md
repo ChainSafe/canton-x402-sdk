@@ -18,7 +18,8 @@ Canton scheme spec requires in the payload as well as in the requirements'
 
 It is a literal, as in `extra`: `"transfer-factory"` is the only method
 Canton's `exact` defines. A payload without it, or with any other value, fails
-the verifier's shape check (`internal_error`).
+the verifier's shape check (`invalid_exact_canton_malformed_payload`, detail
+`payload_shape`).
 
 `CantonX402Payer` sends it, and its `supports()` now also requires
 `extra.assetTransferMethod` to be `"transfer-factory"`. `createX402Fetch` passes

@@ -26,7 +26,10 @@ encoding case used to be labelled `bad_signature`, which it is not — no
 signature is checked there. `invalid_exact_canton_missing_proof` and
 `invalid_exact_canton_malformed_payload` gain `payload_missing`,
 `proof_fields_missing`, `payload_shape` and `unsupported_hashing_scheme` for
-the same reason.
+the same reason. A transaction that gunzips but that the schema cannot read (a
+field it does not define, say) is `structure_undecodable`, apart from the
+`undecodable` of a member that will not gunzip; `reason` used to tell those two
+apart as `invalid_prepared_transaction_structure`.
 
 A refusal whose cause is not in doubt now carries no `extensions` at all,
 rather than one restating the code.
@@ -90,11 +93,18 @@ rather than inside a type narrowing.
 **A facilitator must migrate six codes.** `internal_error` and
 `facilitator_error` have one-for-one replacements in `unexpected_verify_error`
 and `unexpected_settle_error`. `nonce_replayed` does not: neither spec defines
-a replay refusal, because the scheme's model is to relay again and let the
-ledger answer the duplicate. A facilitator keeping a local guard needs to
-decide what to answer with — `invalid_payment_requirements` fits the case where
-a merchant reuses a settled reference, since the requirements are then the
-thing at fault. That migration has to happen in the same change that adopts
+a replay refusal. A guard keyed on the transaction hash never sees a merchant
+reusing a reference; what it sees is the same signed transaction sent again,
+usually a retry after `settlement_pending`. The scheme spec's settle section
+says what that retry gets: while the submission is unresolved, the facilitator
+looks it up and answers `settlement_pending` again until it finds the outcome;
+one found rejected, or provably never recorded, is
+`invalid_exact_canton_execute_failed`; one found committed is answered with
+success once, and any later settle relays again and the ledger refuses the
+duplicate, which is `invalid_exact_canton_execute_failed` too. **Do not map it
+to a requirements or payload refusal.** The express middleware answers those
+with a fresh challenge, so a payer whose first transfer may still land would be
+asked to sign a second. That migration has to happen in the same change that adopts
 this core, which is required anyway for `verify`'s new signature — and it has
 to happen now, because after 1.0.0 a picklist member cannot be removed until
 2.0.

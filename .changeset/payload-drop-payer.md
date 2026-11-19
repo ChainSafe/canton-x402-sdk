@@ -38,8 +38,8 @@ it does not change the payer reported.
 `req.x402.payer` in `@chainsafe/x402-express` is the facilitator's
 `verify.payer`, or the transfer's sender read from the payload when the
 facilitator leaves it out (`payer` is optional in a verify response). If
-neither is there, the middleware refuses with `transfer_mismatch` before
-settling.
+neither is there, the middleware refuses with
+`invalid_exact_canton_malformed_payload` before settling.
 
 `@chainsafe/x402-client` is major because the payload type reaches its
 signatures: `FacilitatorClient.verify` and `settle` take it.

@@ -2114,13 +2114,17 @@ describe("paymentRequired: configuring from /v2/supported", () => {
 
     it("goes on a rejection's 402 too, with its code; details stay in the body", async () => {
       stubFacilitator({
-        verify: { isValid: false, invalidReason: "transfer_mismatch", extensions: { detail: "amount" } },
+        verify: {
+          isValid: false,
+          invalidReason: "invalid_exact_canton_amount_mismatch",
+          extensions: { detail: "amount" },
+        },
       });
       const res = await request(makeApp()).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
       expect(res.status).toBe(402);
-      expect(res.body).toMatchObject({ error: "transfer_mismatch", details: "amount" });
+      expect(res.body).toMatchObject({ error: "invalid_exact_canton_amount_mismatch", details: "amount" });
       const sent = header(res);
-      expect(sent.error).toBe("transfer_mismatch");
+      expect(sent.error).toBe("invalid_exact_canton_amount_mismatch");
       expect(sent).not.toHaveProperty("details");
       const { details: _omit, ...spec } = res.body;
       expect(sent).toEqual(spec);

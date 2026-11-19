@@ -41,10 +41,11 @@ require it.
 
 **The verifier applies spec Rule 1 to `accepted`.** Its `scheme` must be
 `exact` and its `network` must equal the requirements', or the answer is
-`scheme_mismatch` / `network_mismatch`. It compares nothing else in `accepted`:
-the transfer is bound to `paymentRequirements`, as before. A payment without a
-usable `accepted`, including the pre-spec envelope, is `scheme_mismatch`, and an
-`x402Version` other than 2 is `internal_error`. `schemeNetworkMatches` reads
+`unsupported_scheme` / `invalid_network`. It compares nothing else in
+`accepted`: the transfer is bound to `paymentRequirements`, as before. A payment
+without a usable `accepted`, including the pre-spec envelope, is
+`unsupported_scheme`, and an `x402Version` other than 2 is
+`invalid_x402_version`. `schemeNetworkMatches` reads
 `accepted`, and `createVerifierRegistry` routes on the requirements' scheme and
 network instead of the payment's.
 

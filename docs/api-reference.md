@@ -165,7 +165,7 @@ guarantee.
   "isValid": false,
   "invalidReason": "invalid_exact_canton_amount_mismatch",
   "payer": "buyer::1220…",
-  "extensions": { "reason": "transfer_mismatch", "detail": "amount" }
+  "extensions": { "detail": "amount" }
 }
 ```
 
@@ -191,8 +191,9 @@ needs it: `no_payer_key` (the party publishes none this facilitator can use),
 asks for), `hash_mismatch` (the hash describes a different transaction) or
 `bad_signature` (it verifies under none of the party's keys). Elsewhere it
 names what diverged — the field of a transfer that does not match — or
-`undecodable`, `payload_shape`, `payload_missing`, `proof_fields_missing`,
-`unsupported_hashing_scheme`. A code whose cause is not in doubt carries no
+`undecodable` (the transaction will not gunzip), `structure_undecodable` (it
+gunzips but the schema cannot read it), `payload_shape`, `payload_missing`,
+`proof_fields_missing`, `unsupported_hashing_scheme`. A code whose cause is not in doubt carries no
 `extensions` at all.
 
 A body that is not a well-formed request answers `400` with

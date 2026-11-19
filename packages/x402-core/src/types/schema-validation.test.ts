@@ -9,7 +9,9 @@ import {
   isCantonVerifyRequest,
   isX402Request,
   isCantonPaymentRequiredResponse,
+  SettleErrorReasonSchema,
   SettleResponseSchema,
+  VerifyInvalidReasonSchema,
   VerifyResponseSchema,
 } from "../index";
 import {
@@ -338,12 +340,26 @@ describe("reason codes", () => {
     }
   });
 
-  it("takes the older codes a facilitator still answers with, and no others", () => {
-    // Narrowed before 1.0.0 froze them. What stays is what something still
-    // writes to the TOP-LEVEL field — core writes none of these any more, so
-    // the list is the facilitator's. `bad_signature` is in the settle list
-    // because a settle whose verify failed that way passes the verify reason
-    // straight through (canton-exact-v2's verifyReasonToSettleReason).
+  it("takes exactly the specs' codes plus the one declared extension, and nothing else", () => {
+    // Frozen at 1.0.0: a picklist can only grow in a minor, so pin both lists
+    // in full. Re-adding an older code, or dropping a spec code, fails here.
+    const generalCodes = [
+      "insufficient_funds",
+      "invalid_payload",
+      "invalid_payment_requirements",
+      "invalid_scheme",
+      "invalid_x402_version",
+      "invalid_transaction_state",
+      "unexpected_verify_error",
+      "unexpected_settle_error",
+    ];
+    const expected = [
+      ...schemeTable,
+      ...generalCodes,
+      "invalid_exact_canton_synchronizer_mismatch",
+    ];
+    expect(VerifyInvalidReasonSchema.options).toEqual(expected);
+    expect(SettleErrorReasonSchema.options).toEqual(expected);
   });
 
   it("no longer takes the codes nothing produces, which 1.x cannot add back", () => {

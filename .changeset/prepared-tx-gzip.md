@@ -15,7 +15,7 @@ fields, at most 8 KiB compressed and 64 KiB decompressed, the spec's
 recommended bounds. Concatenated members, bytes after the member, bytes
 between the deflate stream and the trailer, and a trailer that does not match
 are refused, and a decompression bomb stops at the bound. Anything else is
-`transfer_mismatch` with detail `undecodable`.
+`invalid_exact_canton_malformed_payload` with detail `undecodable`.
 
 New in `@chainsafe/x402-core`: `gzipPreparedTransaction` and
 `gunzipPreparedTransaction`, with `DEFAULT_MAX_COMPRESSED_BYTES` and

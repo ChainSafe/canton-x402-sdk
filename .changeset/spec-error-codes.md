@@ -28,8 +28,10 @@ annotate both `scheme_mismatch`, which is exactly why the pair could not be
 told apart from the extension; now the code says it and there is no extension.
 
 `VerifyInvalidReason` and `SettleErrorReason` take every code the scheme spec
-and the x402 v2 spec define, and keep the older ones, so an answer from a
-facilitator on an older core still parses. Dropping those is a separate change.
+and the x402 v2 spec define, plus `invalid_exact_canton_synchronizer_mismatch`,
+and nothing else. The older codes in the left column are no longer accepted, so
+an answer from a facilitator on a published 0.1.x carrying one of them no
+longer parses.
 
 The Express middleware passes `invalidReason` through as the 402's `error`, so
 a merchant that matches on it, or on `onReject`'s `reason`, sees the new codes,

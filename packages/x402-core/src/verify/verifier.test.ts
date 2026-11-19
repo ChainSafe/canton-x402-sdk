@@ -20,6 +20,7 @@ import {
   encodeNode,
   encodePreparedTransaction,
   encodePreparedTransactionGraph,
+  stringField,
   wrap,
 } from "./prepared-tx.fixtures";
 import type { EncodeOptions } from "./prepared-tx.fixtures";
@@ -407,6 +408,28 @@ describe("cantonExactVerifier", () => {
     for (const junk of ["", "not base64!", 123, undefined, null, {}]) {
       expect(decodePayloadTransfer(junk as unknown as string)).toBeNull();
     }
+  });
+
+  it("tells a transaction the schema cannot read apart from a bad gzip member", async () => {
+    // Gunzips fine, then carries a field the schema does not define. The guard
+    // refuses it as `structure_undecodable`, not the `undecodable` a member
+    // that will not gunzip answers, so the two causes stay apart.
+    const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture();
+    const preparedTransaction = encodePreparedTransaction(
+      {
+        sender: payer,
+        receiver: requirements.payTo,
+        amount: atomicToLedger(requirements.amount, 10) as string, // Canton Coin
+        instrumentId: requirements.extra.instrumentId,
+      },
+      { extra: { prepared: wrap(15, stringField(1, "unsigned")) } },
+    );
+    const p = { ...payload, payload: { ...payload.payload, preparedTransaction: gzipped(preparedTransaction) } };
+    expect(await verifier.verify(p, requirements, { payerPublicKeys })).toEqual({
+      isValid: false,
+      invalidReason: "invalid_exact_canton_malformed_payload",
+      extensions: { detail: "structure_undecodable" },
+    });
   });
 
   it("rejects a prepared transaction whose transfer node is also encoded as another node type", async () => {

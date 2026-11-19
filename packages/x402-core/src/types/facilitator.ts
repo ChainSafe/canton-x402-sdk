@@ -167,13 +167,10 @@ export type SpecVerifyInvalidReason = (typeof SPEC_REASONS)[number];
  * the spec matches on. Which of a code's causes it was goes in
  * `extensions.detail`, not here.
  *
- * The older codes stay in the union, below the spec's, so an answer from a
- * facilitator on an older core still parses. Until recently they were also the
- * type of `extensions.reason`, so this list could not be narrowed without
- * breaking the verifier itself; that field is gone and this one now types the
- * wire field alone. Dropping them is still a separate, breaking change — it
- * stops answers from published 0.1.x parsing, and the facilitator still writes
- * some of them at the top level today.
+ * The specs' codes plus the one declared extension, and nothing else. The
+ * older codes were dropped before 1.0.0, so an answer from a facilitator on a
+ * published 0.1.x carrying one of them no longer parses. From 1.0.0 this list
+ * can only grow in a minor.
  */
 export const VerifyInvalidReasonSchema = v.picklist([
   ...SPEC_REASONS,
@@ -206,7 +203,7 @@ export const VerifyResponseSchema = v.variant("isValid", [
 ]);
 export type VerifyResponse = v.InferOutput<typeof VerifyResponseSchema>;
 
-/** Why a settle failed: the spec's codes, then this facilitator's own. */
+/** Why a settle failed: the same list as verify's, the specs' codes plus the one extension. */
 export const SettleErrorReasonSchema = v.picklist([
   ...SPEC_REASONS,
   ...CANTON_EXACT_EXTENSION_REASONS,

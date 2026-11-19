@@ -48,7 +48,7 @@ describe("guardPreparedTransaction", () => {
   it("rejects a malformed prepared transaction", () => {
     expect(guardPreparedTransaction("not-base64!!")).toEqual({
       ok: false,
-      reason: "undecodable",
+      reason: "structure_undecodable",
     });
   });
 
@@ -67,7 +67,7 @@ describe("guardPreparedTransaction", () => {
   it("rejects a prepared transaction carrying a field the schema does not define", () => {
     // The hash cannot cover a field it cannot see, so reading past one would
     // bind the requirements to bytes nobody signed. `readUnknownField: "throw"`
-    // is what refuses it, and the catch above turns that into `undecodable`.
+    // is what refuses it, and the catch above turns that into `structure_undecodable`.
     const preparedTransaction = encodePreparedTransaction(
       {
         sender: "alice::fingerprint",
@@ -79,7 +79,7 @@ describe("guardPreparedTransaction", () => {
     );
     expect(guardPreparedTransaction(preparedTransaction)).toEqual({
       ok: false,
-      reason: "undecodable",
+      reason: "structure_undecodable",
     });
   });
 
