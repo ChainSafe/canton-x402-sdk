@@ -78,11 +78,18 @@ const { paymentRequired } = require("@chainsafe/x402-express");
    of this shape: a 0.1.x payer sends the older one, which is `bad_payload`
    either way.
 3. On a valid verify (and a successful `/v2/settle` when `settle: true`), the
-   payer is attached to `req.x402` and `next()` is called. Settlement's ledger
-   transaction id is returned in the `X-PAYMENT-RESPONSE` response header.
+   payer is attached to `req.x402` and `next()` is called. The facilitator's
+   settle answer is returned in the `PAYMENT-RESPONSE` response header,
+   base64-encoded JSON as the x402 v2 HTTP transport defines it
+   (`decodePaymentResponseHeader` from `@chainsafe/x402-core` reads it). A
+   failed settle sends its answer the same way, on the 402 beside the new
+   challenge. A `settlement_pending` answer (the transfer was relayed and may
+   still commit) is a 402 with only `PAYMENT-RESPONSE`: no new challenge, the
+   request is not served, and `onReject` is not called, since nothing is owed
+   an undo.
 
 A browser page on another origin can read `PAYMENT-REQUIRED` and
-`X-PAYMENT-RESPONSE` only if your CORS setup lists them in
+`PAYMENT-RESPONSE` only if your CORS setup lists them in
 `Access-Control-Expose-Headers`, and can send `PAYMENT-SIGNATURE` only if the
 preflight allows it in `Access-Control-Allow-Headers`.
 

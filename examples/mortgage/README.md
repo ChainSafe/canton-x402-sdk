@@ -24,7 +24,7 @@ UI  ──apply──▶  mortgage-backend ──GET /v1/credit-score──▶  
                        │◀───────────────── 402 ─────────────────┘
                        │ CantonX402Payer signs a 0.05 CC transfer
                        │──── retry with PAYMENT-SIGNATURE ─────▶ verify + settle (facilitator)
-                       │◀──── 200 report + X-PAYMENT-RESPONSE ───┘
+                       │◀───── 200 report + PAYMENT-RESPONSE ────┘
                        │ apply lending policy (score / LTV)
 UI ◀── decision + on-chain receipt (updateId) ──┘
 ```

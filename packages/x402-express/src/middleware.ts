@@ -10,6 +10,7 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import {
   decodePaymentHeader,
+  encodePaymentResponseHeader,
   isSettlementPending,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
@@ -44,7 +45,8 @@ import { PaymentRejection, SettlementPending, respondToFailure } from "./respons
  *   way to pay; entries sharing a reference generator are issued one freshly
  *   minted reference between them, a 402 being one sale.
  * - Valid payment → verify (and optionally settle) via the facilitator, then
- *   attach `req.x402` and call `next()`.
+ *   attach `req.x402` and call `next()`. A settle answer, success or failure,
+ *   goes back in the `PAYMENT-RESPONSE` header.
  *
  * @example
  * app.use("/paid", paymentRequired({
@@ -204,9 +206,12 @@ export function paymentRequired<
           throw new PaymentRejection(
             settleResponse.errorReason ?? "settle_failed",
             settleResponse.errorDetails,
+            undefined,
+            settleResponse,
           );
         }
-        res.setHeader("X-PAYMENT-RESPONSE", settleResponse.transaction);
+        // The v2 HTTP transport carries the whole settle answer, base64 JSON.
+        res.setHeader("PAYMENT-RESPONSE", encodePaymentResponseHeader(settleResponse));
       }
 
       req.x402 = {

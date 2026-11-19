@@ -68,9 +68,9 @@ server (step 4).
 
    `/v2/settle` re-runs [every verify check](/facilitator#what-verify-guarantees),
    then calls Canton's `executeAndWaitForTransaction` with the payer-signed
-   blob. On success it returns the update id as `transaction`, which the
-   middleware puts on your response as `X-PAYMENT-RESPONSE`, and your handler
-   runs with the verified payer on `req.x402`.
+   blob. On success it returns the update id as `transaction`. The middleware
+   puts the whole settle answer on your response as `PAYMENT-RESPONSE`
+   (base64 JSON), and your handler runs with the verified payer on `req.x402`.
 
 ::: danger Raise your server's max header size
 The `PAYMENT-SIGNATURE` header from step 4 runs to about 10 KB for a typical

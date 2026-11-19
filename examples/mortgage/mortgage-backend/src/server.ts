@@ -15,6 +15,7 @@ import { config as loadEnv } from "dotenv";
 loadEnv({ path: fileURLToPath(new URL("../../.env", import.meta.url)) });
 
 import express from "express";
+import { decodePaymentResponseHeader } from "@chainsafe/x402-core";
 
 import { buildX402Fetch } from "./payer.js";
 
@@ -110,7 +111,10 @@ async function main() {
     }
 
     const report = (await creditRes.json()) as CreditReport;
-    const updateId = creditRes.headers.get("X-PAYMENT-RESPONSE"); // Canton settlement id
+    // The bureau's settle answer; its `transaction` is the Canton update id.
+    const receipt = creditRes.headers.get("PAYMENT-RESPONSE");
+    const settled = receipt ? decodePaymentResponseHeader(receipt) : undefined;
+    const updateId = settled?.success ? settled.transaction : null;
     console.log(`[mortgage-backend] score=${report.score} (${report.band}) — settled ${updateId ?? "(no receipt)"}`);
 
     // Lending policy.
