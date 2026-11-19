@@ -28,12 +28,15 @@ import { buildQuotes, issueChallenge, type Offer } from "./quotes.js";
  *
  * It carries no requirements. What the 402 advertises is a challenge issued at
  * the point of failure, not something decided when the rejection was raised.
+ * A failed settle carries the facilitator's answer, which the 402 sends in
+ * `PAYMENT-RESPONSE` beside the new challenge.
  */
 export class PaymentRejection extends Error {
   constructor(
     readonly reason: string,
     readonly details?: string,
     readonly extensions?: Record<string, unknown>,
+    readonly settleResponse?: SettleResponseError,
   ) {
     super(reason);
   }
@@ -78,7 +81,11 @@ export async function respondToFailure<
   if (err instanceof PaymentRejection) {
     try {
       const offer = built ?? (await buildQuotes(req, options, scheme));
-      respond402(res, offer.resource, await issueChallenge(offer.quotes), err.reason, err.details);
+      const accepts = await issueChallenge(offer.quotes);
+      if (err.settleResponse) {
+        res.setHeader("PAYMENT-RESPONSE", encodePaymentResponseHeader(err.settleResponse));
+      }
+      respond402(res, offer.resource, accepts, err.reason, err.details);
       // A bare challenge (no payment yet) is the normal flow, not a rejection.
       if (err.reason !== "payment_required") {
         rejection = {
