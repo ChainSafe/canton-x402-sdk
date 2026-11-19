@@ -255,28 +255,64 @@ describe("PAYMENT-RESPONSE codec", () => {
     expect(decodePaymentResponseHeader(encodePaymentResponseHeader(pending))).toEqual(pending);
   });
 
-  it("reads a reason this SDK does not know, so a newer facilitator's answer still decodes", () => {
-    expect(
-      decodePaymentResponseHeader(b64({ success: false, errorReason: "some_future_code" })),
-    ).toEqual({
+  it("round-trips a refusal with its message and cause, and a success with an amount and no payer", () => {
+    const refused: SettleResponse = {
+      success: false,
+      errorReason: "invalid_exact_canton_execute_failed",
+      errorMessage: "the ledger refused the transfer",
+      transaction: "",
+      network: "canton:devnet",
+      extensions: { detail: "boom" },
+    };
+    const settled: SettleResponse = {
+      success: true,
+      network: "canton:devnet",
+      transaction: "1220update",
+      amount: "500000000",
+    };
+    expect(decodePaymentResponseHeader(encodePaymentResponseHeader(refused))).toEqual(refused);
+    expect(decodePaymentResponseHeader(encodePaymentResponseHeader(settled))).toEqual(settled);
+  });
+
+  it("reads a reason or a field this SDK does not know, so a newer facilitator's answer still decodes", () => {
+    const newer = {
       success: false,
       errorReason: "some_future_code",
-    });
+      transaction: "",
+      network: "canton:devnet",
+      someFutureField: { x: 1 },
+    };
+    expect(decodePaymentResponseHeader(b64(newer))).toEqual(newer);
   });
 
   it("refuses what is not a settle answer", () => {
     expect(() => decodePaymentResponseHeader("%%%")).toThrow(/base64/);
     expect(() => decodePaymentResponseHeader(btoa("{nope"))).toThrow(/JSON/);
+    const failure = { success: false, errorReason: "x", transaction: "", network: "canton:devnet" };
+    const success = { success: true, transaction: "t", network: "canton:devnet" };
+    // The answers each bad one is built from decode, so each refusal below is
+    // down to the one field it changes.
+    expect(decodePaymentResponseHeader(b64(failure))).toEqual(failure);
+    expect(decodePaymentResponseHeader(b64(success))).toEqual(success);
     for (const bad of [
       null,
       [],
-      { errorReason: "settlement_pending" },
-      { success: "false", errorReason: "x" },
-      { success: false },
-      { success: false, errorReason: "settlement_pending", transaction: 42 },
+      { errorReason: "settlement_pending", transaction: "", network: "canton:devnet" },
+      { ...failure, success: "false" },
+      { success: false, transaction: "", network: "canton:devnet" },
+      { ...failure, errorReason: "settlement_pending", transaction: 42 },
+      // A failure names its transaction and network as a success does.
+      { success: false, errorReason: "x", network: "canton:devnet" },
+      { success: false, errorReason: "x", transaction: "" },
       { success: true },
       { success: true, transaction: "t" },
       { success: true, transaction: "t", network: 1 },
+      { ...failure, payer: 1 },
+      { ...failure, errorMessage: 1 },
+      { ...success, amount: 1 },
+      { ...failure, extensions: [] },
+      { ...failure, extensions: null },
+      { ...success, extensions: "detail" },
     ]) {
       expect(() => decodePaymentResponseHeader(b64(bad)), JSON.stringify(bad)).toThrow(
         /not a settle answer/,
@@ -294,23 +330,28 @@ describe("PAYMENT-RESPONSE codec", () => {
 });
 
 describe("isSettlementPending", () => {
-  it("is true for a settlement_pending answer that names its transaction", () => {
-    expect(
-      isSettlementPending({ success: false, errorReason: "settlement_pending", transaction: "ab" }),
-    ).toBe(true);
+  const pending = {
+    success: false,
+    errorReason: "settlement_pending",
+    transaction: "ab",
+    network: "canton:devnet",
+  } as const;
+
+  it("is true for a settlement_pending answer that names its transaction and network", () => {
+    expect(isSettlementPending(pending)).toBe(true);
   });
 
-  it("is false for one that names none, and for any other answer", () => {
-    expect(isSettlementPending({ success: false, errorReason: "settlement_pending" })).toBe(false);
+  it("is false for one that names either as empty or not at all, and for any other answer", () => {
+    // The client hands the body over unvalidated, so a pending answer missing
+    // a field the type requires can still reach this.
+    const { transaction: _t, ...noTransaction } = pending;
+    const { network: _n, ...noNetwork } = pending;
+    expect(isSettlementPending(noTransaction as SettleResponse)).toBe(false);
+    expect(isSettlementPending({ ...pending, transaction: "" })).toBe(false);
+    expect(isSettlementPending(noNetwork as SettleResponse)).toBe(false);
+    expect(isSettlementPending({ ...pending, network: "" })).toBe(false);
     expect(
-      isSettlementPending({ success: false, errorReason: "settlement_pending", transaction: "" }),
-    ).toBe(false);
-    expect(
-      isSettlementPending({
-        success: false,
-        errorReason: "invalid_exact_canton_execute_failed",
-        transaction: "ab",
-      }),
+      isSettlementPending({ ...pending, errorReason: "invalid_exact_canton_execute_failed" }),
     ).toBe(false);
     expect(
       isSettlementPending({

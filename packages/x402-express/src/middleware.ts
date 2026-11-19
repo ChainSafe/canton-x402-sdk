@@ -202,9 +202,15 @@ export function paymentRequired<
         // replay, which would read as a failure here.
         if (isSettlementPending(settleResponse)) throw new SettlementPending(settleResponse);
         if (!settleResponse.success) {
+          // The cause, where a verify refusal names it too. A facilitator that
+          // names none may still say what went wrong in `errorMessage`, and
+          // showing that text is fine; matching on it is what x402 v2 §9 rules
+          // out.
+          const detail = settleResponse.extensions?.detail;
+          const message = settleResponse.errorMessage;
           throw new PaymentRejection(
             settleResponse.errorReason ?? "settle_failed",
-            settleResponse.errorDetails,
+            typeof detail === "string" ? detail : typeof message === "string" ? message : undefined,
             undefined,
             settleResponse,
           );

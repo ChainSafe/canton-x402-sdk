@@ -9,11 +9,11 @@ when it relayed the transfer and could not read the outcome: the transfer may
 still commit, so the payer must not be asked to pay again
 (ChainSafe/canton-x402-facilitator#362).
 
-- **core.** A settle failure can carry `transaction`, `network` and `payer`; a
-  pending answer names its transfer in `transaction`. `isSettlementPending`
-  recognises one, and `encodePaymentResponseHeader` /
-  `decodePaymentResponseHeader` carry a settle answer in the `PAYMENT-RESPONSE`
-  header.
+- **core.** A settle failure carries `transaction` and `network`, and can
+  carry `payer`; a pending answer names its transfer in `transaction`, and its
+  `network`. `isSettlementPending` recognises one, and
+  `encodePaymentResponseHeader` / `decodePaymentResponseHeader` carry a settle
+  answer in the `PAYMENT-RESPONSE` header.
 - **express.** On a pending answer the middleware answers 402 with the
   facilitator's answer in `PAYMENT-RESPONSE`, without serving the request,
   without a fresh challenge, and without calling `onReject`. It does not settle

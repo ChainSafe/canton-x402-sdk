@@ -185,14 +185,23 @@ export const VerifyResponseValidSchema = v.object({
   isValid: v.literal(true),
   payer: v.optional(v.string()),
   extensions: v.optional(ExtensionsSchema),
+  /** Scheme-specific data, as x402 v2 §5.4.2 gives a verify answer. */
+  extra: v.optional(ExtensionsSchema),
 });
 export type VerifyResponseValid = v.InferOutput<typeof VerifyResponseValidSchema>;
 
 export const VerifyResponseInvalidSchema = v.object({
   isValid: v.literal(false),
   invalidReason: VerifyInvalidReasonSchema,
+  /**
+   * Human-readable text for `invalidReason`. Free text that can change between
+   * facilitators, so match on the code, never on this (x402 v2 §9).
+   */
+  invalidMessage: v.optional(v.string()),
   payer: v.optional(v.string()),
   extensions: v.optional(ExtensionsSchema),
+  /** Scheme-specific data, as x402 v2 §5.4.2 gives a verify answer. */
+  extra: v.optional(ExtensionsSchema),
 });
 export type VerifyResponseInvalid = v.InferOutput<typeof VerifyResponseInvalidSchema>;
 
@@ -215,8 +224,10 @@ export const SettleResponseSuccessSchema = v.object({
   network: v.string(),
   /** Canton updateId of the executed transaction. */
   transaction: v.string(),
-  completionOffset: v.optional(v.string()),
-  payer: v.string(),
+  /** Optional in x402 v2, so a facilitator may leave it out. */
+  payer: v.optional(v.string()),
+  /** The amount settled, in atomic units, as the requirements' `amount` is. */
+  amount: v.optional(v.string()),
   extensions: v.optional(ExtensionsSchema),
 });
 export type SettleResponseSuccess = v.InferOutput<typeof SettleResponseSuccessSchema>;
@@ -224,32 +235,44 @@ export type SettleResponseSuccess = v.InferOutput<typeof SettleResponseSuccessSc
 export const SettleResponseErrorSchema = v.object({
   success: v.literal(false),
   errorReason: SettleErrorReasonSchema,
-  errorDetails: v.optional(v.string()),
   /**
-   * The transaction the answer is about. On `settlement_pending` it is the
-   * payment's `preparedTxHash`: the relay went out and its outcome is not known
-   * yet. Empty or absent when nothing was relayed.
+   * Human-readable text for `errorReason`. Free text that can change between
+   * facilitators, so match on the code, never on this (x402 v2 §9). Which of a
+   * code's causes it was goes in `extensions.detail`, as on verify.
    */
-  transaction: v.optional(v.string()),
-  network: v.optional(v.string()),
+  errorMessage: v.optional(v.string()),
+  /**
+   * The transaction the answer is about. Empty when nothing was relayed. On
+   * `settlement_pending` it is the payment's `preparedTxHash`: the relay went
+   * out and its outcome is not known yet.
+   */
+  transaction: v.string(),
+  network: v.string(),
   payer: v.optional(v.string()),
+  extensions: v.optional(ExtensionsSchema),
 });
 export type SettleResponseError = v.InferOutput<typeof SettleResponseErrorSchema>;
 
 /**
  * True for a `settlement_pending` answer: the transaction was relayed and may
  * still commit, so the payment must not be treated as failed and the payer
- * must not be asked to sign again. The spec requires such an answer to name the
- * transaction; one that names none is read as a plain failure.
+ * must not be asked to sign again. The spec requires such an answer to carry a
+ * non-empty `transaction` and `network`; one missing either of them, or with
+ * either empty, is read as a plain failure.
+ *
+ * Both are checked at runtime even though the type requires them: the client
+ * hands back the facilitator's body without validating it.
  */
 export function isSettlementPending(
   response: SettleResponse,
-): response is SettleResponseError & { transaction: string } {
+): response is SettleResponseError & { errorReason: "settlement_pending" } {
   return (
     !response.success &&
     response.errorReason === "settlement_pending" &&
     typeof response.transaction === "string" &&
-    response.transaction !== ""
+    response.transaction !== "" &&
+    typeof response.network === "string" &&
+    response.network !== ""
   );
 }
 
@@ -270,6 +293,13 @@ export type SupportedKind = v.InferOutput<typeof SupportedKindSchema>;
 
 export const SupportedResponseSchema = v.object({
   kinds: v.array(SupportedKindSchema),
+  /**
+   * The ids of the extensions the facilitator implements (x402 v2 §7.3.1). A
+   * list of ids, not the `extensions` object an answer carries.
+   */
+  extensions: v.array(v.string()),
+  /** The facilitator's signers, keyed by CAIP-2 pattern such as `canton:*`. */
+  signers: v.record(v.string(), v.array(v.string())),
 });
 export type SupportedResponse = v.InferOutput<typeof SupportedResponseSchema>;
 

@@ -54,7 +54,11 @@ None required. There is no request body.
         }
       }
     }
-  ]
+  ],
+  "extensions": [],
+  "signers": {
+    "canton:*": ["x402-facilitator::1220096…"]
+  }
 }
 ```
 
@@ -72,6 +76,8 @@ None required. There is no request body.
 | `extra.carriages[]`        | How a prepared transaction travels. `inline` means it is carried in the `PAYMENT-SIGNATURE` header itself. |
 | `extra.asset.instrumentId` | **Superseded by `extra.instruments[]`**, which says the same thing and can say it for more than one instrument. Still sent for merchants reading it; prefer `instruments`. |
 | `extra.*`                  | `extra` is Optional and scheme-defined in x402 v2 §7.3, so a deployment may add its own keys and omit any of the above. Read what you need and ignore the rest. |
+| `extensions[]`             | The ids of the x402 extensions the facilitator implements. Always present, as x402 v2 §7.3.1 requires; empty when it implements none. |
+| `signers`                  | The parties that sign for the facilitator, keyed by network family. `canton:*` lists the `feePayer` party, and is an empty list until a deployment has one configured. Always present, as x402 v2 §7.3.1 requires. |
 
 ### curl
 
@@ -294,26 +300,31 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
 
 ### Response 200 — settled
 
-`transaction` is the Canton update id.
+`transaction` is the Canton update id. `amount` is what was settled, in atomic
+units like the requirements' `amount`.
 
 ```json
 {
   "success": true,
   "network": "canton:devnet",
   "transaction": "1220a3f…",
-  "completionOffset": "42",
   "payer": "buyer::1220…",
-  "extensions": { "settledAmount": "0.05" }
+  "amount": "500000000"
 }
 ```
 
 ### Response 400 — not settled
 
+A refusal always carries `transaction` and `network`, as x402 v2 §5.3.2
+requires. `transaction` is empty when nothing was relayed to the ledger.
+
 ```json
 {
   "success": false,
   "errorReason": "invalid_exact_canton_amount_mismatch",
-  "errorDetails": "amount"
+  "transaction": "",
+  "network": "canton:devnet",
+  "extensions": { "detail": "amount" }
 }
 ```
 
@@ -322,8 +333,12 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
 The scheme spec's table and the x402 v2 general codes, the same vocabulary
 `invalidReason` uses — `invalid_exact_canton_execute_failed` for a definite
 ledger rejection, `settlement_pending` when the outcome is not yet known (which
-is **non-terminal**, and carries `transaction`), and `unexpected_settle_error`
-for a fault during settlement, with `errorDetails` saying which.
+is **non-terminal**, and carries the relayed `transaction` and its `network`),
+and `unexpected_settle_error` for a fault during settlement.
+
+`extensions.detail` says which of a code's causes it was, as it does on verify.
+`errorMessage`, when present, is free text for logs and people: it can change
+between facilitators and releases, so match on `errorReason`, never on it.
 
 Every refusal above answers `400`. An unexpected fault answers `500`, and a
 facilitator that is temporarily out of capacity answers `503` with a

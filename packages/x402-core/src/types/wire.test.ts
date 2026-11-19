@@ -51,8 +51,11 @@ describe("x402-core wire types", () => {
     // SettleRequest is an alias of VerifyRequest — the identical envelope.
     const settleReq: SettleRequest = verifyReq;
 
+    // x402 v2 §7.3.1 requires `extensions` (a list of ids) and `signers`.
     const supported: SupportedResponse = {
       kinds: [{ x402Version: 2, scheme: "exact", network: requirements.network }],
+      extensions: [],
+      signers: { "canton:*": ["x402-facilitator::1220fee"] },
     };
 
     const paymentRequired: CantonPaymentRequiredResponse = {
@@ -188,7 +191,13 @@ describe("x402-core wire types", () => {
       invalidReason: "invalid_exact_canton_amount_mismatch",
       extensions: { detail: "amount" },
     };
-    const settleSpec: SettleResponse = { success: false, errorReason: "invalid_exact_canton_execute_failed" };
+    // A failure names `transaction` and `network` too: empty when nothing was relayed.
+    const settleSpec: SettleResponse = {
+      success: false,
+      errorReason: "invalid_exact_canton_execute_failed",
+      transaction: "",
+      network: "canton:devnet",
+    };
     const settlePending: SettleResponse = {
       success: false,
       errorReason: "settlement_pending",
@@ -211,11 +220,36 @@ describe("x402-core wire types", () => {
     const settleErr: SettleResponse = {
       success: false,
       errorReason: "invalid_exact_canton_execute_failed",
-      errorDetails: "boom",
+      errorMessage: "the ledger refused the transfer",
+      transaction: "",
+      network: "canton:devnet",
+      payer: "alice::1220beef",
+      extensions: { detail: "boom" },
     };
     if (settleOk.success) expect(settleOk.transaction).toBe("1220update");
     if (!settleErr.success)
       expect(settleErr.errorReason).toBe("invalid_exact_canton_execute_failed");
+  });
+
+  it("types the fields x402 v2 gives the answers, optional where it leaves them out", () => {
+    // A success may leave `payer` out and may carry the settled `amount`.
+    const settleNoPayer: SettleResponse = {
+      success: true,
+      network: "canton:devnet",
+      transaction: "1220update",
+      amount: "500000000",
+    };
+    const verifyOk: VerifyResponse = { isValid: true, extra: { note: "x" } };
+    const verifyBad: VerifyResponse = {
+      isValid: false,
+      invalidReason: "invalid_exact_canton_amount_mismatch",
+      invalidMessage: "the transfer moves another amount",
+      extra: { note: "x" },
+    };
+    if (settleNoPayer.success) expect(settleNoPayer.amount).toBe("500000000");
+    expect(verifyOk.extra).toEqual({ note: "x" });
+    if (!verifyBad.isValid)
+      expect(verifyBad.invalidMessage).toBe("the transfer moves another amount");
   });
 
   it("exposes the hashing-scheme enum values", () => {
