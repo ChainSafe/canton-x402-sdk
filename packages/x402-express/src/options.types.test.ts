@@ -39,12 +39,19 @@ const unpriced: Accept = { asset: "USDCx" };
 // @ts-expect-error — a price with no asset is 0.05 of whatever turns up
 const unnamedInstrument: Accept = { amount: "500000000" };
 
-// The same field pins it whole, admin included.
-const pinned: Accept = { amount: "1", asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } } };
+// The instrument id is the whole of it.
+const named: Accept = { amount: "1", asset: "Amulet" };
 
-// @ts-expect-error — a symbol is not an instrument id, and a half-pinned
-// instrument is not one either: the two forms are a string or a whole AssetSpec.
-const halfPinned: Accept = { amount: "1", asset: { id: "Amulet" } };
+/* ── and cannot state what the facilitator owns ──────────────────────────── */
+
+// @ts-expect-error — the registry admin is read from /v2/supported, not configured
+const pinnedAdmin: Accept = { amount: "1", asset: { instrumentId: { id: "Amulet", admin: "DSO::x" } } };
+
+// @ts-expect-error — the synchronizer is the facilitator's own fact
+const ownSynchronizer: Accept = { amount: "1", asset: "Amulet", synchronizerId: "global-domain::1220" };
+
+// @ts-expect-error — so is the party that relays the transfer
+const ownFeePayer: Accept = { amount: "1", asset: "Amulet", feePayer: "x402-facilitator::1220" };
 
 /* ── shared terms are overridable per entry, never required there ────────── */
 
@@ -142,8 +149,10 @@ it("is a typecheck assertion; `pnpm typecheck` is what enforces it", () => {
     priced,
     unpriced,
     unnamedInstrument,
-    pinned,
-    halfPinned,
+    named,
+    pinnedAdmin,
+    ownSynchronizer,
+    ownFeePayer,
     overrides,
     perEntryResource,
     perEntryDescription,
@@ -158,5 +167,5 @@ it("is a typecheck assertion; `pnpm typecheck` is what enforces it", () => {
     noFacilitator,
     _incompleteWayToPayIsACompileError,
     sharedMemo,
-  ]).toHaveLength(19);
+  ]).toHaveLength(21);
 });

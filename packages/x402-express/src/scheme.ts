@@ -250,4 +250,13 @@ export interface SchemeAdapter<
   readonly extraRules: RuleTable;
   /** Build the scheme's part of a quote from the merchant's spec. */
   quote(req: Request, spec: TSpec, ctx: SchemeContext): Promise<SchemeQuote>;
+  /**
+   * Check a requirement a builder returned, before it is advertised. A builder
+   * writes the whole requirement, so it can state values that are the
+   * facilitator's to state; throw a `TermsError` (exported from this package)
+   * for one that disagrees with the facilitator, so it is refused before a
+   * payer signs against it.
+   * Optional: a scheme with nothing the facilitator owns needs none.
+   */
+  checkBuilt?(requirements: TRequirements, ctx: SchemeContext): Promise<void>;
 }
