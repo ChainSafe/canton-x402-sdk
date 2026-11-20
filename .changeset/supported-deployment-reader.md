@@ -104,8 +104,7 @@ them, and `supported.kinds` is right there for anyone wanting the raw list.
 Canton Coin is read only when a deployment lists it. The registered
 implementation leaves it implied by the scheme and lists CIP-56 tokens only, so
 discovery against one of those returns its other instruments and not CC. Ours
-lists it explicitly, so this costs nothing here; a merchant on a deployment
-that does not pins `network` and `asset`, which skips discovery. Implying it is
+lists it explicitly, so this costs nothing here. Implying it is
 possible — the DSO is `DSO::` plus the advertised synchronizer's namespace —
 and deliberately not done, so that a quote always rests on what a facilitator
 answered rather than on a convention.

@@ -12,7 +12,7 @@
  */
 export const VERSION = "0.0.1";
 export { paymentRequired } from "./middleware.js";
-export { DEFAULT_MAX_TIMEOUT_SECONDS } from "./quotes.js";
+export { DEFAULT_MAX_TIMEOUT_SECONDS, TermsError } from "./quotes.js";
 export {
   type AcceptSpec,
   type PaymentRejectionInfo,

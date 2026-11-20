@@ -151,8 +151,17 @@ interface SchemeAdapter<TSpec, TRequirements, TPayload> {
   // refuse with when no payer can be read.
   distinctKey?(spec: TSpec): string | undefined;
   unreadablePayerReason?: string;
+  // Optional. Check a requirement a builder returned before it is advertised,
+  // for fields only the facilitator can state.
+  checkBuilt?(requirements: TRequirements, ctx): Promise<void>;
 }
 ```
+
+An adapter signals **the merchant's own configuration** by throwing a
+`TermsError` (exported from this package), from `quote()` or `checkBuilt()`. It
+fails the request, since the fix is the merchant's. Any other error is read as
+the facilitator's answer changing: that way to pay is dropped from the 402 and
+reported through `onQuoteError`, and the route's other ways to pay still quote.
 
 `quote()` returns the `scheme`, `network` and `asset` to advertise, the `extra`
 to carry, and optionally a `mintReference()` the middleware calls **only when it

@@ -12,7 +12,7 @@ import {
   type CantonPaymentRequirements,
   type SupportedResponse,
 } from "@chainsafe/x402-core";
-import { FacilitatorClient } from "@chainsafe/x402-client";
+import { FacilitatorClient, FacilitatorError } from "@chainsafe/x402-client";
 import { paymentRequired } from "./middleware";
 import { TermsError } from "./quotes";
 import type {
@@ -213,7 +213,6 @@ describe("paymentRequired", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-
           accepts: [
             {
               asset: "Amulet",
@@ -548,7 +547,6 @@ describe("paymentRequired", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-
           accepts: [{ asset: "Amulet",
  amount: "500000000" }],
         },
@@ -641,6 +639,66 @@ describe("paymentRequired", () => {
       const { app } = builtWith({ instrumentId: { id: "Nope", admin: "DSO::x" } });
       const res = await request(app).get("/paid");
       expect(res.status).toBe(500);
+    });
+
+    /** A builder offering Canton Coin, which the facilitator settles, and an instrument it does not. */
+    const twoWays = (facilitator: FacilitatorClient) => {
+      const onQuoteError = vi.fn();
+      const way = (instrumentId: { id: string; admin: string }) => ({
+        scheme: "exact",
+        network: "canton:x",
+        amount: "500000000",
+        asset: "CC",
+        extra: { ...ECHOED_EXTRA, instrumentId },
+        payTo: "merchant::x",
+        maxTimeoutSeconds: 60,
+      });
+      const app = express();
+      app.use(
+        "/paid",
+        paymentRequired({
+          ...baseOptions,
+          facilitator,
+          onQuoteError,
+          requirements: () =>
+            [way({ id: "Amulet", admin: "DSO::x" }), way({ id: "Withdrawn", admin: "DSO::x" })] as CantonPaymentRequirements[],
+        }),
+      );
+      app.get("/paid", (_req, res) => res.json({ ok: true }));
+      return { app, onQuoteError };
+    };
+
+    it("drops a way to pay the facilitator no longer settles, and still serves the other", async () => {
+      // As a spec's ways to pay are: the facilitator's answer changing under a
+      // running merchant must not fail the route, paid requests included.
+      stubFacilitator();
+      const { app, onQuoteError } = twoWays(baseOptions.facilitator);
+
+      const challenge = await request(app).get("/paid");
+      expect(challenge.status).toBe(402);
+      expect(challenge.body.accepts).toHaveLength(1);
+      expect(challenge.body.accepts[0].extra.instrumentId).toEqual({ id: "Amulet", admin: "DSO::x" });
+      await new Promise((r) => setImmediate(r));
+      expect(onQuoteError).toHaveBeenCalledOnce();
+      expect((onQuoteError.mock.calls[0][0] as Error).message).toMatch(/way to pay 2/);
+
+      const paid = await request(app).get("/paid").set("PAYMENT-SIGNATURE", paymentHeader());
+      expect(paid.status).toBe(200);
+    });
+
+    it("answers 502 when /v2/supported cannot be reached, whatever the number of ways to pay", async () => {
+      // One cause with two witnesses: the facilitator being down is its fault,
+      // reported as such, not wrapped into a 500 of ours.
+      stubFacilitator();
+      class Unreachable extends FacilitatorClient {
+        override async supported(): Promise<never> {
+          throw new FacilitatorError("/v2/supported", 0, undefined);
+        }
+      }
+      const { app } = twoWays(new Unreachable("https://f.example", { apiKey: "k" }));
+      const res = await request(app).get("/paid");
+      expect(res.status).toBe(502);
+      expect(res.body.error).toBe("facilitator_error");
     });
   });
 
@@ -1349,7 +1407,6 @@ describe("paymentRequired: which quote a payment is for", () => {
       network: "canton:x",
       payTo: "merchant::x",
       resource: "https://f.example/paid",
-
       accepts: [
         { asset: "Amulet",
  amount: "500000000" },
@@ -1369,7 +1426,6 @@ describe("paymentRequired: which quote a payment is for", () => {
         network: "canton:x",
         payTo: "merchant::shared",
         resource: "https://f.example/paid",
-
         accepts: [
           { asset: "Amulet",
  amount: "500000000" },
@@ -1401,7 +1457,6 @@ describe("paymentRequired: which quote a payment is for", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-
           accepts: [],
         },
       }),
@@ -1530,7 +1585,6 @@ describe("paymentRequired: minting a merchant reference", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-
           accepts: [
             {
               asset: "Amulet",
@@ -1690,7 +1744,6 @@ describe("paymentRequired: minting a merchant reference", () => {
           network: "canton:x",
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-
           accepts: [
             {
               asset: "Amulet",
@@ -1873,24 +1926,22 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         },
       ],
     };
-    for (const asset of ["Amulet"] as const) {
-      stubWithSupported(both);
-      const app = express();
-      app.use(
-        "/paid",
-        paymentRequired({
-          facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
-          // No `network`: it is discovered, and the instrument narrows it.
-          requirements: { payTo: "merchant::x", resource: "https://f.example/paid", accepts: [{ amount: "1", asset }] },
-        }),
-      );
-      app.get("/paid", (_q, r) => r.json({ ok: true }));
-      const res = await request(app).get("/paid");
-      expect(res.status).toBe(402);
-      expect(res.body.accepts).toHaveLength(1);
-      expect(res.body.accepts[0].asset).toBe("CC");
-      expect(res.body.accepts[0].extra.instrumentId).toEqual({ id: "Amulet", admin: DSO });
-    }
+    stubWithSupported(both);
+    const app = express();
+    app.use(
+      "/paid",
+      paymentRequired({
+        facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
+        // No `network`: it is discovered, and the instrument narrows it.
+        requirements: { payTo: "merchant::x", resource: "https://f.example/paid", accepts: [{ amount: "1", asset: "Amulet" }] },
+      }),
+    );
+    app.get("/paid", (_q, r) => r.json({ ok: true }));
+    const res = await request(app).get("/paid");
+    expect(res.status).toBe(402);
+    expect(res.body.accepts).toHaveLength(1);
+    expect(res.body.accepts[0].asset).toBe("CC");
+    expect(res.body.accepts[0].extra.instrumentId).toEqual({ id: "Amulet", admin: DSO });
   });
 
   it("reads /v2/supported even when network and asset are both named", async () => {
@@ -2023,7 +2074,6 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-
           accepts: [
             {
               amount: "500000000",
@@ -2251,7 +2301,6 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-
           accepts: [
             { amount: "500000000", asset: "Amulet" },
             { amount: "250000", asset: "Amulet" },
@@ -2262,24 +2311,21 @@ describe("paymentRequired: configuring from /v2/supported", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("catches it across the two ways of naming one asset", async () => {
-    // One names the instrument by id, the other pins it whole. Both normalise
-    // to the same id without a request.
+  it("refuses the old { instrumentId } object at mount, saying what to write instead", async () => {
+    // The pre-2.0 way to pin an asset whole. The admin is the facilitator's
+    // now, so the object is refused outright rather than read as no asset.
     stubWithSupported();
-    expect(() =>
+    const mount = () =>
       paymentRequired({
         facilitator: new FacilitatorClient("https://f.example", { apiKey: "k" }),
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-
-          accepts: [
-            { amount: "500000000", asset: "Amulet" },
-            { amount: "250000", asset: "Amulet" },
-          ],
+          accepts: [{ amount: "500000000", asset: { instrumentId: { id: "Amulet", admin: DSO } } }],
         },
-      }),
-    ).toThrow(/both in Amulet/);
+      } as unknown as Parameters<typeof paymentRequired>[0]);
+    expect(mount).toThrow(TermsError);
+    expect(mount).toThrow(/instrument id string .* form is gone/);
   });
 
   it("does not check an entry whose asset is a resolver", async () => {
@@ -2291,7 +2337,6 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-
           accepts: [
             { amount: "500000000", asset: "Amulet" },
             { amount: "250000", asset: () => "Amulet" },
@@ -2324,7 +2369,6 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-
           accepts: [
             { amount: "500000000", asset: "Amulet" },
             { amount: "250000", asset: "USDCx" },
@@ -2350,7 +2394,6 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
           network: "canton:devnet",
-          feePayer: FACILITATOR,
           accepts: [{ amount: "500000000", ...(asset === undefined ? {} : { asset }) }],
         },
       } as unknown as Parameters<typeof paymentRequired>[0]);
@@ -2575,7 +2618,6 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           requirements: {
             payTo: "merchant::x",
             resource: "https://f.example/paid",
-
             accepts: [
               { amount: "500000000", asset: "Amulet" },
               { amount: "0.10", asset: "USDCx" },
@@ -2609,7 +2651,6 @@ describe("paymentRequired: configuring from /v2/supported", () => {
           network: "canton:x",
           payTo: "merchant::shared",
           resource: "https://f.example/paid",
-
           accepts: [
             {
               amount: "500000000",
@@ -2746,7 +2787,6 @@ describe("paymentRequired: configuring from /v2/supported", () => {
         requirements: {
           payTo: "merchant::x",
           resource: "https://f.example/paid",
-
           accepts: [
             { amount: "1", asset: "GBPx" },
             { amount: "2", asset: "JPYx" },

@@ -22,10 +22,8 @@ enough, and the rest is read from the facilitator's `/v2/supported`: the
 network it settles, and the registry party it validates holdings against. That
 party is the one the facilitator checks a payment against, so reading it from
 there removes the second copy that had to be kept true by hand when a
-deployment moved. Pin `network` and pass the whole `AssetSpec` to skip the
-lookup entirely — a test asserts `/v2/supported` is never called then. An
-`AssetSpec` on its own still reads it, for the network, narrowed to the
-instrument it pins.
+deployment moved. Naming `network` too only chooses which deployment to quote;
+`/v2/supported` is read either way.
 
 Note the id, not the symbol: Canton Coin is `"Amulet"`, and `"CC"` is what goes
 on the wire. It is the one instrument where the two differ, and an id the
@@ -65,8 +63,7 @@ per entry, and no entry is privileged. A builder returns the whole list: `(req) 
 
 ### Every way to pay says what it is priced in
 
-`asset` is required on every `accepts[]` entry, as an instrument id or as a
-whole `AssetSpec`.
+`asset` is required on every `accepts[]` entry, as an instrument id.
 
 `amount` is atomic units of *something*, and an entry that left the asset to
 the facilitator's list meant 0.05 CC against a deployment settling Amulet and
@@ -75,16 +72,10 @@ Worse, two entries could resolve to the same instrument at different prices,
 which a payer settles by taking the cheaper, and a facilitator settling two
 instruments made every request a 500 rather than only the ambiguous entry.
 
-Naming it by id does not skip discovery: the registry `admin` still comes from
-`GET /v2/supported`, which is the point — that party is what the facilitator
-validates holdings against, so there is no second copy to keep true. Only
-`network` and a whole `AssetSpec` together skip it.
-
-Either form narrows discovery to the instrument it names. A pinned `AssetSpec`
-used not to, so the richer form did less than the plain id: against a
-facilitator settling two instruments, `asset: "Amulet"` quoted and
-`asset: { instrumentId: … }` failed as ambiguous. Found in review by
-@dimartiro.
+The registry `admin` comes from `GET /v2/supported`, which is the point — that
+party is what the facilitator validates holdings against, so there is no
+second copy to keep true. The id narrows discovery to the instrument it
+names.
 
 The network can still be ambiguous, and still is an error rather than a guess:
 a facilitator settling the instrument on two networks needs `network` naming
@@ -94,8 +85,7 @@ one.
 leave a payer nothing to choose on but price, so the dearer can never be paid.
 `paymentRequired()` throws when the route is mounted — this is merchant config,
 not anything a request changes, so it fails at startup rather than answering
-500 to every request. Naming an asset by id and pinning the equivalent
-`AssetSpec` are caught as the same asset. An entry whose `asset` is a
+500 to every request. An entry whose `asset` is a
 `(req) => …` resolver cannot be read without a request and is not checked.
 
 An empty `accepts` throws there too, for the same reason — it was a 500 per
@@ -140,7 +130,7 @@ it. Only a failure to quote against the facilitator is skipped.
 A facilitator that starts advertising a second **network** remains a hard
 failure rather than a skip: it makes every entry ambiguous at once, so there is
 nothing left to serve, and picking a chain the merchant did not name would be
-worse than refusing. Pin `network` to settle it.
+worse than refusing. Name `network` to settle it.
 
 Found in review by @dimartiro.
 
