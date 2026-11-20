@@ -69,9 +69,9 @@ None required. There is no request body.
 | `kinds[]`                  | One entry per (scheme, network) pair the deployment settles. A deployment on one Canton network returns exactly one.                                                                       |
 | `scheme`                   | `exact` — the scheme id defined by the registered Canton scheme spec. Copy into `paymentRequirements.scheme`.                                                                              |
 | `network`                  | A network name: `canton:mainnet`, `canton:testnet`, `canton:devnet` or `canton:localnet`. It does not carry the synchronizer id — read it from here rather than deriving it.              |
-| `extra.instruments[]`      | What the deployment settles, one entry per instrument: `instrumentId` as `{ id, admin }`, the registry `admin` party, and a display `symbol`. `admin` is the party the facilitator checks a payment's holding against, so configure from here rather than by hand. `paymentRequired()` reads the `admin` for you when a way to pay names its `asset` by id. |
+| `extra.instruments[]`      | What the deployment settles, one entry per instrument: `instrumentId` as `{ id, admin }`, the registry `admin` party, and a display `symbol`. Express reads `admin` when a way to pay names its `asset` by id. Do not pin an admin of your own. |
 | `extra.synchronizerId`     | The synchronizer the deployment submits to — the id a payer prepares its transfer against. |
-| `extra.feePayer`           | The party that relays a payer-signed transfer and pays its traffic fee. Copy into `paymentRequirements.extra.feePayer` — a facilitator refuses a payment naming anyone but itself. Absent until a deployment has a party configured. `paymentRequired()` reads it for you and prefers it over a `feePayer` in your own config, falling back to yours only while none is advertised — and refusing to quote at all if neither can supply one. |
+| `extra.feePayer`           | The party that relays a payer-signed transfer and pays its traffic fee. Express copies it into the quoted `extra.feePayer`. Do not set your own. A payment naming anyone else is refused. Absent until a deployment has a party configured, and then nothing can be quoted against it. |
 | `extra.transferMethods[]`  | The asset transfer methods it speaks; `transfer-factory` for canton-exact. |
 | `extra.carriages[]`        | How a prepared transaction travels. `inline` means it is carried in the `PAYMENT-SIGNATURE` header itself. |
 | `extra.asset.instrumentId` | **Superseded by `extra.instruments[]`**, which says the same thing and can say it for more than one instrument. Still sent for merchants reading it; prefer `instruments`. |
@@ -166,6 +166,10 @@ guarantee.
 
 ### Response 200 — rejected
 
+A payment verdict is HTTP 200 whether or not it is valid. `FacilitatorClient`
+returns it as a `VerifyResponse`. HTTP 400 is a malformed request, not a
+verdict.
+
 ```json
 {
   "isValid": false,
@@ -175,20 +179,59 @@ guarantee.
 }
 ```
 
+### Response 200 — settlement still pending
+
+Verify returns this when the same signed transaction was already submitted and
+the ledger outcome is not known yet. `extensions.detail` is
+`submission_replayed`. A verify body has no `transaction` or `network` field,
+so the facilitator names them in `extra`:
+
+```json
+{
+  "isValid": false,
+  "invalidReason": "settlement_pending",
+  "payer": "buyer::1220…",
+  "extensions": { "detail": "submission_replayed" },
+  "extra": {
+    "transaction": "<preparedTxHash>",
+    "network": "canton:devnet"
+  }
+}
+```
+
+`extra.transaction` is the payment's `preparedTxHash`, not a Canton update id.
+Express issues no new challenge when both `extra.transaction` and
+`extra.network` are present. If either is missing, it treats the answer as an
+ordinary refusal.
+
 ### `invalidReason` values
 
-The checks the facilitator shares with the SDK answer with the codes the Canton
-`exact` scheme spec defines, so a client written against the spec recognises
-them:
+The wire union is `VerifyInvalidReason` in `@chainsafe/x402-core`: the Canton
+`exact` codes, the general x402 codes this scheme uses, and one extension,
+`invalid_exact_canton_synchronizer_mismatch`.
 
-`invalid_x402_version`, `unsupported_scheme`, `invalid_network`,
-`invalid_payment_requirements`, `invalid_exact_canton_missing_proof`,
+`invalid_exact_canton_missing_proof`,
 `invalid_exact_canton_malformed_payload`,
 `invalid_exact_canton_signature_invalid`,
 `invalid_exact_canton_amount_mismatch`,
 `invalid_exact_canton_merchant_mismatch`,
 `invalid_exact_canton_instrument_id_mismatch`,
-`invalid_exact_canton_memo_mismatch`, `invalid_exact_canton_expired`
+`invalid_exact_canton_preapproval_missing`,
+`invalid_exact_canton_fee_payer_mismatch`,
+`invalid_exact_canton_expired`,
+`invalid_exact_canton_execute_before_too_far`,
+`invalid_exact_canton_insufficient_inputs`,
+`invalid_exact_canton_memo_mismatch`,
+`invalid_exact_canton_merchant_not_registered`,
+`invalid_exact_canton_self_payment`,
+`invalid_exact_canton_execute_failed`,
+`invalid_exact_canton_synchronizer_mismatch`,
+`unexpected_canton_ledger_error`,
+`settlement_pending`,
+`invalid_network`, `unsupported_scheme`, `insufficient_funds`,
+`invalid_payload`, `invalid_payment_requirements`, `invalid_scheme`,
+`invalid_x402_version`, `invalid_transaction_state`,
+`unexpected_verify_error`, `unexpected_settle_error`
 
 `extensions.detail` says WHICH of a code's causes it was, where the code alone
 leaves two apart. `invalid_exact_canton_signature_invalid` is the one that most
@@ -313,10 +356,15 @@ units like the requirements' `amount`.
 }
 ```
 
-### Response 400 — not settled
+### Response 200 — not settled
 
-A refusal always carries `transaction` and `network`, as x402 v2 §5.3.2
-requires. `transaction` is empty when nothing was relayed to the ledger.
+An evaluated settle outcome is HTTP 200, the same as verify.
+`FacilitatorClient.settle` returns it as a `SettleResponse`. A non-2xx
+response is a `FacilitatorError`, not a payment verdict. HTTP 400 means the
+request itself was malformed.
+
+A refusal carries `transaction` and `network`. `transaction` is empty when
+nothing was relayed.
 
 ```json
 {
@@ -328,21 +376,38 @@ requires. `transaction` is empty when nothing was relayed to the ledger.
 }
 ```
 
+### Response 200 — settlement still pending
+
+Non-terminal. The relay went out and the ledger outcome is not known.
+`transaction` here is the payment's `preparedTxHash`, not a Canton update id.
+On success, the same field name is the update id.
+
+```json
+{
+  "success": false,
+  "errorReason": "settlement_pending",
+  "transaction": "<preparedTxHash>",
+  "network": "canton:devnet",
+  "extensions": { "detail": "submission_replayed" }
+}
+```
+
+Express turns this into `402` with only `PAYMENT-RESPONSE`. It does not issue
+a new challenge.
+
 ### `errorReason` values
 
-The scheme spec's table and the x402 v2 general codes, the same vocabulary
-`invalidReason` uses — `invalid_exact_canton_execute_failed` for a definite
-ledger rejection, `settlement_pending` when the outcome is not yet known (which
-is **non-terminal**, and carries the relayed `transaction` and its `network`),
-and `unexpected_settle_error` for a fault during settlement.
+The same vocabulary as `invalidReason`. `invalid_exact_canton_execute_failed`
+is a definite ledger rejection. `settlement_pending` means the outcome is not
+yet known. `unexpected_settle_error` is a fault during settlement.
 
 `extensions.detail` says which of a code's causes it was, as it does on verify.
 `errorMessage`, when present, is free text for logs and people: it can change
 between facilitators and releases, so match on `errorReason`, never on it.
 
-Every refusal above answers `400`. An unexpected fault answers `500`, and a
+A malformed body answers `400`. An unexpected fault answers `500`, and a
 facilitator that is temporarily out of capacity answers `503` with a
-`Retry-After` header.
+`Retry-After` header. Those are not `SettleResponse` values.
 
 ### curl
 

@@ -42,9 +42,9 @@ app.use(
       accepts: [
         { amount: "500000000", asset: "Amulet" }, // atomic units: 1 CC = 1e10
       ],
-      // `asset` names the instrument; its registry party and the `network`
-      // are read from the facilitator's /v2/supported. Pin them yourself by
-      // setting `network`, and `asset: { instrumentId: { id, admin } }`.
+      // `asset` names the instrument. Its registry party, the synchronizer,
+      // the relaying party and (unless you name one) the `network` are read
+      // from the facilitator's /v2/supported, never from your config.
     },
   }),
 );
@@ -86,7 +86,10 @@ const { paymentRequired } = require("@chainsafe/x402-express");
    challenge. A `settlement_pending` answer (the transfer was relayed and may
    still commit) is a 402 with only `PAYMENT-RESPONSE`: no new challenge, the
    request is not served, and `onReject` is not called, since nothing is owed
-   an undo.
+   an undo. That holds whether the facilitator says so at settle or, for a
+   retry of the same payment, at verify (naming the transaction and its network
+   in the verify answer's `extra.transaction` and `extra.network`, since a
+   verify answer has no field for either).
 
 A browser page on another origin can read `PAYMENT-REQUIRED` and
 `PAYMENT-RESPONSE` only if your CORS setup lists them in
@@ -188,7 +191,7 @@ TPayload>` is exported for a route gated on another.
 | `requirements` | How to produce the `PaymentRequirements`: a **spec** or a **builder** (see below). |
 | `preSettle` | `(payment, req) => string \| undefined`, your own say on a verified payment, run after verify and before anything settles. Return a short reason to refuse it, or nothing to let it through; see below. |
 | `onQuoteError` | `(error, req) => void`, called when a way to pay could not be quoted and was left out of the 402 — the facilitator no longer settles the instrument it names, say. The request is still answered from the entries that did quote, so without this a way to pay can disappear unnoticed. Fires once per dropped entry per request; a throw is swallowed. |
-| `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error?, payment? }`, where `extensions` is the facilitator's full verify detail, with `extensions.detail` saying which of the code's causes it was, and `payment` is the payload, requirements and payer this refusal is about, present only once `preSettle` has accepted it — see **Undoing it** under [`requirements`](#requirements). May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
+| `onReject` | `(rejection, req) => void`, called when a presented payment is rejected (402) or the facilitator/middleware fails (502/500). Receives `{ status, reason, details?, extensions?, error?, payment? }`, where `extensions` is the facilitator's verify or settle detail, with `extensions.detail` saying which of the code's causes it was, and `payment` is the payload, requirements and payer this refusal is about, present only once `preSettle` has accepted it — see **Undoing it** under [`requirements`](#requirements). May be async; a throw or rejection is swallowed. The middleware logs nothing on its own, e.g. `onReject: (r) => console.warn("x402 rejected", r)`. |
 
 ### `requirements`
 
@@ -213,15 +216,15 @@ Every entry is a spec, so each gets discovery and the defaults, and there is no 
 
 Per-entry fields are `{ amount, asset, executeBeforeSeconds?, memo? }` plus an override of any shared one but `resource` and `description`. Any of them may also be set **once at the top level**, beside `payTo`, and `memo` usually should be — see below. `amount` and `asset` are required on every entry regardless, so naming those at the top level does nothing. The middleware fills in `maxTimeoutSeconds` (default 60), `extra.assetTransferMethod` and `extra.executeBeforeSeconds` (default 120). Every field may be a fixed value **or** a `(req) => value` resolver.
 
-For full control, a **builder** `(req) => CantonPaymentRequirements[]` returns the whole list and you own `maxTimeoutSeconds` and the whole of `extra`.
+For full control, a **builder** `(req) => CantonPaymentRequirements[]` returns the whole list and you own `maxTimeoutSeconds` and the rest of `extra`. The facilitator's fields in `extra` (`instrumentId`, `synchronizerId`, `feePayer`) are held against `/v2/supported` before the 402 is issued, and one that differs is refused.
 
 `payTo`, and each entry's `amount` and `asset`, are what you must give. `amount` is atomic units *of something*, so every way to pay says what — there is no deployment default to fall back on, and quoting one would be choosing what you charge.
 
-`asset` takes either form. An **instrument id** — `"Amulet"` for Canton Coin, which is the one id that differs from its wire symbol (`"CC"`) — names the instrument and leaves the registry party to the facilitator's `GET /v2/supported`, so that party is read from the service doing the validating instead of living as a second copy in your config. The whole `{ instrumentId: { id, admin } }` pins it, admin included.
+`asset` is an **instrument id**: `"Amulet"` for Canton Coin, which is the one id that differs from its wire symbol (`"CC"`), or `"USDCx"`.
 
-`network` is the one field discovery can supply on its own, and it is narrowed to the instrument the entry names, so the network quoted is one that settles it. Pin it to skip that. The `/v2/supported` response is cached by `FacilitatorClient` (`supportedTtlMs`, default 5 minutes), so discovery is one round trip per TTL and none at all when `network` and a whole `asset` are both pinned.
+**What the facilitator owns, you cannot configure.** The instrument's registry `admin`, the `synchronizerId` it submits to and the `feePayer` that relays the transfer are the facilitator's own facts. A wrong one would only surface at verify, after the payer had signed, so the middleware always reads them from `GET /v2/supported` and the spec has no field for them. A facilitator with no party configured advertises no `feePayer`, and nothing can be quoted against it until it does.
 
-`feePayer` — the party that relays your payer's transfer and pays its traffic fee — is read from `/v2/supported` and **wins over anything you name**. It is the facilitator's own fact, so a value of yours that differs is stale config, and nothing catches it until the facilitator refuses the payment after the payer has signed. You only set it where nothing is advertised: a route that pins `network` and a whole `asset`, which skips `/v2/supported` entirely; a facilitator with no party configured yet; or a **builder**, which owns the whole of `extra`. Either way quoting fails rather than issuing a 402 nobody can pay — `extra.feePayer` is required of canton-exact requirements.
+`network` is yours to name, and optional. Named, it picks which of the facilitator's deployments to quote; left out, it is discovered, narrowed to the instrument the entry names. Either way `/v2/supported` is read, and cached by `FacilitatorClient` (`supportedTtlMs`, default 5 minutes), so it costs one round trip per TTL.
 
 If more than one network settles the instrument, or the id the entry names is not one the deployment carries, that is an error rather than a guess — and the refusal lists what it does carry.
 
