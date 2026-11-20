@@ -9,13 +9,11 @@
 import type { Request } from "express";
 import {
   ASSET_TRANSFER_METHOD,
-  assetSymbol,
   CantonRequirementsExtraKey,
   decodePayloadTransfer,
   isCantonPaymentPayload,
   isCantonPaymentRequirements,
   selectCantonDeployments,
-  type AssetSpec,
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
   type CantonDeploymentPreference,
@@ -27,6 +25,7 @@ import {
 import { TermsError } from "../options.js";
 import {
   resolve,
+  sameValue,
   type BaseRequirementsSpec,
   type RuleTable,
   type Resolvable,
@@ -42,30 +41,24 @@ const DEFAULT_EXECUTE_BEFORE_SECONDS = 120;
  *
  * `asset` is required by the spec type, so TypeScript catches a missing one —
  * except from JavaScript, and from a resolver that returns nothing. Said
- * plainly here rather than as a TypeError about `instrumentId` two frames
- * down, and as a {@link TermsError} so it is never skipped as a way to pay
- * that merely failed to quote.
+ * plainly here, and as a {@link TermsError} so it is never skipped as a way to
+ * pay that merely failed to quote.
  */
-function instrumentIdOf(asset: string | AssetSpec | undefined | null): string {
-  if (asset === undefined || asset === null) {
+function instrumentIdOf(asset: unknown): string {
+  if (typeof asset !== "string" || asset.length === 0) {
     throw new TermsError(
       "paymentRequired: a way to pay names no `asset`. `amount` is atomic units of " +
-        'something, so each entry says what: an instrument id ("Amulet"), or ' +
-        "{ instrumentId: { id, admin } } to pin the registry party too.",
+        'something, so each entry names the instrument id it is priced in ("Amulet", "USDCx").',
     );
   }
-  return typeof asset === "string" ? asset : asset.instrumentId.id;
+  return asset;
 }
 
 /** Declarative requirements for canton-exact. */
 export interface CantonRequirementsSpec extends BaseRequirementsSpec {
   /**
-   * What this way to pay is priced in. Required, since `amount` is atomic
-   * units of whatever this names.
-   *
-   * An **instrument id** names it and leaves the registry `admin` to
-   * `GET /v2/supported` — the party the facilitator validates the payer's
-   * holding against:
+   * The instrument id this way to pay is priced in. Required, since `amount`
+   * is atomic units of whatever this names.
    *
    * ```ts
    * asset: "Amulet"   // Canton Coin. NOT "CC" — that is the wire SYMBOL, and
@@ -73,37 +66,13 @@ export interface CantonRequirementsSpec extends BaseRequirementsSpec {
    * asset: "USDCx"    // id and symbol match here
    * ```
    *
-   * An {@link AssetSpec} pins the admin too. With `network` it is the whole
-   * answer and nothing is looked up; on its own, `/v2/supported` is still read
-   * for the network — narrowed to this instrument, so the network quoted is
-   * one that settles it:
-   *
-   * ```ts
-   * asset: { instrumentId: { id: "Amulet", admin: "DSO::1220…" } }
-   * ```
-   *
-   * An id the deployment does not carry is refused, and the refusal lists what
-   * it does carry.
+   * Only the id. The registry `admin`, the synchronizer and the relaying
+   * `feePayer` are the facilitator's own facts, so they are always read from
+   * its `GET /v2/supported` and cannot be configured here: a wrong one would
+   * only surface at verify, after the payer had signed. An id the facilitator
+   * does not advertise is refused, and the refusal lists what it does.
    */
-  asset: Resolvable<string | AssetSpec>;
-  /**
-   * The synchronizer to settle on, as the LOGICAL id
-   * `global-domain::1220…`. Read from `GET /v2/supported`, which WINS where
-   * discovery runs — where a deployment submits is its own fact, and a
-   * transfer prepared against any other synchronizer cannot settle there.
-   * This is read only where nothing is discovered: `network` pinned alongside
-   * a whole `AssetSpec`.
-   */
-  synchronizerId?: Resolvable<string>;
-  /**
-   * The relayer to quote as `extra.feePayer`. Read from `GET /v2/supported`,
-   * which WINS where it is advertised — the relaying party is the
-   * facilitator's own fact, not a merchant's choice. This is read only where
-   * nothing is advertised: `network` pinned alongside a whole `AssetSpec`,
-   * which skips discovery, or a facilitator with no party configured yet.
-   * Required: quoting fails if neither can supply one.
-   */
-  feePayer?: Resolvable<string>;
+  asset: Resolvable<string>;
   /**
    * Seconds of life the payer gives the transfer it signs. Default 120. Unlike
    * `maxTimeoutSeconds` this one reaches the ledger, as the transfer's
@@ -214,18 +183,22 @@ export const cantonExact: SchemeAdapter<
     spec: CantonRequirementsSpec,
     ctx: SchemeContext,
   ): Promise<SchemeQuote> {
-    const terms = await resolveDeploymentTerms(req, spec, ctx);
+    const scheme = await resolve(spec.scheme ?? cantonExact.id, req);
+    const network = spec.network === undefined ? undefined : await resolve(spec.network, req);
+    const deployment = await deploymentFor(ctx, {
+      scheme,
+      network,
+      instrument: instrumentIdOf(await resolve(spec.asset, req)),
+    });
     const quote: SchemeQuote = {
-      scheme: terms.scheme,
-      network: terms.network,
+      scheme,
+      network: deployment.network,
       // The spec's `asset` is only a symbol, so the full `{admin, id}` travels
       // in `extra` where a payer can read which registry issued it.
-      asset: terms.asset,
+      asset: deployment.asset,
       extra: {
         assetTransferMethod: ASSET_TRANSFER_METHOD,
-        synchronizerId: terms.synchronizerId,
-        feePayer: terms.feePayer,
-        instrumentId: terms.instrumentId,
+        ...facilitatorTerms(deployment),
         executeBeforeSeconds:
           spec.executeBeforeSeconds === undefined
             ? DEFAULT_EXECUTE_BEFORE_SECONDS
@@ -243,142 +216,72 @@ export const cantonExact: SchemeAdapter<
     }
     return quote;
   },
+
+  async checkBuilt(requirements: CantonPaymentRequirements, ctx: SchemeContext): Promise<void> {
+    // A builder writes the whole of `extra`, so it can name values that are
+    // the facilitator's to state. Held against what the facilitator
+    // advertises, so a wrong one is refused here rather than at verify.
+    const deployment = await deploymentFor(ctx, {
+      scheme: requirements.scheme,
+      network: requirements.network,
+      instrument: requirements.extra.instrumentId.id,
+    });
+    const advertised = facilitatorTerms(deployment);
+    for (const field of FACILITATOR_TERMS) {
+      if (!sameValue(requirements.extra[field], advertised[field])) {
+        throw new TermsError(
+          `paymentRequired: the requirements builder quotes extra.${field} ` +
+            `${JSON.stringify(requirements.extra[field])}, but the facilitator advertises ` +
+            `${JSON.stringify(advertised[field])} on /v2/supported. It is the facilitator's ` +
+            "own fact; quote what it advertises.",
+        );
+      }
+    }
+  },
 };
 
-/**
- * Resolve a merchant-supplied term that must end up a non-empty string.
- *
- * `Resolvable<string>` holds at compile time only: a resolver reading an unset
- * or blank env var hands back undefined or "" at runtime, and either would be
- * quoted into a 402 that cannot be paid — refused much later by the
- * requirements schema, under a worse name. Checked in one place because the
- * same `!== undefined` test was wrong at every site that spelled it out.
- */
-async function requiredTerm(
-  value: Resolvable<string> | undefined,
-  req: Request,
-  message: string,
-): Promise<string> {
-  const resolved = value === undefined ? undefined : await resolve(value, req);
-  if (typeof resolved !== "string" || resolved.length === 0) throw new TermsError(message);
-  return resolved;
-}
+/** The `extra` fields only the facilitator can state. */
+const FACILITATOR_TERMS = ["instrumentId", "synchronizerId", "feePayer"] as const;
 
 /**
- * The scheme, network and instrument to quote.
- *
- * Anything the merchant pinned is used as given. Anything it left out comes
- * from the facilitator's own `/v2/supported`, so a deployment's registry admin
- * and token are read from the service that will settle the payment rather than
- * copied into the merchant's config and kept in step by hand. The response is
- * cached by the client, so this costs one round trip per TTL, not one per
- * request — and a merchant that pins both fields never calls out at all.
+ * The facilitator's own part of `extra`, read from its advertised deployment:
+ * the instrument with its registry admin, the synchronizer it submits to, and
+ * the party that relays the transfer.
  */
-async function resolveDeploymentTerms(
-  req: Request,
-  spec: CantonRequirementsSpec,
-  ctx: SchemeContext,
-): Promise<{
-  scheme: string;
-  network: string;
-  asset: string;
-  synchronizerId: string;
-  feePayer: string;
-  instrumentId: AssetSpec["instrumentId"];
-}> {
-  const scheme = await resolve(spec.scheme ?? cantonExact.id, req);
-  const network = spec.network === undefined ? undefined : await resolve(spec.network, req);
-  // A string names the instrument and leaves its admin to discovery; an
-  // AssetSpec carries the admin too. Either way the id is known, and is what
-  // narrows discovery below.
-  const asset = await resolve(spec.asset, req);
-  const instrument = instrumentIdOf(asset);
-  const pinned = typeof asset === "string" ? undefined : asset;
-
-  // Both pinned: nothing to discover — so the synchronizer and the relayer
-  // have to come from the merchant, since there is no `/v2/supported` answer
-  // to read either from.
-  if (network !== undefined && pinned !== undefined) {
-    const synchronizerId = await requiredTerm(
-      spec.synchronizerId,
-      req,
-      "paymentRequired: `network` and a whole `asset` are pinned, so nothing is read from " +
-        "/v2/supported — name the `synchronizerId` to settle on, or leave one of them out.",
+function facilitatorTerms(
+  deployment: CantonDeploymentTerms,
+): Pick<CantonPaymentRequirements["extra"], (typeof FACILITATOR_TERMS)[number]> {
+  const { instrumentId, synchronizerId, feePayer } = deployment.extra;
+  // Advertised only once the facilitator has a party configured. Without one
+  // there is nobody to relay the payment, so it cannot be quoted. The fix is
+  // the facilitator's, which is why this is not a TermsError: the way to pay
+  // is dropped and reported, and the route's other ways to pay still quote.
+  if (feePayer === undefined) {
+    throw new Error(
+      `paymentRequired: the facilitator advertises no feePayer for ${deployment.network} ` +
+        "on /v2/supported, so nothing can relay this payment. It has no party configured yet.",
     );
-    const feePayer = await requiredTerm(
-      spec.feePayer,
-      req,
-      "paymentRequired: `network` and a whole `asset` are pinned, so nothing is read from " +
-        "/v2/supported — name the `feePayer` that will relay the transfer, or leave one of " +
-        "them out.",
-    );
-    return {
-      scheme,
-      network,
-      asset: assetSymbol(pinned.instrumentId),
-      synchronizerId,
-      feePayer,
-      instrumentId: pinned.instrumentId,
-    };
   }
-
-  const prefer: CantonDeploymentPreference = { schemes: [scheme] };
-  // Each key is a filter, and an absent one filters on nothing — so add a key
-  // only where the merchant named a value. The instrument always narrows: a
-  // pinned AssetSpec says which one as surely as a string does, and the
-  // network discovered here must be one that settles it.
-  if (network !== undefined) prefer.networks = [network];
-  prefer.instruments = [instrument];
-
-  const advertised = exactlyOne(
-    await selectCantonDeployments(await ctx.facilitator.supported(), prefer),
-  );
-  return {
-    scheme,
-    network: network ?? advertised.network,
-    asset: pinned ? assetSymbol(pinned.instrumentId) : advertised.asset,
-    // The deployment's own, unless the merchant named one.
-    // Both of these are the facilitator's own facts, so its answer wins over
-    // anything the merchant named. The supported schema requires a
-    // synchronizer, so discovery always has one; `feePayer` it may omit.
-    synchronizerId: advertised.extra.synchronizerId,
-    feePayer: await requiredFeePayer(req, spec, advertised.extra.feePayer),
-    instrumentId: pinned?.instrumentId ?? advertised.extra.instrumentId,
-  };
+  return { instrumentId, synchronizerId, feePayer };
 }
 
 /**
- * The relayer to quote: the deployment's own, and the merchant's only where
- * nothing is advertised.
+ * The one deployment to quote against, from the facilitator's `/v2/supported`.
  *
- * The advertised value WINS. `feePayer` names the party that relays and pays
- * the traffic fee, which is the facilitator's own fact — a merchant cannot
- * know it better than the facilitator does, so a different value is stale
- * config or a mistake. Nothing catches it either: the facilitator compares the
- * echoed value against its parties with `skip`, by design, so a wrong one
- * surfaces as a fee-payer mismatch after the payer has signed.
- *
- * The merchant's is still read when discovery runs but the facilitator
- * advertises no party — it advertises one only once a party is configured. The
- * fully-pinned path never reaches here; it resolves both its terms itself.
- *
- * Absent from both is a refusal — the merchant hears it here, where the fix is
- * theirs, rather than issuing a 402 the facilitator will refuse later.
+ * `scheme` and `instrument` always narrow; `network` narrows when the merchant
+ * named one. The response is cached by the client, so this costs one round
+ * trip per TTL, not one per request.
  */
-async function requiredFeePayer(
-  req: Request,
-  spec: CantonRequirementsSpec,
-  advertised: string | undefined,
-): Promise<string> {
-  // Schema-guaranteed non-empty where present, so it needs no check of its own.
-  if (advertised !== undefined) return advertised;
-  return requiredTerm(
-    spec.feePayer,
-    req,
-    "paymentRequired: no relayer to quote — the facilitator advertises no `feePayer` on " +
-      "/v2/supported, and this deployment's own `feePayer` is unset or empty. Configure the " +
-      "facilitator's party, or name a `feePayer` here.",
-  );
+async function deploymentFor(
+  ctx: SchemeContext,
+  want: { scheme: string; network: string | undefined; instrument: string },
+): Promise<CantonDeploymentTerms> {
+  const prefer: CantonDeploymentPreference = {
+    schemes: [want.scheme],
+    instruments: [want.instrument],
+  };
+  if (want.network !== undefined) prefer.networks = [want.network];
+  return exactlyOne(await selectCantonDeployments(await ctx.facilitator.supported(), prefer));
 }
 
 /**

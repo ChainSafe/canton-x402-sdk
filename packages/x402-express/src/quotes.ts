@@ -74,6 +74,14 @@ export async function buildQuotes<
     if (named.accepts.length === 0) {
       throw new TermsError("paymentRequired: the requirements builder returned no ways to pay");
     }
+    if (scheme.checkBuilt) {
+      const ctx = { facilitator: options.facilitator };
+      for (const r of named.accepts) {
+        // Only a requirement the scheme reads as its own; anything else is the
+        // builder's business and is refused, as before, when a payer echoes it.
+        if (scheme.acceptsRequirements(r)) await scheme.checkBuilt(r, ctx);
+      }
+    }
     return {
       resource: {
         url: named.resource ?? absoluteUrl(req),

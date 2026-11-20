@@ -217,8 +217,8 @@ function selectInstruments(
   // not settling it, and discovery will not produce it. That is deliberate:
   // synthesising an entry nobody advertised would mean quoting against a
   // deployment on the strength of a convention rather than its own answer.
-  // A merchant paying Canton Coin there pins `network` and `asset`, which
-  // skips discovery altogether.
+  // Canton Coin cannot be quoted against such a deployment: its registry
+  // admin, synchronizer and relayer are the facilitator's to state.
   const listed = (extra.instruments ?? []).filter((i) => i.instrumentId !== undefined);
   const matching =
     want === undefined ? listed : listed.filter((i) => want.includes(i.instrumentId?.id ?? ""));
