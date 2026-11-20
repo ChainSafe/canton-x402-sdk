@@ -86,7 +86,10 @@ const { paymentRequired } = require("@chainsafe/x402-express");
    challenge. A `settlement_pending` answer (the transfer was relayed and may
    still commit) is a 402 with only `PAYMENT-RESPONSE`: no new challenge, the
    request is not served, and `onReject` is not called, since nothing is owed
-   an undo.
+   an undo. That holds whether the facilitator says so at settle or, for a
+   retry of the same payment, at verify (naming the transaction and its network
+   in the verify answer's `extra.transaction` and `extra.network`, since a
+   verify answer has no field for either).
 
 A browser page on another origin can read `PAYMENT-REQUIRED` and
 `PAYMENT-RESPONSE` only if your CORS setup lists them in

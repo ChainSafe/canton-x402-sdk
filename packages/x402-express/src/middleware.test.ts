@@ -1205,6 +1205,8 @@ describe("paymentRequired", () => {
         status: 402,
         reason: "invalid_exact_canton_execute_failed",
         details: "boom",
+        // As a verify refusal hands over the facilitator's `extensions`.
+        extensions: { detail: "boom" },
       });
     });
 
@@ -2867,6 +2869,68 @@ describe("a settlement whose outcome is not known yet (settlement_pending)", () 
     // settle carries it.
     expect(res.headers["payment-required"]).toBeDefined();
     expect(decodePaymentResponseHeader(res.headers["payment-response"])).toEqual(unnamed);
+  });
+
+  /** A facilitator whose verify answers `settlement_pending`, with `extra` as given. */
+  function pendingAtVerify(extra?: Record<string, unknown>) {
+    let settles = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/v2/verify"))
+          return json({
+            isValid: false,
+            invalidReason: "settlement_pending",
+            payer: "alice::x",
+            extensions: { detail: "submission_replayed" },
+            ...(extra ? { extra } : {}),
+          });
+        if (url.includes("/v2/settle")) settles++;
+        return new Response("no route", { status: 404 });
+      }),
+    );
+    return { settles: () => settles };
+  }
+
+  it("a pending answer from VERIFY is answered as pending too, not with a fresh challenge", async () => {
+    // A retry of a payment whose first relay is unresolved: the facilitator
+    // has seen this signed transaction and says so at verify, naming it in
+    // `extra`. Re-challenging would have the payer sign a second.
+    const facilitator = pendingAtVerify({ transaction: "facilitator-tx", network: "canton:x" });
+    const booked: string[] = [];
+    const { app, served, onReject } = pendingApp(booked);
+    const res = await request(app)
+      .get("/paid")
+      .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-0" } }));
+    expect(res.status).toBe(402);
+    expect(res.headers["payment-required"]).toBeUndefined();
+    expect(booked).toEqual([]);
+    expect(served).not.toHaveBeenCalled();
+    expect(facilitator.settles()).toBe(0);
+    // The facilitator's own transaction id and network, not values read from
+    // the payload (whose prepared-transaction hash is "h").
+    expect(decodePaymentResponseHeader(res.headers["payment-response"])).toMatchObject({
+      errorReason: "settlement_pending",
+      transaction: "facilitator-tx",
+      network: "canton:x",
+      payer: "alice::x",
+    });
+    await new Promise((r) => setImmediate(r));
+    expect(onReject).not.toHaveBeenCalled();
+  });
+
+  it("a pending answer from verify missing the transaction or network is a plain refusal", async () => {
+    // Without both there is nothing to look up, so it cannot be answered as pending.
+    for (const extra of [undefined, { network: "canton:x" }, { transaction: "facilitator-tx" }]) {
+      pendingAtVerify(extra);
+      const { app } = pendingApp([]);
+      const res = await request(app)
+        .get("/paid")
+        .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-0" } }));
+      expect(res.status, JSON.stringify(extra)).toBe(402);
+      expect(res.headers["payment-required"], JSON.stringify(extra)).toBeDefined();
+      expect(res.body.error).toBe("settlement_pending");
+    }
   });
 
   it("a pending answer that names no network is a plain failure, not retried", async () => {

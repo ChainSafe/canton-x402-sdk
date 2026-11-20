@@ -203,6 +203,21 @@ async function verifyPayment<
 ): Promise<{ verify: VerifyResponse; payer: string }> {
   const verify = await facilitator.verify(payload, accepted);
   if (!verify.isValid) {
+    // A retry whose first relay may still commit: answer it as pending, not
+    // with a fresh challenge. The facilitator names the transaction and its
+    // network in `extra`, since a verify answer has no field for either.
+    const { transaction, network } =
+      verify.invalidReason === "settlement_pending" ? (verify.extra ?? {}) : {};
+    if (nonEmpty(transaction) && nonEmpty(network)) {
+      throw new SettlementPending({
+        success: false,
+        errorReason: "settlement_pending",
+        transaction,
+        network,
+        ...(verify.payer ? { payer: verify.payer } : {}),
+        ...(verify.extensions ? { extensions: verify.extensions } : {}),
+      });
+    }
     throw new PaymentRejection(verify.invalidReason ?? "verify_failed", {
       details: causeOf(verify.extensions),
       extensions: verify.extensions,
@@ -238,9 +253,15 @@ async function settlePayment(
     // Showing `errorMessage` is fine; matching on it is what x402 v2 §9 rules out.
     throw new PaymentRejection(settled.errorReason ?? "settle_failed", {
       details: causeOf(settled.extensions, settled.errorMessage),
+      extensions: settled.extensions,
       settleResponse: settled,
     });
   }
   res.setHeader("PAYMENT-RESPONSE", encodePaymentResponseHeader(settled));
   return settled;
+}
+
+/** A non-empty string: the only kind of `extra` value read as a transaction or network. */
+function nonEmpty(value: unknown): value is string {
+  return typeof value === "string" && value !== "";
 }
