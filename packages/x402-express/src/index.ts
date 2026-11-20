@@ -12,9 +12,8 @@
  */
 export const VERSION = "0.0.1";
 export { paymentRequired } from "./middleware.js";
+export { DEFAULT_MAX_TIMEOUT_SECONDS, TermsError } from "./quotes.js";
 export {
-  DEFAULT_MAX_TIMEOUT_SECONDS,
-  TermsError,
   type AcceptSpec,
   type PaymentRejectionInfo,
   type PaymentRequiredOptions,
@@ -22,14 +21,11 @@ export {
   type RequirementsSpec,
   type X402RequestState,
 } from "./options.js";
+export { compareQuote, sameValue, type FieldRule, type RuleTable } from "./policy.js";
 export {
   resolve,
-  sameValue,
-  compareQuote,
   type BaseRequirementsSpec,
-  type FieldRule,
   type Resolvable,
-  type RuleTable,
   type SchemeAdapter,
   type SchemeContext,
   type SchemeQuote,

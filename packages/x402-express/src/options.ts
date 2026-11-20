@@ -21,21 +21,6 @@ import type { BaseRequirementsSpec, Resolvable, SchemeAdapter, SharedTerms } fro
 import type { CantonRequirementsSpec } from "./schemes/canton-exact.js";
 
 /**
- * The merchant's configuration is wrong.
- *
- * Separated from a failure to quote against the facilitator, which is the
- * environment changing and leaves the other ways to pay standing. A merchant
- * error is never skipped: it would drop a way to pay silently and the fix is
- * in the merchant's own hands.
- */
-export class TermsError extends Error {
-  override readonly name = "TermsError";
-}
-
-/** Seconds a client is given to pay, when the merchant names none. */
-export const DEFAULT_MAX_TIMEOUT_SECONDS = 60;
-
-/**
  * One way to pay: a scheme's spec minus the fields named once for all of them.
  *
  * Most shared fields may still be set here to override them — a second
@@ -277,48 +262,3 @@ declare global {
 
 /** Re-exported so a merchant writing a spec does not need two imports. */
 export type { Resolvable };
-
-/**
- * Throws when the terms cannot produce a 402.
- *
- * Both checks are on what the merchant wrote, so both run once, when the route
- * is mounted — a request cannot change either answer, and answering 500 to
- * every request for a config mistake hides it.
- *
- * - `accepts` must offer something: a 402 with no way to pay cannot be paid.
- * - No two entries may be the same way to pay. A payer chooses by what an
- *   entry says, and the asset is what says it, so two in one asset leave only
- *   price to choose on and the dearer can never be paid. The scheme reads each
- *   entry's key ({@link SchemeAdapter.distinctKey}); an entry whose asset is a
- *   resolver has none and is not checked.
- *
- * A builder is skipped entirely: it answers per request.
- */
-export function assertUsableTerms<
-  TSpec extends BaseRequirementsSpec,
-  TRequirements extends X402PaymentRequirements<unknown>,
-  TPayload extends X402PaymentPayload<unknown>,
->(
-  source: PaymentRequiredOptions<TSpec, TRequirements, TPayload>["requirements"],
-  scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
-): void {
-  if (typeof source === "function") return;
-  const { accepts, ...shared } = source;
-  if (accepts.length === 0) {
-    throw new TermsError("paymentRequired: `accepts` is empty — a 402 must advertise a way to pay");
-  }
-  const seen = new Map<string, number>();
-  accepts.forEach((entry, i) => {
-    const key = scheme.distinctKey?.({ ...shared, ...entry } as unknown as TSpec);
-    if (key === undefined) return;
-    const first = seen.get(key);
-    if (first !== undefined) {
-      throw new TermsError(
-        `paymentRequired: ways to pay ${first + 1} and ${i + 1} are both in ${key}. ` +
-          `A payer cannot tell them apart, so only the cheaper would ever be paid — ` +
-          `give them different assets, or quote one.`,
-      );
-    }
-    seen.set(key, i);
-  });
-}

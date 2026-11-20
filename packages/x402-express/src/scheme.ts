@@ -9,12 +9,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Request } from "express";
-import {
-  isValidAmount,
-  type X402PaymentPayload,
-  type X402PaymentRequirements,
-} from "@chainsafe/x402-core";
+import type { X402PaymentPayload, X402PaymentRequirements } from "@chainsafe/x402-core";
 import type { FacilitatorClient } from "@chainsafe/x402-client";
+
+import type { RuleTable } from "./policy.js";
 
 /** A fixed value, or one computed per request. */
 export type Resolvable<T> = T | ((req: Request) => T | Promise<T>);
@@ -69,98 +67,6 @@ export interface BaseRequirementsSpec extends SharedTerms {
    */
   amount: Resolvable<string>;
 }
-
-/* ------------------------------------------------------------------ *
- * Holding an echoed requirement against the merchant's own terms
- * ------------------------------------------------------------------ */
-
-/** How one field of an echoed requirement is held against the merchant's. */
-export type FieldRule =
-  /** Must be exactly what the merchant quoted. */
-  | { compare: "equal"; reason: string }
-  /** An integer-string amount that must be at least the merchant's. */
-  | { compare: "atLeast"; reason: string; invalidReason: string }
-  /** Walk a nested table. */
-  | { compare: "nested"; rules: RuleTable }
-  /** Not compared, with the reason recorded here rather than left to inference. */
-  | { compare: "skip"; why: string };
-
-export type RuleTable = Record<string, FieldRule>;
-
-/** Structural equality over the JSON these fields are made of. */
-export function sameValue(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((item, i) => sameValue(item, b[i]));
-  }
-  const ae = Object.entries(a as Record<string, unknown>);
-  const be = b as Record<string, unknown>;
-  if (ae.length !== Object.keys(be).length) return false;
-  return ae.every(([k, v]) => k in be && sameValue(v, be[k]));
-}
-
-/**
- * Walk a rule table, comparing an echoed requirement against one quote.
- *
- * `depth` counts the comparisons that passed before the one that failed. It is
- * how the middleware decides which of several advertised quotes a payment was
- * aimed at when it matches none of them: the quote it got furthest through is
- * the one whose refusal is worth reporting.
- */
-export function compareQuote(
-  echoed: Record<string, unknown>,
-  policy: Record<string, unknown>,
-  rules: RuleTable,
-  depth = 0,
-): { ok: true; depth: number } | { ok: false; reason: string; depth: number } {
-  let passed = depth;
-  for (const [field, rule] of Object.entries(rules)) {
-    switch (rule.compare) {
-      case "skip":
-        continue;
-      case "equal":
-        if (!sameValue(echoed[field], policy[field])) {
-          return { ok: false, reason: rule.reason, depth: passed };
-        }
-        break;
-      case "atLeast": {
-        const e = echoed[field];
-        // Validate the FORMAT before comparing, with core's bound and not a
-        // bare integer test. BigInt throws on "abc" — a 500 where a 402 belongs
-        // — and happily reads "0x10" as 16 and "" as 0, so a value the merchant
-        // never quoted would compare as a number. The LENGTH bound matters too:
-        // BigInt parsing is superlinear, and a million-digit echoed amount
-        // reaches here before any signature is checked.
-        if (typeof e !== "string" || !isValidAmount(e)) {
-          return { ok: false, reason: rule.invalidReason, depth: passed };
-        }
-        if (BigInt(e) < BigInt(policy[field] as string)) {
-          return { ok: false, reason: rule.reason, depth: passed };
-        }
-        break;
-      }
-      case "nested": {
-        const nested = compareQuote(
-          echoed[field] as Record<string, unknown>,
-          policy[field] as Record<string, unknown>,
-          rule.rules,
-          passed,
-        );
-        if (!nested.ok) return nested;
-        passed = nested.depth;
-        break;
-      }
-    }
-    passed += 1;
-  }
-  return { ok: true, depth: passed };
-}
-
-/* ------------------------------------------------------------------ *
- * The adapter
- * ------------------------------------------------------------------ */
 
 /** What a scheme is handed when it builds a quote. */
 export interface SchemeContext {

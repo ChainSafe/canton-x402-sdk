@@ -32,14 +32,40 @@ import { buildQuotes, issueChallenge, type Offer } from "./quotes.js";
  * `PAYMENT-RESPONSE` beside the new challenge.
  */
 export class PaymentRejection extends Error {
+  readonly details?: string;
+  readonly extensions?: Record<string, unknown>;
+  readonly settleResponse?: SettleResponseError;
+
   constructor(
     readonly reason: string,
-    readonly details?: string,
-    readonly extensions?: Record<string, unknown>,
-    readonly settleResponse?: SettleResponseError,
+    more: {
+      /** The 402 body's `details`. */
+      details?: string;
+      /** The facilitator's `extensions`, for `onReject`. */
+      extensions?: Record<string, unknown>;
+      /** A failed settle's answer, sent in `PAYMENT-RESPONSE`. */
+      settleResponse?: SettleResponseError;
+    } = {},
   ) {
     super(reason);
+    this.details = more.details;
+    this.extensions = more.extensions;
+    this.settleResponse = more.settleResponse;
   }
+}
+
+/**
+ * Why the facilitator refused, for the 402's `details`: `extensions.detail`
+ * where it names the cause, else the free-text message. Either only when it is
+ * a string, since both arrive from the facilitator unchecked.
+ */
+export function causeOf(
+  extensions: Record<string, unknown> | undefined,
+  message?: unknown,
+): string | undefined {
+  const detail = extensions?.detail;
+  if (typeof detail === "string") return detail;
+  return typeof message === "string" ? message : undefined;
 }
 
 /**

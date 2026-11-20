@@ -15,21 +15,19 @@ import {
   type CantonPaymentPayload,
   type CantonPaymentRequirements,
   type SettleResponse,
+  type VerifyResponse,
   type X402PaymentPayload,
   type X402PaymentRequirements,
 } from "@chainsafe/x402-core";
+import type { FacilitatorClient } from "@chainsafe/x402-client";
 
 import type { BaseRequirementsSpec, SchemeAdapter } from "./scheme.js";
 import { cantonExact, type CantonRequirementsSpec } from "./schemes/canton-exact.js";
-import {
-  assertUsableTerms,
-  type PaymentRejectionInfo,
-  type PaymentRequiredOptions,
-  type X402RequestState,
-} from "./options.js";
-import { buildQuotes, type Offer } from "./quotes.js";
+import type { PaymentRejectionInfo, PaymentRequiredOptions, X402RequestState } from "./options.js";
+import { assertUsableTerms, buildQuotes, type Offer } from "./quotes.js";
 import { assertAcceptedQuote, rulesFor } from "./policy.js";
-import { PaymentRejection, SettlementPending, respondToFailure } from "./response.js";
+import type { RuleTable } from "./policy.js";
+import { PaymentRejection, SettlementPending, causeOf, respondToFailure } from "./response.js";
 
 /**
  * Express middleware that gates a route behind an x402 payment.
@@ -82,7 +80,6 @@ export function paymentRequired<
   TPayload extends X402PaymentPayload<unknown> = CantonPaymentPayload,
 >(options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>): RequestHandler {
   const { facilitator } = options;
-  const settle = options.settle ?? false;
   const scheme = (options.scheme ?? cantonExact) as unknown as SchemeAdapter<
     TSpec,
     TRequirements,
@@ -93,142 +90,157 @@ export function paymentRequired<
   assertUsableTerms(options.requirements, scheme);
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    // Built at most once per request, and only when something needs them: a
-    // paid request needs terms to hold the payment against, a challenge needs
-    // terms to advertise. The failure path reuses whatever was built here.
+    // Built once per request, and reused by the failure path.
     let offer: Offer<TRequirements> | undefined;
-    // Kept for the failure path, and set at ONE point: once `preSettle` has
-    // accepted. From there on a refusal may be undoing work the merchant
-    // already did, and this is what names it. Set any earlier and it would
-    // name a payment nothing has checked — an underpriced header echoing
-    // another order's reference would hand `onReject` that reference, and a
-    // merchant releasing it would release someone else's.
+    // Set at ONE point: once `preSettle` has accepted. From there a refusal may
+    // be undoing work the merchant did, and this names it. Any earlier and it
+    // would name a payment nothing has checked: an underpriced header echoing
+    // another order's reference would hand `onReject` that reference.
     let payment: PaymentRejectionInfo<TRequirements, TPayload>["payment"];
     try {
-      // The spec's name first. X-PAYMENT is the name this SDK used before, and
-      // is still read for a payment of this shape sent under it. A 0.1.x payer
-      // sends the older { payment, requirements } shape, which is refused
-      // either way.
-      const header = req.header("PAYMENT-SIGNATURE") || req.header("X-PAYMENT");
-      // No payment yet. Nothing is built for the terms' own sake — the
-      // challenge below is what gets built, references and all.
-      if (!header) throw new PaymentRejection("payment_required");
-
-      // The payment carries the requirements it was built against as
-      // `accepted`, the accepts[] entry the payer chose. Verify against those,
-      // after checking them against merchant policy. Nothing in the payment
-      // binds them on its own — what binds is the signed transfer the verifier
-      // decodes and compares to them.
-      let decoded: X402PaymentPayload<unknown>;
-      try {
-        decoded = decodePaymentHeader(header);
-      } catch {
-        throw new PaymentRejection("bad_payload");
-      }
-
-      // The codec checks the envelope only: `payload.payload` is `{}` as far as
-      // it is concerned, `accepted` is checked for the fields every scheme's
-      // requirements share, and neither `extra` nor `resource` is checked at
-      // all. It types the result optimistically; these guards are the only
-      // things that have looked. Narrow before reading a field, or
-      // attacker-controlled input picks our status code by throwing a
-      // TypeError into the 500 path.
-      if (!scheme.acceptsPayload(decoded)) throw new PaymentRejection("policy_payload_invalid");
-      if (!scheme.acceptsRequirements(decoded.accepted)) {
-        throw new PaymentRejection("policy_requirements_invalid");
-      }
-      const payload = decoded as TPayload;
-      const accepted = decoded.accepted as TRequirements;
-
+      const { payload, accepted } = readPayment(req, scheme);
       offer = await buildQuotes(req, options, scheme);
-      assertAcceptedQuote(accepted, offer.quotes, rules);
-
-      // §5.2.2 lets a payment name the resource it is for, and it is the only
-      // place one reaches us from the payer — `accepted` is a
-      // PaymentRequirements, which carries none. Optional, so naming none is
-      // fine; naming another resource is refused. Echo fidelity, not a
-      // binding: nothing the payer sends is signed, and `extra.memo` is what
-      // ties a payment to one challenge.
-      const named = payload.resource?.url;
-      if (named !== undefined && named !== offer.resource.url) {
-        throw new PaymentRejection("policy_resource");
-      }
-
-      const verify = await facilitator.verify(payload, accepted);
-      if (!verify.isValid) {
-        const detail = verify.extensions?.detail;
-        throw new PaymentRejection(
-          verify.invalidReason ?? "verify_failed",
-          typeof detail === "string" ? detail : undefined,
-          verify.extensions,
-        );
-      }
-
-      // The payload names no payer — it is the signed transfer's sender (spec
-      // Rule 8), which the facilitator reports. `payer` is optional in a verify
-      // response, so ask the scheme to read its own when it is left out. Before
-      // settling, so a payment is never captured for a request we then fail.
-      const payer = verify.payer ?? scheme.payerOf(payload);
-      if (!payer) {
-        // Worded as the scheme's verifier words an undecodable transfer: the
-        // code, and `extensions.detail` naming which of its causes this was.
-        throw new PaymentRejection(
-          scheme.unreadablePayerReason ?? "invalid_payload",
-          "undecodable",
-          { detail: "undecodable" },
-        );
-      }
+      holdToTerms(payload, accepted, offer, rules);
+      const { verify, payer } = await verifyPayment(facilitator, scheme, payload, accepted);
 
       // The merchant's own say, on a payment the facilitator has vouched for:
       // after verify, so `accepted` is bound to the signed transfer and
       // `payer` is known, and before settle, so a refusal moves no funds.
-      const merchantRefusal = await options.preSettle?.(
+      const refusal = await options.preSettle?.(
         { payload, requirements: accepted, payer, verify },
         req,
       );
-      if (merchantRefusal) throw new PaymentRejection(merchantRefusal);
-      // Accepted. Whatever the merchant reserved in there is reserved, so from
-      // here a refusal owes it an undo and carries what to undo it against.
+      if (refusal) throw new PaymentRejection(refusal);
       payment = { payload, requirements: accepted, payer };
 
-      let settleResponse: SettleResponse | undefined;
-      if (settle) {
-        settleResponse = await facilitator.settle(payload, accepted);
-        // Pending is not a failure: the transfer was relayed and may still
-        // commit. Answer so without serving and without a fresh challenge,
-        // which would have the payer sign a second transfer while the first
-        // may land. Settling again is left to a facilitator that can look a
-        // pending submission up; one that cannot refuses the same payload as a
-        // replay, which would read as a failure here.
-        if (isSettlementPending(settleResponse)) throw new SettlementPending(settleResponse);
-        if (!settleResponse.success) {
-          // The cause, where a verify refusal names it too. A facilitator that
-          // names none may still say what went wrong in `errorMessage`, and
-          // showing that text is fine; matching on it is what x402 v2 §9 rules
-          // out.
-          const detail = settleResponse.extensions?.detail;
-          const message = settleResponse.errorMessage;
-          throw new PaymentRejection(
-            settleResponse.errorReason ?? "settle_failed",
-            typeof detail === "string" ? detail : typeof message === "string" ? message : undefined,
-            undefined,
-            settleResponse,
-          );
-        }
-        // The v2 HTTP transport carries the whole settle answer, base64 JSON.
-        res.setHeader("PAYMENT-RESPONSE", encodePaymentResponseHeader(settleResponse));
-      }
-
+      const settled = options.settle
+        ? await settlePayment(facilitator, payload, accepted, res)
+        : undefined;
       req.x402 = {
         payer,
         requirements: accepted,
         payload,
         verify,
-        settle: settleResponse,
+        settle: settled,
       } as X402RequestState;
       next();
     } catch (err) {
       await respondToFailure(err, req, res, options, scheme, offer, payment);
     }
   };
+}
+
+/**
+ * The payment in `PAYMENT-SIGNATURE` (or the older `X-PAYMENT`), narrowed to
+ * this scheme's shapes. No header is the plain challenge; anything else that
+ * fails here is a 402 refusal.
+ */
+function readPayment<
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  req: Request,
+  scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
+): { payload: TPayload; accepted: TRequirements } {
+  const header = req.header("PAYMENT-SIGNATURE") || req.header("X-PAYMENT");
+  if (!header) throw new PaymentRejection("payment_required");
+
+  let decoded: X402PaymentPayload<unknown>;
+  try {
+    decoded = decodePaymentHeader(header);
+  } catch {
+    throw new PaymentRejection("bad_payload");
+  }
+  // The codec checks the envelope only, and types the result optimistically;
+  // these guards are what look at `payload` and `accepted`. Narrow before
+  // reading a field, or attacker-controlled input picks our status code by
+  // throwing a TypeError into the 500 path.
+  if (!scheme.acceptsPayload(decoded)) throw new PaymentRejection("policy_payload_invalid");
+  if (!scheme.acceptsRequirements(decoded.accepted)) {
+    throw new PaymentRejection("policy_requirements_invalid");
+  }
+  return { payload: decoded, accepted: decoded.accepted };
+}
+
+/**
+ * Hold the payment against the terms this request would advertise: the
+ * requirements it says it accepted, and the resource it names, if any.
+ *
+ * Nothing the payer sends here is signed, so this is echo fidelity: what binds
+ * the payment is the transfer the facilitator verifies against `accepted`.
+ */
+function holdToTerms<TRequirements extends X402PaymentRequirements<unknown>>(
+  payload: X402PaymentPayload<unknown>,
+  accepted: TRequirements,
+  offer: Offer<TRequirements>,
+  rules: RuleTable,
+): void {
+  assertAcceptedQuote(accepted, offer.quotes, rules);
+  // §5.2.2 lets a payment name its resource; optional, but another one is refused.
+  const named = payload.resource?.url;
+  if (named !== undefined && named !== offer.resource.url) {
+    throw new PaymentRejection("policy_resource");
+  }
+}
+
+/**
+ * Verify with the facilitator, and find who paid.
+ *
+ * The payload names no payer: it is the signed transfer's sender (spec
+ * Rule 8). The facilitator reports it, and `payer` is optional in a verify
+ * response, so the scheme reads its own when it is left out.
+ */
+async function verifyPayment<
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  facilitator: FacilitatorClient,
+  scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
+  payload: TPayload,
+  accepted: TRequirements,
+): Promise<{ verify: VerifyResponse; payer: string }> {
+  const verify = await facilitator.verify(payload, accepted);
+  if (!verify.isValid) {
+    throw new PaymentRejection(verify.invalidReason ?? "verify_failed", {
+      details: causeOf(verify.extensions),
+      extensions: verify.extensions,
+    });
+  }
+  const payer = verify.payer ?? scheme.payerOf(payload);
+  if (!payer) {
+    // Worded as the scheme's verifier words an undecodable transfer.
+    throw new PaymentRejection(scheme.unreadablePayerReason ?? "invalid_payload", {
+      details: "undecodable",
+      extensions: { detail: "undecodable" },
+    });
+  }
+  return { verify, payer };
+}
+
+/**
+ * Settle with the facilitator, and put its answer in `PAYMENT-RESPONSE`.
+ *
+ * Pending is not a failure: the transfer was relayed and may still commit, so
+ * it is answered without serving and without a fresh challenge, which would
+ * have the payer sign a second transfer while the first may land.
+ */
+async function settlePayment(
+  facilitator: FacilitatorClient,
+  payload: X402PaymentPayload<unknown>,
+  accepted: X402PaymentRequirements<unknown>,
+  res: Response,
+): Promise<SettleResponse> {
+  const settled = await facilitator.settle(payload, accepted);
+  if (isSettlementPending(settled)) throw new SettlementPending(settled);
+  if (!settled.success) {
+    // Showing `errorMessage` is fine; matching on it is what x402 v2 §9 rules out.
+    throw new PaymentRejection(settled.errorReason ?? "settle_failed", {
+      details: causeOf(settled.extensions, settled.errorMessage),
+      settleResponse: settled,
+    });
+  }
+  res.setHeader("PAYMENT-RESPONSE", encodePaymentResponseHeader(settled));
+  return settled;
 }
