@@ -26,6 +26,7 @@ import { sameValue, type RuleTable } from "../policy.js";
 import { TermsError } from "../quotes.js";
 import {
   resolve,
+  sameValue,
   type BaseRequirementsSpec,
   type Resolvable,
   type SchemeAdapter,
