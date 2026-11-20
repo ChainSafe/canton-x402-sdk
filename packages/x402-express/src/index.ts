@@ -14,6 +14,7 @@ export const VERSION = "0.0.1";
 export { paymentRequired } from "./middleware.js";
 export {
   DEFAULT_MAX_TIMEOUT_SECONDS,
+  TermsError,
   type AcceptSpec,
   type PaymentRejectionInfo,
   type PaymentRequiredOptions,
