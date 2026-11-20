@@ -5,11 +5,12 @@ description: The guarantees verify enforces before any money moves, and what set
 # The facilitator
 
 This page zooms in on steps 5 and 6 of [the payment flow](/payment-flow), the
-facilitator's half. Before any money moves, verify enforces a handful of
-guarantees — your payment can't be replayed, tampered with, or under-paid — and
-settle re-runs all of them before executing on Canton. The facilitator never
-moves a payer's funds on its own authority: the only write that moves them is
-`executeAndWaitForTransaction` of a **payer-signed** transaction.
+facilitator's half. Before any money moves, verify checks that a payment was
+not swapped for different terms, and it does not treat an in-flight transfer
+as a failure. Settle re-runs those checks before executing on Canton. The
+facilitator never moves a payer's funds on its own authority: the only write
+that moves them is `executeAndWaitForTransaction` of a **payer-signed**
+transaction.
 
 ## What verify guarantees
 
@@ -62,13 +63,33 @@ facilitator's alone, since only it holds the state involved:
    inside what the payer signed, so this check takes it on the payer's word;
    the synchronizer authenticates it against the contract id at submission,
    which is where a fabricated one fails.
-8. **No replay, and you're an allowed destination** — the payment has not
-   settled before (the ledger is the real guard: a replayed transfer names
-   input holdings that are already spent), and for an authenticated merchant
-   `payTo` must be a party that key is allowed to receive at (your destination
-   policy). A destination denial comes back as
+8. **Submission state, and you're an allowed destination.** A transfer that
+   has already settled names input holdings that are spent, and the ledger
+   refuses it. A retry whose first relay is still unresolved is not that case:
+   verify answers `settlement_pending`, with `extensions.detail` of
+   `submission_replayed`, instead of asking for another signature. For an
+   authenticated merchant, `payTo` must be a party that key is allowed to
+   receive at. A destination denial comes back as
    `invalid_exact_canton_merchant_not_registered` with a
    `destination_not_allowed` detail, on verify and on settle alike.
+
+## When a payment may still land
+
+`settlement_pending` is non-terminal. It can arrive from verify, on a retry of
+a transaction the facilitator has already submitted, or from settle, when the
+relay went out and the ledger outcome is not known yet.
+
+The buyer resends the same signed payment. It does not sign another one.
+Express therefore answers `402` with `PAYMENT-RESPONSE` and no
+`PAYMENT-REQUIRED`. `onReject` is not called, because nothing the merchant
+reserved is yet known to need an undo.
+
+A verify answer has no `transaction` or `network` field of its own. The
+facilitator supplies them as `extra.transaction` and `extra.network`.
+`extra.transaction` is the payment's `preparedTxHash`. On a successful settle,
+the field named `transaction` means something else: the Canton update id. On a
+pending settle it is again the `preparedTxHash`. Match on `errorReason` or
+`invalidReason` before reading it.
 
 ## What settlement does
 

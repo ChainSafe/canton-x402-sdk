@@ -61,16 +61,35 @@ server (step 4).
    payment built for other terms can't pass. It then POSTs
    `{ x402Version, paymentPayload, paymentRequirements }` to `/v2/verify` and,
    with `settle: true` (the default is `false`: verify only), to `/v2/settle`,
-   with your API key. A payment that fails your terms or the facilitator's
-   verify gets a fresh challenge (a new `402`) instead of being settled.
+   with your API key. A payment that fails your terms, or a verify refusal other
+   than `settlement_pending`, gets a fresh challenge (a new `402`) instead of
+   being settled.
+
+   `settlement_pending` is the exception. The facilitator has already seen this
+   signed transaction, and its first relay may still commit
+   (`extensions.detail` is `submission_replayed`). Express answers that the same
+   way it answers a pending settle: `402` with only `PAYMENT-RESPONSE`, no new
+   challenge, and the route is not served. The facilitator names the in-flight
+   transfer in `extra.transaction` (the payment's `preparedTxHash`) and
+   `extra.network`. An answer missing either is an ordinary refusal, because
+   there is then nothing a buyer can retry.
 
 6. **Facilitator executes on Canton**
 
    `/v2/settle` re-runs [every verify check](/facilitator#what-verify-guarantees),
    then calls Canton's `executeAndWaitForTransaction` with the payer-signed
-   blob. On success it returns the update id as `transaction`. The middleware
-   puts the whole settle answer on your response as `PAYMENT-RESPONSE`
-   (base64 JSON), and your handler runs with the verified payer on `req.x402`.
+   blob. Evaluated outcomes, including a refusal and `settlement_pending`, come
+   back as HTTP 200. On success `transaction` is the Canton update id, the
+   middleware puts that answer on the response as `PAYMENT-RESPONSE`, and your
+   handler runs with the verified payer on `req.x402`.
+
+   When the outcome is not yet known, `success` is false and `errorReason` is
+   `settlement_pending`. `transaction` is then the payment's `preparedTxHash`,
+   not an update id. Express returns `402` with only `PAYMENT-RESPONSE` and
+   does not mint a new challenge. `createX402Fetch` returns that response
+   without signing again. Calling the wrapper again starts a new unpaid
+   request and would sign a second transfer, so a caller that still wants the
+   first payment resends the same `PAYMENT-SIGNATURE`.
 
 ::: danger Raise your server's max header size
 The `PAYMENT-SIGNATURE` header from step 4 runs to about 10 KB for a typical

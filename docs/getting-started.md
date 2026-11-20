@@ -59,18 +59,18 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
    validates, each with the registry party that admins it.
 
    The middleware reads this for you. Name the instrument by id — `asset:
-   "Amulet"` — and leave `network` out, and the rest comes from the facilitator:
-   the network it settles, the party that relays your payments, and the
-   registry party they are validated against — read from the service doing the
-   validating rather than copied into your `.env` to go stale when a deployment
-   moves. It is fetched once and
-   cached (see `supportedTtlMs` on `FacilitatorClient`), not per request.
+   "Amulet"` — and the rest comes from the facilitator: the synchronizer, the
+   party that relays your payments, and the registry party they are validated
+   against. These are the facilitator's own facts, so you cannot configure
+   them: a wrong one would only fail at verify, after the payer had signed.
+   It is fetched once and cached (see `supportedTtlMs` on `FacilitatorClient`),
+   not per request.
 
    `asset` itself is required on every way to pay: `amount` is atomic units of
-   something, so each entry says what. Pin the rest to skip the lookup
-   entirely — `network`, and `asset: { instrumentId: { id, admin } }` for the
-   registry party. If the facilitator settles that instrument on more than one
-   network, naming one with `network` is required rather than guessed. The
+   something, so each entry says what. `network` is optional: leave it out and
+   it is discovered, or name it to choose. If the facilitator settles that
+   instrument on more than one network, naming one is required rather than
+   guessed. The
    [API reference](/api-reference#get-v2-supported) describes every field.
 
 5. **Gate a route**
@@ -165,7 +165,8 @@ pair in the SDK repo is a full runnable payer + merchant, with the complete
 credential wiring in its `.env.example`.
 
 ::: tip Next
-[The payment flow](/payment-flow) walks every request end to end, and the
-[API reference](/api-reference) has the full request and response spec for
-`/v2/verify` and `/v2/settle`.
+[The payment flow](/payment-flow) walks every request end to end, including a
+settlement that is still in flight. The [API reference](/api-reference) has
+the verify and settle bodies, and [Upgrading](/upgrading) covers a merchant
+config that still sets facilitator-owned fields.
 :::

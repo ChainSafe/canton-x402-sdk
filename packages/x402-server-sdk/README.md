@@ -147,6 +147,13 @@ const f = createX402Fetch(payer);                    // one payer
 const res = await f("https://api.example/paid");     // 402 → pay → retry, transparently
 ```
 
+A `402` that carries `PAYMENT-RESPONSE` and no `PAYMENT-REQUIRED` is a pending
+settlement, not a new price. The wrapper returns it without signing again.
+Calling `f` again starts from an unpaid request, so it would sign a second
+transfer. Resend the original `PAYMENT-SIGNATURE` while the first one may
+still land. `transaction` on that pending answer is the payment's
+`preparedTxHash`, not a Canton update id.
+
 Accepts **one payer or several**. With several, each advertised requirement routes to
 the first payer that `supports()` it (server `accepts[]` order wins) — so a mixed-scheme
 offer (e.g. Canton + EVM) is paid by the right payer. Options: `select(accepts, payers)`

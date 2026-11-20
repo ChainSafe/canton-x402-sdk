@@ -5,7 +5,7 @@
 // workspace compiles, and the pages transclude it (#69).
 //
 // WHY THE SIDEBAR IS WRITTEN OUT rather than generated from the directory:
-// these six pages are a reading order, not a folder. Someone meeting x402 for
+// these pages are a reading order, not a folder. Someone meeting x402 for
 // the first time should be walked from what it is to how to call it, and
 // alphabetical or filesystem order would not do that.
 import { readFileSync } from "node:fs";
@@ -61,7 +61,8 @@ export default defineConfig({
         text: "Reference",
         items: [
           { text: "API reference", link: "/api-reference" },
-          { text: "Protocol spec", link: "/protocol/spec" },
+          { text: "Protocol contract", link: "/protocol/spec" },
+          { text: "Upgrading", link: "/upgrading" },
         ],
       },
     ],

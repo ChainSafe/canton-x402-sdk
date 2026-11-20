@@ -25,8 +25,9 @@ const facilitator = new FacilitatorClient("https://x402.example.com", {
 const result = await facilitator.verify(paymentPayload, paymentRequirements);
 
 // What does this facilitator settle? The (scheme, network) kinds, and in
-// `kinds[].extra` the synchronizer, instruments and transfer methods a merchant
-// configures from. Cached for `supportedTtlMs` (default 5 minutes); concurrent
+// `kinds[].extra` the synchronizer, instruments and transfer methods the SDK
+// quotes from. A merchant does not copy them into config. Cached for
+// `supportedTtlMs` (default 5 minutes); concurrent
 // callers share one request, and a refresh that fails falls back to the last
 // value rather than stopping a merchant quoting.
 const kinds = await facilitator.supported();
