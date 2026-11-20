@@ -22,12 +22,11 @@ import {
   type X402PaymentRequirements,
 } from "@chainsafe/x402-core";
 
-import { TermsError } from "../options.js";
+import { sameValue, type RuleTable } from "../policy.js";
+import { TermsError } from "../quotes.js";
 import {
   resolve,
-  sameValue,
   type BaseRequirementsSpec,
-  type RuleTable,
   type Resolvable,
   type SchemeAdapter,
   type SchemeContext,

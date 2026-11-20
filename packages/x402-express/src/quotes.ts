@@ -17,11 +17,22 @@ import {
 import { FacilitatorError } from "@chainsafe/x402-client";
 
 import { resolve, type BaseRequirementsSpec, type SchemeAdapter } from "./scheme.js";
-import {
-  DEFAULT_MAX_TIMEOUT_SECONDS,
-  TermsError,
-  type PaymentRequiredOptions,
-} from "./options.js";
+import type { PaymentRequiredOptions } from "./options.js";
+
+/**
+ * The merchant's configuration is wrong.
+ *
+ * Separated from a failure to quote against the facilitator, which is the
+ * environment changing and leaves the other ways to pay standing. A merchant
+ * error is never skipped: it would drop a way to pay silently and the fix is
+ * in the merchant's own hands.
+ */
+export class TermsError extends Error {
+  override readonly name = "TermsError";
+}
+
+/** Seconds a client is given to pay, when the merchant names none. */
+export const DEFAULT_MAX_TIMEOUT_SECONDS = 60;
 
 /**
  * One way to pay this request would be offered, before any per-challenge
@@ -96,15 +107,14 @@ export async function buildQuotes<
   // the sale itself. Merged before the scheme sees it, so an adapter is handed
   // one complete spec and never has to know the difference.
   const { accepts, ...shared } = source;
-  // The resource is the sale's, named once — it is no longer a field of any
-  // `accepts[]` entry, so there is nothing per-entry to disagree with.
+  // The resource is the sale's, named once (x402 v2 §5.1.2).
   const resource = {
     url: shared.resource ? await resolve(shared.resource, req) : absoluteUrl(req),
     description: shared.description
       ? await resolve(shared.description, req)
       : `Access to ${req.path}`,
   };
-  const settled = await Promise.all(
+  const settled = await Promise.allSettled(
     accepts.map(async (entry) => {
       const spec = mergeTerms<TSpec>(shared, entry);
       const part = await scheme.quote(req, spec, { facilitator: options.facilitator });
@@ -124,41 +134,32 @@ export async function buildQuotes<
       if (part.mintReference) quote.mintReference = part.mintReference;
       if (part.referenceKey !== undefined) quote.referenceKey = part.referenceKey;
       return quote;
-    }).map((quote) => quote.then(
-      (value) => ({ value }),
-      (error: unknown) => {
-        if (error instanceof TermsError) throw error;
-        return { error };
-      },
-    )),
+    }),
   );
 
-  // One way to pay that cannot be quoted does not take the others with it — a
-  // TermsError already threw above, so what is left here is the facilitator's
-  // answer, not the merchant's config. The
-  // facilitator's answer changes under a running merchant — an instrument is
-  // withdrawn, a deployment moves — and refusing every request then, paid ones
-  // included, loses sales that another entry would have taken.
-  const quotes = settled.flatMap((r) => ("value" in r ? [r.value] : []));
-  const failed = settled.flatMap((r, i) => ("error" in r ? [{ at: i, error: r.error }] : []));
+  // The merchant's config is wrong: never skipped, since the fix is theirs.
+  const termsError = settled.find(
+    (r): r is PromiseRejectedResult => r.status === "rejected" && r.reason instanceof TermsError,
+  );
+  if (termsError) throw termsError.reason;
+
+  // One way to pay that cannot be quoted does not take the others with it.
+  // What is left here is the facilitator's answer, which changes under a
+  // running merchant — an instrument is withdrawn, a deployment moves — and
+  // refusing every request then loses sales another entry would have taken.
+  const quotes = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+  const failed = settled.flatMap((r, i) =>
+    r.status === "rejected" ? [{ at: i, error: r.reason as unknown }] : [],
+  );
 
   if (quotes.length === 0) {
     // Nothing left to advertise, so the request cannot be answered. One cause
     // is reported as it came: an ambiguity the merchant must resolve reads
     // better unwrapped than wrapped in a count.
     if (failed.length === 1) throw failed[0].error;
-    // The facilitator being down is ONE cause with several witnesses, not
-    // several causes. Wrapping it loses what it is, and the middleware answers
-    // `500 x402_middleware_error` — our fault, nothing to retry — for an
-    // outage that a route offering one way to pay answers `502` for. The
-    // number of ways a merchant takes money must not decide what a client is
-    // told about someone else's downtime.
-    //
-    // `every`, not `some`: today the entries share one `/v2/supported` call,
-    // so either all of them failed on it or none did and a mixed set cannot
-    // arise. If a per-entry call to the facilitator ever appears, `some` would
-    // answer 502 for a set that also holds a merchant's own broken entry and
-    // bury it.
+    // The facilitator being down is one cause with several witnesses: answer
+    // it as the 502 it is, not wrapped into a 500. `every`, not `some`, so a
+    // merchant's own broken entry among them is never buried under a 502.
     if (failed.every((f) => f.error instanceof FacilitatorError)) throw failed[0].error;
     throw new Error(
       `paymentRequired: no way to pay could be quoted — ${failed
@@ -269,4 +270,49 @@ function assertAtomicAmount<TRequirements extends X402PaymentRequirements<unknow
  */
 function absoluteUrl(req: Request): string {
   return `${req.protocol}://${req.get("host") ?? ""}${req.originalUrl}`;
+}
+
+/**
+ * Throws when the terms cannot produce a 402.
+ *
+ * Both checks are on what the merchant wrote, so both run once, when the route
+ * is mounted — a request cannot change either answer, and answering 500 to
+ * every request for a config mistake hides it.
+ *
+ * - `accepts` must offer something: a 402 with no way to pay cannot be paid.
+ * - No two entries may be the same way to pay. A payer chooses by what an
+ *   entry says, and the asset is what says it, so two in one asset leave only
+ *   price to choose on and the dearer can never be paid. The scheme reads each
+ *   entry's key ({@link SchemeAdapter.distinctKey}); an entry whose asset is a
+ *   resolver has none and is not checked.
+ *
+ * A builder is skipped entirely: it answers per request.
+ */
+export function assertUsableTerms<
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  source: PaymentRequiredOptions<TSpec, TRequirements, TPayload>["requirements"],
+  scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
+): void {
+  if (typeof source === "function") return;
+  const { accepts, ...shared } = source;
+  if (accepts.length === 0) {
+    throw new TermsError("paymentRequired: `accepts` is empty — a 402 must advertise a way to pay");
+  }
+  const seen = new Map<string, number>();
+  accepts.forEach((entry, i) => {
+    const key = scheme.distinctKey?.({ ...shared, ...entry } as unknown as TSpec);
+    if (key === undefined) return;
+    const first = seen.get(key);
+    if (first !== undefined) {
+      throw new TermsError(
+        `paymentRequired: ways to pay ${first + 1} and ${i + 1} are both in ${key}. ` +
+          `A payer cannot tell them apart, so only the cheaper would ever be paid — ` +
+          `give them different assets, or quote one.`,
+      );
+    }
+    seen.set(key, i);
+  });
 }

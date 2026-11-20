@@ -14,7 +14,7 @@ import {
 } from "@chainsafe/x402-core";
 import { FacilitatorClient } from "@chainsafe/x402-client";
 import { paymentRequired } from "./middleware";
-import { TermsError } from "./options";
+import { TermsError } from "./quotes";
 import type {
   PaymentRejectionInfo,
   PaymentRequiredOptions,
