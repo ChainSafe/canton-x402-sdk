@@ -88,11 +88,9 @@ that reduces the rule to equality fails the test that covers it.
 
 ### Where the value comes from
 
-`GET /v2/supported` already advertises it, as `extra.synchronizerId` of the
-kind being quoted, so a merchant that discovers its deployment gets it for
-free. Only a merchant that pins **both** `network` and a whole `asset`
-discovers nothing, and that one must name `synchronizerId` on the way to pay —
-it fails loudly rather than quoting a domain nobody chose.
+`GET /v2/supported` advertises it, as `extra.synchronizerId` of the kind being
+quoted, and the middleware always reads it from there: where a deployment
+submits is its own fact, so a merchant cannot configure it.
 
 The middleware compares the echoed value against its own, as `policy_synchronizer`:
 a payer that echoed another would otherwise have the verifier pin the transfer

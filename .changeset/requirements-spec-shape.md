@@ -25,9 +25,9 @@ case where the two differ is Canton Coin, whose instrument is `Amulet`.
 No compatibility shim: the old spelling is not accepted. Clients and
 facilitators move together.
 
-**The middleware's own options are unchanged.** A merchant still declares
-`asset: { instrumentId: { id, admin } }`; the symbol is derived and the
-instrument placed in `extra` when the 402 is built.
+**The middleware's own options** name the asset by instrument id
+(`asset: "Amulet"`); the symbol and the whole instrument are read from the
+facilitator and placed in `extra` when the 402 is built.
 
 **`requirementsHash` changes for every payment**, because the canonical form
 did. Any golden vector pinned against it must be regenerated on both sides of

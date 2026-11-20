@@ -17,7 +17,11 @@ import {
 import { FacilitatorError } from "@chainsafe/x402-client";
 
 import { resolve, type BaseRequirementsSpec, type SchemeAdapter } from "./scheme.js";
-import type { PaymentRequiredOptions } from "./options.js";
+import type {
+  PaymentRequiredOptions,
+  RequirementsBuilder,
+  RequirementsSpec,
+} from "./options.js";
 
 /**
  * The merchant's configuration is wrong.
@@ -74,38 +78,65 @@ export async function buildQuotes<
   scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
 ): Promise<Offer<TRequirements>> {
   const source = options.requirements;
+  return typeof source === "function"
+    ? offerFromBuilder(req, source, options, scheme)
+    : offerFromSpec(req, source, options, scheme);
+}
 
-  // A builder is opaque: it returns finished requirements, so the middleware
-  // cannot hold back a reference it may have minted inside. Documented on
-  // RequirementsBuilder as the reason it must stay side-effect-free.
-  if (typeof source === "function") {
-    const built = await source(req);
-    // A bare array leaves the resource implicit; the object form names it.
-    const named = Array.isArray(built) ? { accepts: built } : built;
-    if (named.accepts.length === 0) {
-      throw new TermsError("paymentRequired: the requirements builder returned no ways to pay");
-    }
-    if (scheme.checkBuilt) {
-      const ctx = { facilitator: options.facilitator };
-      for (const r of named.accepts) {
-        // Only a requirement the scheme reads as its own; anything else is the
-        // builder's business and is refused, as before, when a payer echoes it.
-        if (scheme.acceptsRequirements(r)) await scheme.checkBuilt(r, ctx);
-      }
-    }
-    return {
-      resource: {
-        url: named.resource ?? absoluteUrl(req),
-        ...(named.description ? { description: named.description } : {}),
-      },
-      quotes: named.accepts.map((r) => ({ requirements: assertAtomicAmount(r) })),
-    };
+/**
+ * A builder's offer. A builder is opaque: it returns finished requirements, so
+ * the middleware cannot hold back a reference it may have minted inside —
+ * documented on RequirementsBuilder as the reason it must stay
+ * side-effect-free.
+ */
+async function offerFromBuilder<
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  req: Request,
+  builder: RequirementsBuilder<TRequirements>,
+  options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>,
+  scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
+): Promise<Offer<TRequirements>> {
+  const built = await builder(req);
+  // A bare array leaves the resource implicit; the object form names it.
+  const named = Array.isArray(built) ? { accepts: built } : built;
+  if (named.accepts.length === 0) {
+    throw new TermsError("paymentRequired: the requirements builder returned no ways to pay");
   }
+  const ctx = { facilitator: options.facilitator };
+  const quotes = await quoteEach(named.accepts, options, req, async (r) => {
+    const requirements = assertAtomicAmount(r);
+    // Only a requirement the scheme reads as its own; anything else is the
+    // builder's business and is refused, as before, when a payer echoes it.
+    if (scheme.checkBuilt && scheme.acceptsRequirements(r)) await scheme.checkBuilt(r, ctx);
+    return { requirements };
+  });
+  return {
+    resource: {
+      url: named.resource ?? absoluteUrl(req),
+      ...(named.description ? { description: named.description } : {}),
+    },
+    quotes,
+  };
+}
 
-  // The shared terms describe the sale; each entry describes one way to pay for
-  // it and may override any of them but `resource` and `description`, which name
-  // the sale itself. Merged before the scheme sees it, so an adapter is handed
-  // one complete spec and never has to know the difference.
+/**
+ * A declarative spec's offer. The shared terms describe the sale; each entry
+ * describes one way to pay for it and may override any of them but `resource`
+ * and `description`, which name the sale itself and so are resolved once.
+ */
+async function offerFromSpec<
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  req: Request,
+  source: RequirementsSpec<TSpec>,
+  options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>,
+  scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
+): Promise<Offer<TRequirements>> {
   const { accepts, ...shared } = source;
   // The resource is the sale's, named once (x402 v2 §5.1.2).
   const resource = {
@@ -114,43 +145,100 @@ export async function buildQuotes<
       ? await resolve(shared.description, req)
       : `Access to ${req.path}`,
   };
-  const settled = await Promise.allSettled(
-    accepts.map(async (entry) => {
-      const spec = mergeTerms<TSpec>(shared, entry);
-      const part = await scheme.quote(req, spec, { facilitator: options.facilitator });
-      const quote: Quote<TRequirements> = {
-        requirements: assertAtomicAmount({
-          scheme: part.scheme,
-          network: part.network,
-          amount: await resolve(spec.amount, req),
-          asset: part.asset,
-          extra: part.extra,
-          payTo: await resolve(spec.payTo, req),
-          maxTimeoutSeconds: spec.maxTimeoutSeconds
-            ? await resolve(spec.maxTimeoutSeconds, req)
-            : DEFAULT_MAX_TIMEOUT_SECONDS,
-        } as unknown as TRequirements),
-      };
-      if (part.mintReference) quote.mintReference = part.mintReference;
-      if (part.referenceKey !== undefined) quote.referenceKey = part.referenceKey;
-      return quote;
-    }),
+  // Merged before the scheme sees it, so an adapter is handed one complete
+  // spec and never has to know the difference.
+  const quotes = await quoteEach(accepts, options, req, (entry) =>
+    quoteSpec(req, mergeTerms<TSpec>(shared, entry), options, scheme),
   );
+  return { resource, quotes };
+}
 
-  // The merchant's config is wrong: never skipped, since the fix is theirs.
-  const termsError = settled.find(
-    (r): r is PromiseRejectedResult => r.status === "rejected" && r.reason instanceof TermsError,
-  );
-  if (termsError) throw termsError.reason;
+/** One way to pay from a merged spec: the scheme's part, and the protocol's fields around it. */
+async function quoteSpec<
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  req: Request,
+  spec: TSpec,
+  options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>,
+  scheme: SchemeAdapter<TSpec, TRequirements, TPayload>,
+): Promise<Quote<TRequirements>> {
+  const part = await scheme.quote(req, spec, { facilitator: options.facilitator });
+  const quote: Quote<TRequirements> = {
+    requirements: assertAtomicAmount({
+      scheme: part.scheme,
+      network: part.network,
+      amount: await resolve(spec.amount, req),
+      asset: part.asset,
+      extra: part.extra,
+      payTo: await resolve(spec.payTo, req),
+      maxTimeoutSeconds: spec.maxTimeoutSeconds
+        ? await resolve(spec.maxTimeoutSeconds, req)
+        : DEFAULT_MAX_TIMEOUT_SECONDS,
+    } as unknown as TRequirements),
+  };
+  if (part.mintReference) quote.mintReference = part.mintReference;
+  if (part.referenceKey !== undefined) quote.referenceKey = part.referenceKey;
+  return quote;
+}
 
-  // One way to pay that cannot be quoted does not take the others with it.
-  // What is left here is the facilitator's answer, which changes under a
-  // running merchant — an instrument is withdrawn, a deployment moves — and
-  // refusing every request then loses sales another entry would have taken.
-  const quotes = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
-  const failed = settled.flatMap((r, i) =>
-    r.status === "rejected" ? [{ at: i, error: r.reason as unknown }] : [],
+/**
+ * Quote every way to pay, the same rule on both paths: one the facilitator no
+ * longer takes is dropped and reported, not allowed to fail the route.
+ */
+async function quoteEach<
+  TItem,
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  items: readonly TItem[],
+  options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>,
+  req: Request,
+  quote: (item: TItem) => Promise<Quote<TRequirements>>,
+): Promise<Array<Quote<TRequirements>>> {
+  const settled = await Promise.all(items.map((item) => settle(quote(item))));
+  return keepQuoted(settled, options, req);
+}
+
+/** One way to pay's outcome: its quote, or the error that kept it out. */
+type Settled<TRequirements> = { value: Quote<TRequirements> } | { error: unknown };
+
+/**
+ * Settle one way to pay without failing the others. A TermsError is the
+ * merchant's own config and still throws: dropping the entry would hide the
+ * mistake instead of reporting it. Anything else is recorded.
+ */
+function settle<TRequirements>(quote: Promise<Quote<TRequirements>>): Promise<Settled<TRequirements>> {
+  return quote.then(
+    (value) => ({ value }),
+    (error: unknown) => {
+      if (error instanceof TermsError) throw error;
+      return { error };
+    },
   );
+}
+
+/**
+ * The ways to pay that quoted, the rest reported through onQuoteError. Throws
+ * only when none is left, since then there is nothing to answer with.
+ */
+function keepQuoted<
+  TSpec extends BaseRequirementsSpec,
+  TRequirements extends X402PaymentRequirements<unknown>,
+  TPayload extends X402PaymentPayload<unknown>,
+>(
+  settled: Array<Settled<TRequirements>>,
+  options: PaymentRequiredOptions<TSpec, TRequirements, TPayload>,
+  req: Request,
+): Array<Quote<TRequirements>> {
+  // A TermsError already threw in settle(), so what failed here is the
+  // facilitator's answer, which changes under a running merchant — an
+  // instrument is withdrawn, a deployment moves. Refusing every request then,
+  // paid ones included, would lose sales another entry would have taken.
+  const quotes = settled.flatMap((r) => ("value" in r ? [r.value] : []));
+  const failed = settled.flatMap((r, i) => ("error" in r ? [{ at: i, error: r.error }] : []));
 
   if (quotes.length === 0) {
     // Nothing left to advertise, so the request cannot be answered. One cause
@@ -168,7 +256,7 @@ export async function buildQuotes<
     );
   }
   for (const { at, error } of failed) report(options, req, at, error);
-  return { resource, quotes };
+  return quotes;
 }
 
 /** Tell the merchant a way to pay was dropped, without letting that throw. */
