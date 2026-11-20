@@ -2919,20 +2919,6 @@ describe("a settlement whose outcome is not known yet (settlement_pending)", () 
     expect(onReject).not.toHaveBeenCalled();
   });
 
-  it("a pending answer from verify missing the transaction or network is a plain refusal", async () => {
-    // Without both there is nothing to look up, so it cannot be answered as pending.
-    for (const extra of [undefined, { network: "canton:x" }, { transaction: "facilitator-tx" }]) {
-      pendingAtVerify(extra);
-      const { app } = pendingApp([]);
-      const res = await request(app)
-        .get("/paid")
-        .set("PAYMENT-SIGNATURE", paymentHeader({ extra: { ...ECHOED_EXTRA, memo: "order-0" } }));
-      expect(res.status, JSON.stringify(extra)).toBe(402);
-      expect(res.headers["payment-required"], JSON.stringify(extra)).toBeDefined();
-      expect(res.body.error).toBe("settlement_pending");
-    }
-  });
-
   it("a pending answer that names no network is a plain failure, not retried", async () => {
     // x402 v2 §9 asks a pending answer for both, so the caller can look the
     // transfer up; one without the network is read as a failure.

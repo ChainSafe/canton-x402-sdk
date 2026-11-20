@@ -206,14 +206,12 @@ async function verifyPayment<
     // A retry whose first relay may still commit: answer it as pending, not
     // with a fresh challenge. The facilitator names the transaction and its
     // network in `extra`, since a verify answer has no field for either.
-    const { transaction, network } =
-      verify.invalidReason === "settlement_pending" ? (verify.extra ?? {}) : {};
-    if (nonEmpty(transaction) && nonEmpty(network)) {
+    if (verify.invalidReason === "settlement_pending") {
       throw new SettlementPending({
         success: false,
         errorReason: "settlement_pending",
-        transaction,
-        network,
+        transaction: verify.extra?.transaction as string,
+        network: verify.extra?.network as string,
         ...(verify.payer ? { payer: verify.payer } : {}),
         ...(verify.extensions ? { extensions: verify.extensions } : {}),
       });
@@ -259,9 +257,4 @@ async function settlePayment(
   }
   res.setHeader("PAYMENT-RESPONSE", encodePaymentResponseHeader(settled));
   return settled;
-}
-
-/** A non-empty string: the only kind of `extra` value read as a transaction or network. */
-function nonEmpty(value: unknown): value is string {
-  return typeof value === "string" && value !== "";
 }

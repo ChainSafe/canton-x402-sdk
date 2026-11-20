@@ -9,7 +9,7 @@ would have the payer sign a second transfer while the first may commit.
   the signed transaction before, on a retry) is answered as pending, as one
   from settle is: a 402 with only `PAYMENT-RESPONSE`. A verify answer has no
   field for the transaction or its network, so the facilitator names them in
-  `extra.transaction` and `extra.network`; one missing either is a plain
-  refusal, since there is nothing to look up.
+  `extra.transaction` and `extra.network`, and the middleware passes them on
+  as given.
 - `onReject` receives a failed settle's `extensions`, as it does a verify
   refusal's.
