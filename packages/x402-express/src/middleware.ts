@@ -203,6 +203,19 @@ async function verifyPayment<
 ): Promise<{ verify: VerifyResponse; payer: string }> {
   const verify = await facilitator.verify(payload, accepted);
   if (!verify.isValid) {
+    // A retry whose first relay may still commit: answer it as pending, not
+    // with a fresh challenge. The facilitator names the transaction and its
+    // network in `extra`, since a verify answer has no field for either.
+    if (verify.invalidReason === "settlement_pending") {
+      throw new SettlementPending({
+        success: false,
+        errorReason: "settlement_pending",
+        transaction: verify.extra?.transaction as string,
+        network: verify.extra?.network as string,
+        ...(verify.payer ? { payer: verify.payer } : {}),
+        ...(verify.extensions ? { extensions: verify.extensions } : {}),
+      });
+    }
     throw new PaymentRejection(verify.invalidReason ?? "verify_failed", {
       details: causeOf(verify.extensions),
       extensions: verify.extensions,
@@ -238,6 +251,7 @@ async function settlePayment(
     // Showing `errorMessage` is fine; matching on it is what x402 v2 §9 rules out.
     throw new PaymentRejection(settled.errorReason ?? "settle_failed", {
       details: causeOf(settled.extensions, settled.errorMessage),
+      extensions: settled.extensions,
       settleResponse: settled,
     });
   }
