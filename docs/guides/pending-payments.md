@@ -25,8 +25,15 @@ what the facilitator knows:
 A retry can tell you a payment **failed**, so the payer can sign a new one. It
 cannot tell you it succeeded: the spec forbids a facilitator from answering a
 settle from a remembered commit, so a committed payment keeps answering
-`settlement_pending`. Once the transfer's deadline has passed, a retry is
-refused as `invalid_exact_canton_expired` before any of this.
+`settlement_pending`.
+
+Once the transfer's deadline has passed, a retry is refused as
+`invalid_exact_canton_expired` before any of this, and that answer says nothing
+about the first payment: it may have committed. Through the Express middleware
+the refusal comes with a fresh, payable challenge, like any other refusal. With
+the default `executeBeforeSeconds` of 120, that is about two minutes after
+signing. **Don't pay that challenge** until you know what became of the first
+payment.
 
 The answer names the transaction, in `transaction` on settle and in
 `extra.transaction` on verify. It is the payment's `preparedTxHash`, since there
@@ -53,13 +60,43 @@ out of band, matching it by the transaction hash or your `memo`.
   settle answer decoded from `PAYMENT-RESPONSE`
   (`decodePaymentResponseHeader`).
 - Re-sending the **same** `PAYMENT-SIGNATURE` header is safe, and tells you if
-  the payment failed. If it keeps answering `settlement_pending`, take it up
-  with the merchant, naming the transaction.
+  the payment failed. Through the Express middleware a failed relay comes back
+  as a `402` with a fresh challenge and
+  `error: "invalid_exact_canton_execute_failed"` in the body, not in
+  `PAYMENT-RESPONSE`; only then sign a new payment. If it keeps answering
+  `settlement_pending`, take it up with the merchant, naming the transaction.
+  After the deadline, see [above](#what-a-retry-tells-you).
+
+### Keeping the header
+
+`createX402Fetch` doesn't hand back the header it sent. To keep it, either build
+the payment yourself, with `payer.authorize(requirements, { resource })` and
+`encodePaymentHeader` from `@chainsafe/x402-core`, or give the wrapper a `fetch`
+that records it. The paid request goes through the same `fetch`, carrying the
+header:
+
+```ts
+let sent: string | undefined;
+
+const pay = createX402Fetch(payer, {
+  fetch: (input, init) => {
+    sent = new Headers(init?.headers).get("PAYMENT-SIGNATURE") ?? sent;
+    return fetch(input, init);
+  },
+});
+```
 
 ## Calling the facilitator directly
 
 `FacilitatorClient.settle` returns a pending answer as a value, not an error,
 since the facilitator sends it with HTTP `200`. Settling the same payload again
-is safe: it never submits twice, and it answers `invalid_exact_canton_execute_failed`
-if the first relay was rejected. A payment that keeps answering
-`settlement_pending` has to be confirmed on the ledger, by its transaction.
+is safe: it never submits twice, and it answers
+`invalid_exact_canton_execute_failed` if the first relay was rejected. A payment
+that keeps answering `settlement_pending` has to be confirmed on the ledger, by
+its transaction.
+
+`verify` answers a payment that was already relayed with `isValid: false` and
+`invalidReason: "settlement_pending"`, naming the transaction and its network in
+`extra.transaction` and `extra.network`. That is the same pending state, not a
+refusal, and the Express middleware answers it as pending. `isSettlementPending`
+reads only a settle answer, so check `invalidReason` on a verify answer.

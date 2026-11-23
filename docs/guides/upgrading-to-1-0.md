@@ -23,7 +23,8 @@ payer.
 ## Merchants: `@chainsafe/x402-express`
 
 Configure ways to pay, not Canton details. Each entry in `accepts` names an
-instrument by id and an amount in **atomic units** (10 decimals, so 0.05 CC is
+instrument by id and an amount in **atomic units** (10 decimals for every
+instrument, so 0.05 CC is
 `"500000000"`). The registry admin, the synchronizer and the fee payer come from
 the facilitator's `/v2/supported`, and can no longer be set.
 

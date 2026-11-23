@@ -126,15 +126,16 @@ requirements: {
   // the ways to pay, each advertised as one accepts[] entry
   accepts: [
     { amount: "500000000", asset: "Amulet" }, // 0.05 CC
-    { amount: "250000", asset: "USDCx" }, // priced separately
+    { amount: "2500000000", asset: "USDCx" }, // 0.25 USDCx, priced separately
   ],
 }
 ```
 
 - **`payTo`, and each entry's `amount` and `asset`, are required.** `amount` is
-  atomic units of the instrument (10 decimals for Canton Coin, so 0.05 CC is
-  `"500000000"`). Each entry carries its own price: nothing here checks that two
-  entries are worth the same.
+  in atomic units, and every instrument uses 10 decimals on the wire
+  (`WIRE_DECIMALS` in `@chainsafe/x402-core`), so 0.05 CC is `"500000000"` and
+  0.25 USDCx is `"2500000000"`. Each entry carries its own price: nothing here
+  checks that two entries are worth the same.
 - **`asset` is an instrument id**: `"Amulet"` for Canton Coin (the one id that
   differs from its symbol, `"CC"`), or `"USDCx"`.
 - **Any shared field can be overridden per entry**, except `resource` and
@@ -186,7 +187,7 @@ requirements: {
   memo: (req) => orders.open(req), // once, for the sale
   accepts: [
     { amount: "500000000", asset: "Amulet" },
-    { amount: "250000", asset: "USDCx" },
+    { amount: "2500000000", asset: "USDCx" },
   ],
 }
 ```
