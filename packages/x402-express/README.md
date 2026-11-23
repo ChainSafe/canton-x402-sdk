@@ -50,7 +50,7 @@ app.get("/paid", (req, res) => {
 
 - [Accept payments](https://chainsafe.github.io/canton-x402-sdk/get-started/accept-payments.html): from a fresh account to a paid route
 - [Express middleware](https://chainsafe.github.io/canton-x402-sdk/guides/express-middleware.html): every option, several ways to pay, memos and `preSettle`, `req.x402`, and gating on another scheme
-- [Pending settlements](https://chainsafe.github.io/canton-x402-sdk/guides/pending-settlements.html): what a `settlement_pending` answer means for your route
+- [Pending payments](https://chainsafe.github.io/canton-x402-sdk/guides/pending-payments.html): what a `settlement_pending` answer means for your route
 - [Networks](https://chainsafe.github.io/canton-x402-sdk/get-started/networks.html): the DevNet and MainNet facilitators
 
 ## License

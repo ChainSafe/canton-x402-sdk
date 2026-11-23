@@ -64,9 +64,9 @@ transaction the payer signed.
   [Pay for an API](/get-started/pay-for-an-api) ·
   [Networks](/get-started/networks)
 - **Guides** — [Express middleware](/guides/express-middleware) ·
-  [Paying from your service](/guides/paying-from-your-service) ·
-  [Calling the facilitator](/guides/calling-the-facilitator) ·
-  [Pending settlements](/guides/pending-settlements) ·
+  [Payer SDK](/guides/payer-sdk) ·
+  [Facilitator client](/guides/facilitator-client) ·
+  [Pending payments](/guides/pending-payments) ·
   [Upgrading to 1.0](/guides/upgrading-to-1-0)
 - **Concepts** — [The facilitator](/concepts/facilitator) ·
   [The payment flow](/concepts/payment-flow)

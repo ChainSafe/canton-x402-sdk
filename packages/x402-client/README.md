@@ -30,7 +30,7 @@ For gating an Express route behind a payment, use
 
 ## Documentation
 
-- [Calling the facilitator](https://chainsafe.github.io/canton-x402-sdk/guides/calling-the-facilitator.html): which requirements to send, answers and errors, the `supported()` cache
+- [Facilitator client](https://chainsafe.github.io/canton-x402-sdk/guides/facilitator-client.html): which requirements to send, answers and errors, the `supported()` cache
 - [Facilitator HTTP API](https://chainsafe.github.io/canton-x402-sdk/reference/http-api.html) and [Error codes](https://chainsafe.github.io/canton-x402-sdk/reference/error-codes.html)
 
 ## License

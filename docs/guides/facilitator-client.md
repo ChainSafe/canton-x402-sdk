@@ -2,7 +2,7 @@
 description: Call a facilitator's verify, settle and supported from code with FacilitatorClient — when you are not using the Express middleware.
 ---
 
-# Calling the facilitator
+# Facilitator client
 
 `FacilitatorClient` from `@chainsafe/x402-client` calls a facilitator's
 `/v2/verify`, `/v2/settle` and `/v2/supported`. The Express middleware uses it
@@ -46,7 +46,7 @@ does. The facilitator then holds the signed transfer to those requirements.
   The facilitator answers `settlement_pending` and its other relay outcomes with
   `200`, so they arrive as values. `settlement_pending` is not a failure: check
   it with `isSettlementPending` from `@chainsafe/x402-core`, and see
-  [Pending settlements](/guides/pending-settlements).
+  [Pending payments](/guides/pending-payments).
 - **Any other status throws** a `FacilitatorError` carrying the HTTP `status`
   (`0` for a network failure or timeout), the response body, and the
   `Retry-After` value when there is one. A refusal before anything was relayed

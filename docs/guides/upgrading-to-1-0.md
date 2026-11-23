@@ -93,7 +93,7 @@ paymentRequired({
   `@chainsafe/x402-core` 1.0.
 - **`settlement_pending` is not a failure.** Check it with
   `isSettlementPending`, and don't ask for a new payment; see
-  [Pending settlements](/guides/pending-settlements).
+  [Pending payments](/guides/pending-payments).
 - `supported()` caches its answer for `supportedTtlMs` (5 minutes by default);
   `supported({ refresh: true })` skips the cache.
 

@@ -2,7 +2,7 @@
 description: What settlement_pending means, why it is not a failure, and what the merchant, the payer and a direct facilitator caller should each do with it.
 ---
 
-# Pending settlements
+# Pending payments
 
 `settlement_pending` means the facilitator relayed the payer-signed transaction
 to Canton but does not know yet whether it committed: the participant took it,

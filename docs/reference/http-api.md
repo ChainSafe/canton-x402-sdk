@@ -237,7 +237,7 @@ submits the payer-signed transaction to Canton. Returns the on-ledger update id.
 Settling the same payload twice is safe: the second call never submits again.
 It answers `invalid_exact_canton_execute_failed` if the first relay was
 rejected, and `settlement_pending` otherwise, even once it has committed. See
-[Pending settlements](/guides/pending-settlements).
+[Pending payments](/guides/pending-payments).
 
 ### Request headers
 
@@ -301,7 +301,7 @@ units like the requirements' `amount`.
 The transaction was relayed but its outcome is not known yet. This is **not a
 failure**: do not ask the payer for a new payment. A retry with the same
 payload tells you if it failed; see
-[Pending settlements](/guides/pending-settlements). There is no update id until
+[Pending payments](/guides/pending-payments). There is no update id until
 the transaction commits, so `transaction` is its `preparedTxHash`.
 
 ```json

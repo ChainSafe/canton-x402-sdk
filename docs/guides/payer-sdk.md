@@ -2,7 +2,7 @@
 description: Pay x402 endpoints from an agent, service or backend with @chainsafe/x402-server-sdk — authenticating per network, the payer, the auto-pay fetch, and writing your own payer.
 ---
 
-# Paying from your service
+# Payer SDK
 
 `@chainsafe/x402-server-sdk` pays from anything that holds a Canton party's
 Ed25519 key and can reach a participant's Ledger API: an agent, a service, a
@@ -131,7 +131,7 @@ passes through unchanged.
   or a `Request` whose body the first call consumes.
 - **Don't retry a pending payment.** A `402` whose `PAYMENT-RESPONSE` is
   `settlement_pending` may still land, and retrying through the wrapper signs a
-  new payment. See [Pending settlements](/guides/pending-settlements).
+  new payment. See [Pending payments](/guides/pending-payments).
 
 ## Writing your own payer
 
@@ -155,4 +155,4 @@ requirements to verify from it.
 ## Settling yourself
 
 `FacilitatorClient` is re-exported for a service that drives verify and settle
-itself; see [Calling the facilitator](/guides/calling-the-facilitator).
+itself; see [Facilitator client](/guides/facilitator-client).

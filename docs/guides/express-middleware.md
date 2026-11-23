@@ -73,7 +73,7 @@ A refused payment gets a `402` with a **fresh** challenge, never the terms the
 payer just failed on, so a retrying client is handed terms it can pay. A failed
 settle sends its answer in `PAYMENT-RESPONSE` beside that challenge. A
 `settlement_pending` answer is different: see
-[Pending settlements](/guides/pending-settlements).
+[Pending payments](/guides/pending-payments).
 
 ### What is checked before the facilitator
 

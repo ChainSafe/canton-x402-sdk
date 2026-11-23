@@ -45,8 +45,8 @@ const res = await paidFetch("https://api.example/paid"); // 402 → pay → retr
 ## Documentation
 
 - [Pay for an API](https://chainsafe.github.io/canton-x402-sdk/get-started/pay-for-an-api.html): the quickstart
-- [Paying from your service](https://chainsafe.github.io/canton-x402-sdk/guides/paying-from-your-service.html): auth on each network, the payer, the auto-pay fetch, and writing your own payer
-- [Pending settlements](https://chainsafe.github.io/canton-x402-sdk/guides/pending-settlements.html): why a `settlement_pending` answer must not be retried through `createX402Fetch`
+- [Payer SDK](https://chainsafe.github.io/canton-x402-sdk/guides/payer-sdk.html): auth on each network, the payer, the auto-pay fetch, and writing your own payer
+- [Pending payments](https://chainsafe.github.io/canton-x402-sdk/guides/pending-payments.html): why a `settlement_pending` answer must not be retried through `createX402Fetch`
 
 ## License
 

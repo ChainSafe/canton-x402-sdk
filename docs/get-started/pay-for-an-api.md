@@ -61,8 +61,8 @@ pair in the SDK repo is a full runnable payer + merchant, with the complete
 credential wiring in its `.env.example`.
 
 ::: tip Next
-[Paying from your service](/guides/paying-from-your-service) covers auth on each
+[Payer SDK](/guides/payer-sdk) covers auth on each
 network, several payers, and writing your own, and
-[Pending settlements](/guides/pending-settlements) what to do when a payment's
+[Pending payments](/guides/pending-payments) what to do when a payment's
 outcome is not known yet.
 :::
