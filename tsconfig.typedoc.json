@@ -1,0 +1,19 @@
+// TypeDoc only (typedoc.json). Resolves each @chainsafe/x402-* import to the
+// package's source, so the API reference builds without building the
+// packages first: the docs workflow never runs `pnpm build`, and a reference
+// generated from dist/ could describe a stale build.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@chainsafe/x402-core": ["packages/x402-core/src/index.ts"],
+      "@chainsafe/x402-client": ["packages/x402-client/src/index.ts"],
+      "@chainsafe/x402-express": ["packages/x402-express/src/index.ts"],
+      "@chainsafe/x402-server-sdk": ["packages/x402-server-sdk/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src"],
+  "exclude": ["**/*.test.ts", "**/__fixtures__/**"]
+}
