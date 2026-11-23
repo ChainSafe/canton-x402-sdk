@@ -41,7 +41,11 @@ does. The facilitator then holds the signed transfer to those requirements.
 ## Answers and errors
 
 - **`verify`** resolves with the verdict, `isValid` true or false; a refusal
-  carries `invalidReason` and `extensions.detail`.
+  carries `invalidReason` and `extensions.detail`. One `isValid: false` is not a
+  refusal: `invalidReason: "settlement_pending"` means the payment was already
+  relayed and may still commit, with the transaction in `extra.transaction`.
+  Don't ask for a new payment. `isSettlementPending` takes only a settle answer,
+  so check `invalidReason` here.
 - **`settle`** resolves with the outcome on any `2xx`, `success` true or false.
   The facilitator answers `settlement_pending` and its other relay outcomes with
   `200`, so they arrive as values. `settlement_pending` is not a failure: check
