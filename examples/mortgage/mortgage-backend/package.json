@@ -1,6 +1,6 @@
 {
   "name": "@chainsafe/x402-example-mortgage-backend",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "description": "Demo mortgage-application backend — the x402 payer. Auto-pays the credit bureau per credit-score pull via @chainsafe/x402-server-sdk, then makes a lending decision.",
