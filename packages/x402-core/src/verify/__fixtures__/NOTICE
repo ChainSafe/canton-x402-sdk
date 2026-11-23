@@ -1,0 +1,30 @@
+mainnet-usdcx-transfer-preapproval.b64
+
+A prepared transaction for a USDCx transfer on Canton MainNet, copied unchanged
+from the x402 project:
+
+  https://github.com/x402-foundation/x402
+  typescript/packages/mechanisms/canton/src/__fixtures__/mainnet-usdcx-transfer-preapproval.b64
+  commit c5bed45f7e461677642ed862108a4a078b8ad2c9
+
+It was never signed and its deadline has passed. The tests that verify it sign
+its hash with a throwaway key, which verify accepts because the caller supplies
+the payer's keys, and pin the clock inside its deadline.
+
+The x402 project's NOTICE reads:
+
+  Apache-2.0 License
+
+  Copyright 2026 x402 Foundation
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.

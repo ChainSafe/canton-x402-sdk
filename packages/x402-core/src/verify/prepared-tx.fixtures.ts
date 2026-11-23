@@ -175,13 +175,34 @@ export interface EncodeOptions {
     moduleName?: string;
     entityName?: string;
     nodeId?: string;
-    /** The preapproval's `receiver`. Defaults to the transfer's receiver. */
+    /**
+     * The preapproval's `receiver`. Defaults to the transfer's receiver.
+     * Ignored for a registry `TransferRule`, which has none.
+     */
     receiver?: string;
-    /** The preapproval's `dso`. Defaults to the instrument's admin. */
+    /**
+     * The preapproval's `dso`. Defaults to the instrument's admin. Ignored for
+     * a registry `TransferRule`, whose `registrar` is always the instrument's
+     * admin.
+     */
     dso?: string;
-    /** The preapproval's `provider`. Defaults to a third party. */
+    /**
+     * The preapproval's `provider`. Defaults to a third party.
+     *
+     * For a registry `TransferRule` it is the rule's `provider` instead, and
+     * defaults to {@link REGISTRY_PROVIDER}.
+     */
     provider?: string;
-    /** Signatories of the disclosure. Defaults to the {dso, receiver, provider} trio. */
+    /**
+     * A registry `TransferRule`'s `operator`. Defaults to
+     * {@link REGISTRY_OPERATOR}. Ignored for a preapproval, which has none.
+     */
+    operator?: string;
+    /**
+     * Signatories of the disclosure. Defaults to the {dso, receiver, provider}
+     * trio — or, for a registry `TransferRule`, to its provider and the
+     * registrar, which is who signs the captured MainNet one.
+     */
     signatories?: readonly string[];
     /** Disclose no input contract for the delivery, so it resolves to nothing. */
     omitDisclosure?: boolean;
@@ -191,7 +212,10 @@ export interface EncodeOptions {
      * which is how a label-keyed reader and the engine come apart.
      */
     blankDisclosureLabels?: readonly string[];
-    /** Rewrite a label on the disclosure's record, e.g. `{ receiver: "dso" }`. */
+    /**
+     * Rewrite a label on the disclosure's record, e.g. `{ receiver: "dso" }`,
+     * or `{ operator: "custodian" }` on a registry `TransferRule`.
+     */
     relabelDisclosure?: Readonly<Record<string, string>>;
     /**
      * What a preapproval send's OWN `amount` says it moves. Defaults to the
@@ -283,6 +307,10 @@ export interface EncodeOptions {
     owner?: string;
     /** The record's `dso` (Canton Coin) or `registrar` (registry). */
     admin?: string;
+    /** A registry holding's `operator`. Defaults to {@link REGISTRY_OPERATOR}. */
+    operator?: string;
+    /** A registry holding's `provider`. Defaults to {@link REGISTRY_PROVIDER}. */
+    provider?: string;
     /** `amount.initialAmount` (Canton Coin) or `amount` (registry). */
     amount?: string;
     /** The registry record's `instrument.id`. */
@@ -529,6 +557,22 @@ export const holdingCid = (i: number): string =>
   `00a1${i.toString(16).padStart(2, "0")}${"ee".repeat(30)}`;
 
 /**
+ * The registry infrastructure parties a fixture's Utility Registry contracts
+ * name by default: the `TransferRule`'s and every holding's `operator` and
+ * `provider`. Shared, as they are on MainNet, so one `registryParties` entry
+ * trusts a whole fixture.
+ */
+export const REGISTRY_OPERATOR = "operator::1220op";
+export const REGISTRY_PROVIDER = "provider::1220pv";
+
+/** The Utility Registry's transfer rule, which a registry token delivers through. */
+export const REGISTRY_RULE_TEMPLATE = {
+  choiceId: "TransferRule_DirectTransfer",
+  moduleName: "Utility.Registry.V0.Rule.Transfer",
+  entityName: "TransferRule",
+} as const;
+
+/**
  * The template a fixture's exercise carries by default. Canton Coin's, because
  * a realistic fixture should look like the common case — but nothing compares
  * it against this: the verifier matches the INTERFACE, and the package id is
@@ -654,8 +698,17 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
   const PREAPPROVAL_CID = "00aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899";
   const preReceiver = delivery?.receiver ?? transfer.receiver;
   const preDso = delivery?.dso ?? transfer.instrumentId.admin;
-  const preProvider = delivery?.provider ?? "app-provider::1220prov";
-  const preSignatories = delivery?.signatories ?? [preDso, preReceiver, preProvider];
+  // A registry delivery exercises the Utility's TransferRule, whose record is
+  // `{operator, provider, registrar}` and not a preapproval's trio.
+  const registryRule = delivery?.moduleName === REGISTRY_RULE_TEMPLATE.moduleName;
+  const preProvider =
+    delivery?.provider ?? (registryRule ? REGISTRY_PROVIDER : "app-provider::1220prov");
+  const ruleOperator = delivery?.operator ?? REGISTRY_OPERATOR;
+  const preSignatories =
+    delivery?.signatories ??
+    (registryRule
+      ? [preProvider, transfer.instrumentId.admin]
+      : [preDso, preReceiver, preProvider]);
   const deliveryTemplate = encodeIdentifier({
     moduleName: delivery?.moduleName ?? "Splice.AmuletRules",
     entityName: delivery?.entityName ?? "TransferPreapproval",
@@ -924,8 +977,8 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
             },
           ]
         : [
-            { label: "operator", value: party("operator::1220op") },
-            { label: "provider", value: party("provider::1220pv") },
+            { label: "operator", value: party(h.operator ?? REGISTRY_OPERATOR) },
+            { label: "provider", value: party(h.provider ?? REGISTRY_PROVIDER) },
             { label: "registrar", value: admin },
             { label: "owner", value: owner },
             {
@@ -966,11 +1019,32 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
         deliveryTemplate,
         preSignatories,
         FACTORY_PACKAGE_NAME,
-        [
-          { label: delivery.relabelDisclosure?.dso ?? "dso", value: party(preDso) },
-          { label: delivery.relabelDisclosure?.receiver ?? "receiver", value: party(preReceiver) },
-          { label: delivery.relabelDisclosure?.provider ?? "provider", value: party(preProvider) },
-        ],
+        registryRule
+          ? [
+              {
+                label: delivery.relabelDisclosure?.operator ?? "operator",
+                value: party(ruleOperator),
+              },
+              {
+                label: delivery.relabelDisclosure?.provider ?? "provider",
+                value: party(preProvider),
+              },
+              {
+                label: delivery.relabelDisclosure?.registrar ?? "registrar",
+                value: party(transfer.instrumentId.admin),
+              },
+            ]
+          : [
+              { label: delivery.relabelDisclosure?.dso ?? "dso", value: party(preDso) },
+              {
+                label: delivery.relabelDisclosure?.receiver ?? "receiver",
+                value: party(preReceiver),
+              },
+              {
+                label: delivery.relabelDisclosure?.provider ?? "provider",
+                value: party(preProvider),
+              },
+            ],
         new Set(delivery.blankDisclosureLabels ?? []),
       ),
     );
