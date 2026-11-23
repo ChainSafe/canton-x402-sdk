@@ -11,7 +11,8 @@ this page is for calling the facilitator directly, or for reading what the
 middleware sends. What each verify check means is on
 [The facilitator](/concepts/facilitator#what-verify-guarantees).
 
-`$FACILITATOR_URL` below is your facilitator's base URL. The integration panel
+`$FACILITATOR_URL` below is your facilitator's base URL — the DevNet and
+MainNet ones are on [Networks](/get-started/networks). The integration panel
 on the merchant dashboard's **API keys** page shows it, and `$FACILITATOR_API_KEY`
 is a key you create on that same page (it is shown only once). Both are the
 names the panel's `.env` uses.

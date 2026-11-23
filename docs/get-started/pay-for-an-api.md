@@ -20,6 +20,8 @@ call the URL and get the paid response back.
   client credentials (LocalNet uses a self-signed token instead).
 - The **Amulet Token Standard registry** URL — your validator's scan-proxy for
   Amulet, where the payer fetches the `TransferFactory`.
+- The **facilitator** the API you are paying uses — the DevNet and MainNet
+  facilitators are listed on [Networks](/get-started/networks).
 - The **DSO party** (the Amulet asset admin) — from
   `extra.instruments[].instrumentId.admin` in
   `GET $FACILITATOR_URL/v2/supported` on the facilitator the API you are paying
