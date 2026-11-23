@@ -63,7 +63,7 @@ transaction the payer signed.
 - **Get started** — [Accept payments](/get-started/accept-payments) ·
   [Pay for an API](/get-started/pay-for-an-api) ·
   [Networks](/get-started/networks)
-- **Concepts** — [The payment flow](/concepts/payment-flow) ·
-  [The facilitator](/concepts/facilitator)
+- **Concepts** — [The facilitator](/concepts/facilitator) ·
+  [The payment flow](/concepts/payment-flow)
 - **Reference** — [Facilitator HTTP API](/reference/http-api) ·
   [Protocol spec](/protocol/spec)
