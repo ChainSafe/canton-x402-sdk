@@ -32,8 +32,8 @@ const SECTIONS = [
   {
     text: "Concepts",
     items: [
-      { text: "The payment flow", link: "/concepts/payment-flow" },
       { text: "The facilitator", link: "/concepts/facilitator" },
+      { text: "The payment flow", link: "/concepts/payment-flow" },
     ],
   },
   {
