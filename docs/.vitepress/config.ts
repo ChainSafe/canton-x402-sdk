@@ -6,8 +6,9 @@
 //
 // WHY THE SIDEBAR IS WRITTEN OUT rather than generated from the directory:
 // each section is a reading order, not a folder. Get started is a task to do,
-// Concepts is what to understand once it works, Reference is what to look up,
-// and within each the pages go in the order a newcomer needs them.
+// Guides are tasks beyond the first one, Concepts is what to understand once it
+// works, Reference is what to look up, and within each the pages go in the
+// order a newcomer needs them.
 //
 // Pages that moved are sent on from their old URLs by theme/redirects.ts.
 import { readFileSync } from "node:fs";
@@ -25,6 +26,10 @@ const SECTIONS = [
     ],
   },
   {
+    text: "Guides",
+    items: [{ text: "Upgrading to 1.0", link: "/guides/upgrading-to-1-0" }],
+  },
+  {
     text: "Concepts",
     items: [
       { text: "The facilitator", link: "/concepts/facilitator" },
@@ -35,6 +40,7 @@ const SECTIONS = [
     text: "Reference",
     items: [
       { text: "Facilitator HTTP API", link: "/reference/http-api" },
+      { text: "Error codes", link: "/reference/error-codes" },
       { text: "Protocol spec", link: "/protocol/spec" },
     ],
   },

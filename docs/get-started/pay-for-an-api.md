@@ -25,8 +25,7 @@ call the URL and get the paid response back.
 - The **DSO party** (the Amulet asset admin) — from
   `extra.instruments[].instrumentId.admin` in
   `GET $FACILITATOR_URL/v2/supported` on the facilitator the API you are paying
-  uses. (`extra.asset.instrumentId.admin` is the older spelling of the same
-  party; prefer `instruments`.)
+  uses.
 
 ## Steps
 

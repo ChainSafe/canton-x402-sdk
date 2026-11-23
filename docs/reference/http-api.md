@@ -46,13 +46,7 @@ None required. There is no request body.
             "instrumentId": { "id": "Amulet", "admin": "DSO::1220be58c2…" },
             "symbol": "CC"
           }
-        ],
-        "asset": {
-          "instrumentId": {
-            "id": "Amulet",
-            "admin": "DSO::1220be58c2…"
-          }
-        }
+        ]
       }
     }
   ],
@@ -75,7 +69,6 @@ None required. There is no request body.
 | `extra.feePayer`           | The party that relays a payer-signed transfer and pays its traffic fee. Copy into `paymentRequirements.extra.feePayer` — a facilitator refuses a payment naming anyone but itself. Absent until a deployment has a party configured. `paymentRequired()` reads it for you, and cannot be configured with one of your own; it refuses to quote against a deployment that advertises none. |
 | `extra.transferMethods[]`  | The asset transfer methods it speaks; `transfer-factory` for canton-exact. |
 | `extra.carriages[]`        | How a prepared transaction travels. `inline` means it is carried in the `PAYMENT-SIGNATURE` header itself. |
-| `extra.asset.instrumentId` | **Superseded by `extra.instruments[]`**, which says the same thing and can say it for more than one instrument. Still sent for merchants reading it; prefer `instruments`. |
 | `extra.*`                  | `extra` is Optional and scheme-defined in x402 v2 §7.3, so a deployment may add its own keys and omit any of the above. Read what you need and ignore the rest. |
 | `extensions[]`             | The ids of the x402 extensions the facilitator implements. Always present, as x402 v2 §7.3.1 requires; empty when it implements none. |
 | `signers`                  | The parties that sign for the facilitator, keyed by network family. `canton:*` lists the `feePayer` party, and is an empty list until a deployment has one configured. Always present, as x402 v2 §7.3.1 requires. |
@@ -178,30 +171,14 @@ guarantee.
 
 ### `invalidReason` values
 
-The checks the facilitator shares with the SDK answer with the codes the Canton
-`exact` scheme spec defines, so a client written against the spec recognises
-them:
+The codes the Canton `exact` scheme spec defines, with the cause in
+`extensions.detail`: [Error codes](/reference/error-codes) lists every one and
+what to do about it. A refusal is still a `200`; only the HTTP status below
+says the request itself failed.
 
-`invalid_x402_version`, `unsupported_scheme`, `invalid_network`,
-`invalid_payment_requirements`, `invalid_exact_canton_missing_proof`,
-`invalid_exact_canton_malformed_payload`,
-`invalid_exact_canton_signature_invalid`,
-`invalid_exact_canton_amount_mismatch`,
-`invalid_exact_canton_merchant_mismatch`,
-`invalid_exact_canton_instrument_id_mismatch`,
-`invalid_exact_canton_memo_mismatch`, `invalid_exact_canton_expired`
-
-`extensions.detail` says WHICH of a code's causes it was, where the code alone
-leaves two apart. `invalid_exact_canton_signature_invalid` is the one that most
-needs it: `no_payer_key` (the party publishes none this facilitator can use),
-`malformed_encoding` (the hash or signature is not in the encoding the spec
-asks for), `hash_mismatch` (the hash describes a different transaction) or
-`bad_signature` (it verifies under none of the party's keys). Elsewhere it
-names what diverged — the field of a transfer that does not match — or
-`undecodable` (the transaction will not gunzip), `structure_undecodable` (it
-gunzips but the schema cannot read it), `payload_shape`, `payload_missing`,
-`proof_fields_missing`, `unsupported_hashing_scheme`. A code whose cause is not in doubt carries no
-`extensions` at all.
+A payment that was already relayed is not verified again: it answers with what
+became of it, `settlement_pending` (with the transaction and its network in
+`extra`) or `invalid_exact_canton_execute_failed`.
 
 A body that is not a well-formed request answers `400` with
 `invalid_payload`, and an unexpected fault answers `500` with
@@ -256,6 +233,10 @@ JSON
 
 Re-runs verify, reserves the payment so a concurrent replay cannot spend it, and
 submits the payer-signed transaction to Canton. Returns the on-ledger update id.
+
+Settling the same payload twice is safe: the second call answers with the
+first one's outcome rather than submitting again. That is how a
+`settlement_pending` answer is resolved: retry with the same payload.
 
 ### Request headers
 
@@ -314,10 +295,36 @@ units like the requirements' `amount`.
 }
 ```
 
-### Response 400 — not settled
+### Response 200 — pending
 
-A refusal always carries `transaction` and `network`, as x402 v2 §5.3.2
-requires. `transaction` is empty when nothing was relayed to the ledger.
+The transaction was relayed but its outcome is not known yet. This is **not a
+failure**: do not ask the payer for a new payment. Retry settle with the same
+payload, and it answers with the outcome. There is no update id until the
+transaction commits, so `transaction` is its `preparedTxHash`.
+
+```json
+{
+  "success": false,
+  "errorReason": "settlement_pending",
+  "transaction": "7c1e9a…",
+  "network": "canton:devnet",
+  "payer": "buyer::1220…"
+}
+```
+
+### Response 200 — the relay's other outcomes
+
+The relay's other outcomes also answer `200`, so a client reads the body:
+`invalid_exact_canton_execute_failed` when the ledger rejected the
+transaction, and `unexpected_settle_error` when the facilitator failed to
+relay it.
+
+### Response 400 — refused
+
+A payment refused before anything was relayed: any verify refusal, or a
+malformed body (`invalid_payload`). A refusal always carries `transaction` and
+`network`, as x402 v2 §5.3.2 requires; `transaction` is empty, since nothing
+reached the ledger.
 
 ```json
 {
@@ -329,21 +336,20 @@ requires. `transaction` is empty when nothing was relayed to the ledger.
 }
 ```
 
+### Other statuses
+
+| Status | When |
+| --- | --- |
+| `401` | No API key, an unknown one, or one whose project has no payout party yet. |
+| `429` | Over the rate limit; wait for `Retry-After`. |
+| `500` | A fault in the facilitator: `unexpected_settle_error`. |
+| `503` | Out of ledger capacity for the day: `unexpected_settle_error` with detail `capacity_exhausted`. Retry the same payload after `Retry-After`. |
+
 ### `errorReason` values
 
-The scheme spec's table and the x402 v2 general codes, the same vocabulary
-`invalidReason` uses — `invalid_exact_canton_execute_failed` for a definite
-ledger rejection, `settlement_pending` when the outcome is not yet known (which
-is **non-terminal**, and carries the relayed `transaction` and its `network`),
-and `unexpected_settle_error` for a fault during settlement.
-
-`extensions.detail` says which of a code's causes it was, as it does on verify.
-`errorMessage`, when present, is free text for logs and people: it can change
-between facilitators and releases, so match on `errorReason`, never on it.
-
-Every refusal above answers `400`. An unexpected fault answers `500`, and a
-facilitator that is temporarily out of capacity answers `503` with a
-`Retry-After` header.
+The same codes as verify's `invalidReason`, plus the settlement outcomes above:
+see [Error codes](/reference/error-codes). `errorMessage`, when present, is free
+text for logs and people; match on `errorReason`, never on it.
 
 ### curl
 
