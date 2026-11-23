@@ -68,7 +68,7 @@ transaction the payer signed.
   [Calling the facilitator](/guides/calling-the-facilitator) ·
   [Pending settlements](/guides/pending-settlements) ·
   [Upgrading to 1.0](/guides/upgrading-to-1-0)
-- **Concepts** — [The payment flow](/concepts/payment-flow) ·
-  [The facilitator](/concepts/facilitator)
+- **Concepts** — [The facilitator](/concepts/facilitator) ·
+  [The payment flow](/concepts/payment-flow)
 - **Reference** — [Facilitator HTTP API](/reference/http-api) ·
   [Error codes](/reference/error-codes) · [Protocol spec](/protocol/spec)
