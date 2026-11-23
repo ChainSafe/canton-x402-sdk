@@ -88,9 +88,19 @@ export interface CantonVerifyContext {
    * of the parties listed for it. They are compared as a set, not by role:
    * the list says who is trusted, not which field each one fills.
    *
-   * Optional, and OPT-IN. Leave it out (or pass `undefined`) and this check
-   * does not run, as before it existed: registry infrastructure parties are
-   * then not checked at all. Pass it — even `{}` — and it is authoritative: a
+   * It is also what spec Rule 3's registry check reads. A registry token's
+   * transfer must exercise the receiver's own registry `TransferPreapproval`
+   * (`Utility.Registry.App.V0.Model.TransferPreapproval`), signed by `payTo`
+   * alone and naming `payTo` as receiver and the instrument's admin, for a
+   * registrar with an entry here. Otherwise verify answers
+   * `invalid_exact_canton_malformed_payload` with a `factory_` detail:
+   * `factory_not_preapproval` when the payee has no preapproval at all, and
+   * `factory_registry_unconfigured` for a registrar with no entry, which this
+   * check reaches before the one above.
+   *
+   * Optional, and OPT-IN. Leave it out (or pass `undefined`) and neither
+   * check runs, as before they existed: registry infrastructure parties and a
+   * registry token's factory are then not checked at all. Pass it — even `{}` — and it is authoritative: a
    * registrar with no entry is one nobody configured, and its tokens are
    * refused. So are they when the value is not an object at all, or when the
    * registrar's entry is not a list; members of a list that are not strings

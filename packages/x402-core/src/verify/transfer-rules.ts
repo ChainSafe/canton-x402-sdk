@@ -80,7 +80,14 @@ const REGISTRY_HOLDING = {
  * a new return site would otherwise compile and invent a code nobody handles.
  */
 type CreateDetail = "create_unissued";
-type FactoryDetail = "factory_unresolved" | "factory_interface";
+type FactoryDetail =
+  | "factory_unresolved"
+  | "factory_interface"
+  | "factory_not_preapproval"
+  | "factory_signatories"
+  | "factory_receiver"
+  | "factory_admin"
+  | "factory_registry_unconfigured";
 type InputsDetail =
   | "inputs_none"
   | "inputs_repeated"
@@ -437,7 +444,8 @@ function registryTrustViolation(
  * here and enforced at settlement — a caller that verifies without settling
  * gets no protection from it.
  *
- * The issuer binding is not here either. It runs through `expectedAdmin`,
+ * The issuer binding is not here either — for Canton Coin, or for a registry
+ * token whose caller passes no `registryParties`. It runs through `expectedAdmin`,
  * which the transfer names and which the standard requires the factory to
  * validate against its own admin — see `readTransfer`. That admin is
  * MERCHANT-QUOTED, so closing the last gap needs the real DSO party, which
@@ -447,8 +455,16 @@ function registryTrustViolation(
  * What the rule does buy: a payer cannot swap in a contract of their own that
  * merely exposes a same-named choice and have it SETTLE, which before this
  * check it could.
+ *
+ * A REGISTRY TOKEN'S FACTORY is also held to the one spec Rule 3 names, when
+ * the caller says which registrars it trusts — see
+ * {@link registryFactoryViolation}. Canton Coin's arm is unchanged.
  */
-export function factoryViolation(transfer: DecodedTransfer): FactoryDetail | null {
+export function factoryViolation(
+  transfer: DecodedTransfer,
+  requirements: CantonPaymentRequirements,
+  registryTrust: RegistryTrust,
+): FactoryDetail | null {
   const exercised = transfer.exercisedContract;
   // Absent means the decoder could not resolve the exercised contract to
   // exactly one input contract that agrees with it — see resolveExercised.
@@ -458,18 +474,79 @@ export function factoryViolation(transfer: DecodedTransfer): FactoryDetail | nul
   const inherited = exercised.interfaceId;
   if (!inherited) return "factory_interface";
   if (!sameTemplate(inherited, TRANSFER_FACTORY_INTERFACE)) return "factory_interface";
-  // NOT CHECKED: who signed the factory. The Token Standard says nothing about
-  // it — `TransferFactory` is an interface and signatories are an
-  // implementation's own choice — and real bytes bear that out: Canton Coin's
-  // factory is signed by the DSO, but a Utility Registry transfer exercises
-  // the MERCHANT's own preapproval, signed by the merchant and not the issuer
-  // at all. A rule inferred from Canton Coin refused those outright.
+  // WHO SIGNED THE FACTORY is not a Token Standard question — `TransferFactory`
+  // is an interface and signatories are an implementation's own choice — and
+  // real bytes bear that out: Canton Coin's factory is signed by the DSO, but
+  // a Utility Registry transfer exercises the MERCHANT's own preapproval,
+  // signed by the merchant and not the issuer at all. A rule inferred from
+  // Canton Coin refused those outright. So it is checked per arm, from what
+  // spec Rule 3 names for that arm, never from one shape for both.
   //
-  // What binds the factory to the issuer is `expectedAdmin`, held to the
-  // instrument's admin where the transfer is read, and which the standard
-  // requires the factory to validate against its own admin. That link is the
-  // ledger's to enforce and holds only because vetted packages implement the
-  // MUST — it cannot be checked from the bytes, so nothing here tries.
+  // Canton Coin's arm is still not checked here. What binds its factory to the
+  // issuer is `expectedAdmin`, held to the instrument's admin where the
+  // transfer is read, and which the standard requires the factory to validate
+  // against its own admin — the ledger's to enforce, and the facilitator holds
+  // the admin to its own DSO party.
+  if (transfer.instrumentId.id !== AMULET_INSTRUMENT_ID) {
+    return registryFactoryViolation(transfer, exercised, requirements, registryTrust);
+  }
+  return null;
+}
+
+/**
+ * The receiver's own registry preapproval, which spec Rule 3 requires a
+ * registry token's transfer to exercise. Matched on module and entity, like
+ * every template here: the package id moves with each release.
+ */
+const REGISTRY_PREAPPROVAL = {
+  moduleName: "Utility.Registry.App.V0.Model.TransferPreapproval",
+  entityName: "TransferPreapproval",
+};
+
+/**
+ * Why a registry token's factory is not the one spec Rule 3 names, or null:
+ * "the receiver's own registry `TransferPreapproval` whose only signatory is
+ * `payTo`, naming `payTo` as receiver and `extra.instrumentId.admin` as
+ * instrument admin, for a registrar the facilitator is configured to settle."
+ *
+ * OPT-IN, on the same switch as Rule 7's trust check: it runs only when the
+ * caller passes `registryParties`, which is also what says which registrars
+ * it settles. Without it nothing here runs — not even the answer for a payee
+ * with no preapproval changes — so every caller written before it verifies
+ * exactly as before.
+ *
+ * A PAYEE WITH NO PREAPPROVAL is answered here, before delivery: its transfer
+ * exercises the registry's own factory, which leaves a two-step offer.
+ * `factory_not_preapproval` names that case on its own, because a malformed
+ * payload alone would not tell a merchant to create one.
+ *
+ * Its record is `{operator, receiver, instrumentAdmin, instrumentAllowances}`,
+ * read through `recordField` by label or declared position, as the captured
+ * MainNet USDCx preapproval lays it out. A field the reader cannot find
+ * refuses, as a field that names someone else does.
+ */
+function registryFactoryViolation(
+  transfer: DecodedTransfer,
+  factory: NonNullable<DecodedTransfer["exercisedContract"]>,
+  requirements: CantonPaymentRequirements,
+  registryTrust: RegistryTrust,
+): FactoryDetail | null {
+  if (registryTrust === "unchecked") return null;
+  // Nobody configured this registrar, so whatever its factory is, nothing
+  // here settles its tokens.
+  if (registryTrust === "unconfigured") return "factory_registry_unconfigured";
+  if (!sameTemplate(factory.templateId, REGISTRY_PREAPPROVAL)) return "factory_not_preapproval";
+  // The receiver's OWN: signed by `payTo` and nobody else. Compared as a set,
+  // so a repeated signatory is still one party.
+  const signatories = new Set(factory.signatories);
+  if (signatories.size !== 1 || !signatories.has(requirements.payTo)) {
+    return "factory_signatories";
+  }
+  const argument = factory.argument ?? [];
+  if (recordField(argument, "receiver", 1) !== requirements.payTo) return "factory_receiver";
+  if (recordField(argument, "instrumentAdmin", 2) !== transfer.instrumentId.admin) {
+    return "factory_admin";
+  }
   return null;
 }
 

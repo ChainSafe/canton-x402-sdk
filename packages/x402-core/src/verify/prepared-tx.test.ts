@@ -360,6 +360,24 @@ describe("which disclosure the exercised contract resolves to", () => {
     expect(exercised?.contractId).toBe(EXERCISED_CID);
     expect(exercised?.signatories).toEqual([TRANSFER.instrumentId.admin]);
   });
+
+  it("reports the contract's own template and record, from its disclosure", () => {
+    // The disclosure and the exercise agree on module and entity but not on
+    // the package id, as they may across an upgrade. What is reported is the
+    // disclosure's: what the contract IS.
+    const disclosed = { packageId: "a".repeat(64) };
+    const blob = encodePreparedTransaction(TRANSFER, {
+      factory: { inputContracts: [{ templateId: disclosed }] },
+    });
+    const exercised = decodePreparedTransaction(blob)?.exercisedContract;
+    expect(exercised?.templateId).toMatchObject({
+      packageId: disclosed.packageId,
+      moduleName: "Splice.ExternalPartyAmuletRules",
+      entityName: "ExternalPartyAmuletRules",
+    });
+    // Canton Coin's factory record is the one-field {dso}.
+    expect(exercised?.argument).toEqual([{ label: "dso", value: TRANSFER.instrumentId.admin }]);
+  });
 });
 
 describe("the inputs the transfer declares", () => {

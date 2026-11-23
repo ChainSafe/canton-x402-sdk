@@ -102,8 +102,11 @@ facilitator's alone, since only it holds the state involved:
    well.
 7. **The transfer went through a real factory** — the contract the transfer
    choice was exercised on must be one the transaction itself discloses,
-   exercised through the Token Standard `TransferFactory` interface, and
-   carrying the instrument's admin among its signatories
+   exercised through the Token Standard `TransferFactory` interface. For a
+   registry token (USDCx, say), when the facilitator verifies it against the
+   registrars it is configured for, it must also be your own registry
+   `TransferPreapproval`: signed by `payTo` alone, naming `payTo` as receiver
+   and the instrument's admin, for a configured registrar
    (`invalid_exact_canton_malformed_payload`, with a `factory_` detail naming
    which part failed). Without it a payer could exercise a contract of their
    own that merely exposes a choice of the same name, and the payment would
@@ -128,5 +131,10 @@ or locked up. Without one the Token Standard would make it an offer that
 completes only once you accept it — which is not a payment the facilitator can
 stand behind, since the resource is already served while the funds sit where
 the payer can withdraw them. Such a payment is refused at verify, with
-`invalid_exact_canton_preapproval_missing`. What is recorded is the signed transfer's amount, not
+`invalid_exact_canton_preapproval_missing`. A registry token (USDCx, say)
+needs your registry `TransferPreapproval` the same way. When the facilitator
+verifies it against the registrars it is configured for, a payment without one
+is refused earlier, at the factory check (7 above), as
+`invalid_exact_canton_malformed_payload` with the detail
+`factory_not_preapproval`. What is recorded is the signed transfer's amount, not
 the quoted floor, so an overpayment is not understated.

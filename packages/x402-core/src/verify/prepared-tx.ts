@@ -89,6 +89,24 @@ export interface DecodedTransfer {
     contractId: string;
     signatories: readonly string[];
     /**
+     * The contract's own template, from its disclosure. The exercise names the
+     * same one — resolving requires the two to agree — but this is what the
+     * contract IS, which a rule about whose factory it is reads.
+     *
+     * Optional so that adding it changed no caller that builds this type; the
+     * decoder always sets it.
+     */
+    templateId?: { packageId: string; moduleName: string; entityName: string };
+    /**
+     * The disclosure's own record, scalar leaves only, in declaration order
+     * with whatever labels it carried — read exactly as a consequence's
+     * `target.argument` is. A reader names the fields it wants, through
+     * `recordField`.
+     *
+     * Optional for the same reason as `templateId`; the decoder always sets it.
+     */
+    argument?: readonly { label: string; value?: string }[];
+    /**
      * The interface the exercised choice was inherited from, absent when the
      * choice is the template's own. A Token Standard transfer is exercised
      * through `TransferFactory`, so this is what says which kind of transfer
@@ -599,6 +617,9 @@ function resolveExercised(
   return {
     contractId: resolved.create.contractId,
     signatories: resolved.create.signatories,
+    // `resolveTarget` refuses a disclosure without a template, so it is set.
+    ...(resolved.create.templateId === undefined ? {} : { templateId: resolved.create.templateId }),
+    argument: scalarFields(resolved.create.argument as VendorValue | undefined),
     ...(exercise.interfaceId === undefined ? {} : { interfaceId: exercise.interfaceId }),
   };
 }
