@@ -1,0 +1,13 @@
+{
+  "name": "@chainsafe/x402-example-one-job-catalog",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The seventy one-job tools, and which of them this demo actually runs.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

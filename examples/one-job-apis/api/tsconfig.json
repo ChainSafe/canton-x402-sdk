@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    "skipLibCheck": true,
+    "paths": {
+      "@chainsafe/x402-core": ["../../../packages/x402-core/src/index.ts"],
+      "@chainsafe/x402-client": ["../../../packages/x402-client/src/index.ts"],
+      "@chainsafe/x402-express": ["../../../packages/x402-express/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}
