@@ -48,7 +48,7 @@ The merchant's side needs fixing, not the payer's.
 
 ## Settlement outcomes
 
-- `settlement_pending`: **Not a failure.** The transaction was relayed and its outcome is not known yet. `transaction` names it. **What to do:** Do not ask for a new payment: retry settle with the same payload, which answers with its outcome. A verify of a payment already relayed answers it too, with the transaction in `extra`.
+- `settlement_pending`: **Not a failure.** The transaction was relayed and its outcome is not known yet. `transaction` names it. **What to do:** Do not ask for a new payment. Retrying the same payload is safe and answers `invalid_exact_canton_execute_failed` if the relay failed, but keeps answering `settlement_pending` even once it commits. A verify of a payment already relayed answers the same way, with the transaction in `extra`. See [Pending settlements](/guides/pending-settlements).
 - `invalid_exact_canton_execute_failed`: The ledger rejected the transaction. Also the answer to a replay of one that failed. **What to do:** The payer builds a new payment.
 
 ## Faults

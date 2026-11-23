@@ -63,7 +63,11 @@ transaction the payer signed.
 - **Get started** — [Accept payments](/get-started/accept-payments) ·
   [Pay for an API](/get-started/pay-for-an-api) ·
   [Networks](/get-started/networks)
-- **Guides** — [Upgrading to 1.0](/guides/upgrading-to-1-0)
+- **Guides** — [Express middleware](/guides/express-middleware) ·
+  [Paying from your service](/guides/paying-from-your-service) ·
+  [Calling the facilitator](/guides/calling-the-facilitator) ·
+  [Pending settlements](/guides/pending-settlements) ·
+  [Upgrading to 1.0](/guides/upgrading-to-1-0)
 - **Concepts** — [The payment flow](/concepts/payment-flow) ·
   [The facilitator](/concepts/facilitator)
 - **Reference** — [Facilitator HTTP API](/reference/http-api) ·
