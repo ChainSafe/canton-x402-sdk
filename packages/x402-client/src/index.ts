@@ -5,5 +5,4 @@
  * protocol (verify / settle / supported over the envelopes from @chainsafe/x402-core),
  * so any payer — the server SDK, a browser fetch wrapper, other tooling — reuses it.
  */
-export const VERSION = "0.0.1";
 export * from "./facilitator";
