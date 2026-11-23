@@ -47,7 +47,7 @@ function instrumentIdOf(asset: unknown): string {
   if (typeof asset === "string" && asset.length > 0) return asset;
   throw new TermsError(
     typeof asset === "object" && asset !== null
-      ? // The form this field took before 2.0, so a merchant upgrading meets it.
+      ? // The form this field took before 1.0, so a merchant upgrading meets it.
         'paymentRequired: `asset` is an instrument id string ("Amulet", "USDCx"). The ' +
           "{ instrumentId: { id, admin } } form is gone: the registry admin is read from the " +
           "facilitator's /v2/supported."
