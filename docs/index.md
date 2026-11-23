@@ -3,7 +3,7 @@ layout: home
 description: Pay for an HTTP request on Canton — charge for your API, or pay for someone else's, through the x402 facilitator and the SDK that talks to it.
 
 hero:
-  name: Canton x402
+  name: x402 on Canton
   text: Pay for an HTTP request on Canton
   tagline: Charge for your API, or pay for someone else's, in a single HTTP round trip — settled on the Canton Network by a facilitator that never holds your funds.
   actions:
@@ -13,24 +13,23 @@ hero:
     - theme: alt
       text: Pay for an API
       link: /get-started/pay-for-an-api
+    - theme: alt
+      text: View on GitHub
+      link: https://github.com/ChainSafe/canton-x402-sdk
 
 features:
-  - title: Accept payments
-    details: Gate an Express route with @chainsafe/x402-express. The facilitator verifies and settles each payment, straight to your Canton party.
-    link: /get-started/accept-payments
-    linkText: Merchant quickstart
-  - title: Pay for an API
-    details: Wrap fetch with @chainsafe/x402-server-sdk, and a 402 is paid and the request retried for you.
-    link: /get-started/pay-for-an-api
-    linkText: Buyer quickstart
-  - title: How it works
-    details: Every paid request from the 402 to the on-ledger update id, and what the facilitator checks before any money moves.
-    link: /concepts/payment-flow
-    linkText: The payment flow
-  - title: Facilitator HTTP API
-    details: GET /v2/supported, POST /v2/verify and POST /v2/settle, for calling the facilitator directly.
-    link: /reference/http-api
-    linkText: HTTP API reference
+  - title: Non-custodial
+    details: Payers prepare and sign on their own participant. The facilitator only executes a transaction the payer already signed — it never sees a private key, and never picks the payer's holdings.
+    link: /concepts/facilitator#non-custodial-by-construction
+    linkText: Why it is non-custodial
+  - title: Canton-native
+    details: Settlement is a Splice Token Standard transfer through the instrument's TransferFactory, delivered straight to your party through its TransferPreapproval — one atomic Canton transaction.
+    link: /concepts/facilitator#what-settlement-does
+    linkText: What settlement does
+  - title: Standards-aligned
+    details: The x402 v2 wire format and the Canton exact scheme — the quote in the 402's PAYMENT-REQUIRED header, the signed payment in PAYMENT-SIGNATURE, verify and settle at the facilitator.
+    link: /protocol/spec
+    linkText: The protocol
 ---
 
 `x402` makes an ordinary HTTP request payable: a client that calls a paid
@@ -39,3 +38,31 @@ it. The **facilitator** is the HTTP service that turns that signed payment into
 a real, settled payment on the Canton Network — so your server never has to
 speak to a ledger, hold a wallet, or run a node. [The facilitator](/concepts/facilitator)
 explains what it does and why it is non-custodial.
+
+## Choose your integration path
+
+<IntegrationPaths />
+
+## Payment flow
+
+A paid request is an ordinary HTTP request, retried once. The first try comes
+back `402 Payment Required` with the price and terms. The payer prepares a
+Canton transfer for exactly that amount, signs it with its own key, and retries
+with the signed payment attached. Your server hands it to the facilitator,
+which checks that the signed transfer pays exactly your terms, then executes it
+on Canton, where the funds land at your party. Custody stays with the payer
+throughout: the facilitator never sees a private key, and can only submit the
+transaction the payer signed.
+
+<PaymentFlow />
+
+[Each step in detail →](/concepts/payment-flow)
+
+## Browse the docs
+
+- **Get started** — [Accept payments](/get-started/accept-payments) ·
+  [Pay for an API](/get-started/pay-for-an-api)
+- **Concepts** — [The payment flow](/concepts/payment-flow) ·
+  [The facilitator](/concepts/facilitator)
+- **Reference** — [Facilitator HTTP API](/reference/http-api) ·
+  [Protocol spec](/protocol/spec)
