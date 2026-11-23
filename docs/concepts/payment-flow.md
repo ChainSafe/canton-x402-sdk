@@ -7,7 +7,7 @@ description: Every paid request, from the 402 to the on-ledger update id — and
 A paid request end to end under `exact` on Canton — from the `402` your route
 returns to the on-ledger update id it settles with. This is what runs
 underneath the route you gated in [Accept payments](/get-started/accept-payments), and
-[The facilitator](/concepts/facilitator) then zooms in on steps 5 and 6. You write
+[The facilitator](/concepts/facilitator) covers steps 5 and 6 in depth. You write
 almost none of it: the merchant side (steps 1, 5 and 6) is handled via
 [`@chainsafe/x402-express`](https://www.npmjs.com/package/@chainsafe/x402-express),
 and the payer side (steps 2–4) via the payer's own SDK,
