@@ -55,7 +55,10 @@ paymentRequired({
   `/v2/supported`. Named, it is a `canton:<name>` such as `canton:mainnet`, no
   longer the `canton:1220…` hash.
 - **Removed options:** `asset` as an object, `additionalAccepts`,
-  `validForSeconds` and `nonce`. Use `memo` for an order reference.
+  `validForSeconds` and `nonce`. Use `memo` for an order reference, but it is
+  not a drop-in for `nonce`: the middleware doesn't check that a `memo` is one
+  you issued, and nothing makes it single-use. If you reconcile orders on it,
+  check it in `preSettle`.
 - **Headers:** the 402 carries `PAYMENT-REQUIRED`, the payment arrives in
   `PAYMENT-SIGNATURE` (`X-PAYMENT` is still read), and the settle answer goes
   back in `PAYMENT-RESPONSE`, which replaces `X-PAYMENT-RESPONSE`.
@@ -77,6 +80,10 @@ paymentRequired({
 - **Headers:** `createX402Fetch` sends the payment in `PAYMENT-SIGNATURE`
   instead of `X-PAYMENT`, and reads the offer from the `PAYMENT-REQUIRED`
   header.
+- **Don't retry a pending payment.** A 402 whose `PAYMENT-RESPONSE` is
+  `settlement_pending` (`isSettlementPending`) may still land. Retrying the
+  request through `createX402Fetch` signs a new payment, so the payer could pay
+  twice.
 - **Custom payers:** `X402Payer.authorize` receives the 402's `resource` as a
   second argument (`PaymentContext`).
 
@@ -84,9 +91,9 @@ paymentRequired({
 
 - `verify`, `settle` and `supported` send and return the spec's shapes from
   `@chainsafe/x402-core` 1.0.
-- **A settle failure sent with a `2xx` status is returned, not thrown.** That
-  includes `settlement_pending`, which is not a failure: check it with
-  `isSettlementPending` and retry with the same payload.
+- **`settlement_pending` is not a failure.** Check it with
+  `isSettlementPending`, and retry settle with the same payload to learn the
+  outcome.
 - `supported()` caches its answer for `supportedTtlMs` (5 minutes by default);
   `supported({ refresh: true })` skips the cache.
 
@@ -100,8 +107,8 @@ paymentRequired({
   from 0.x no longer parse; see [Error codes](/reference/error-codes).
 - **Verifying** a payment yourself takes the payer's keys from the caller:
   `verify(payload, requirements, { payerPublicKeys })`.
-- **Validate with the `is*` guards.** The schemas and `parse*` functions are no
-  longer exported.
+- **Validate with the `is*` guards.** Most schemas and `parse*` functions are
+  no longer exported.
 - **New helpers:** header codecs for `PAYMENT-REQUIRED` and `PAYMENT-RESPONSE`,
   `selectCantonDeployments` for reading `/v2/supported`, and `ledgerToAtomic` /
   `atomicToLedger` for amounts.
