@@ -1,59 +1,41 @@
 ---
-description: What the facilitator does, why it is non-custodial, the scheme it implements, and where your API key fits.
----
+layout: home
+description: Pay for an HTTP request on Canton — charge for your API, or pay for someone else's, through the x402 facilitator and the SDK that talks to it.
 
-# The x402 facilitator
+hero:
+  name: Canton x402
+  text: Pay for an HTTP request on Canton
+  tagline: Charge for your API, or pay for someone else's, in a single HTTP round trip — settled on the Canton Network by a facilitator that never holds your funds.
+  actions:
+    - theme: brand
+      text: Accept payments
+      link: /get-started/accept-payments
+    - theme: alt
+      text: Pay for an API
+      link: /get-started/pay-for-an-api
+
+features:
+  - title: Accept payments
+    details: Gate an Express route with @chainsafe/x402-express. The facilitator verifies and settles each payment, straight to your Canton party.
+    link: /get-started/accept-payments
+    linkText: Merchant quickstart
+  - title: Pay for an API
+    details: Wrap fetch with @chainsafe/x402-server-sdk, and a 402 is paid and the request retried for you.
+    link: /get-started/pay-for-an-api
+    linkText: Buyer quickstart
+  - title: How it works
+    details: Every paid request from the 402 to the on-ledger update id, and what the facilitator checks before any money moves.
+    link: /concepts/payment-flow
+    linkText: The payment flow
+  - title: Facilitator HTTP API
+    details: GET /v2/supported, POST /v2/verify and POST /v2/settle, for calling the facilitator directly.
+    link: /reference/http-api
+    linkText: HTTP API reference
+---
 
 `x402` makes an ordinary HTTP request payable: a client that calls a paid
 endpoint gets back `402 Payment Required`, signs a payment, and retries with
 it. The **facilitator** is the HTTP service that turns that signed payment into
 a real, settled payment on the Canton Network — so your server never has to
-speak to a ledger, hold a wallet, or run a node. Your server (the resource
-server) just hands each payment to the facilitator, which does exactly two
-things with it: `POST /v2/verify` checks a signed payment against your terms
-without submitting or reserving anything; `POST /v2/settle` then executes it on
-Canton and returns the update id.
-
-## Non-custodial by construction
-
-Canton settles in three steps — `prepare`, `sign`, `execute` — and that split
-is what makes the facilitator non-custodial. The payer does `prepare` and
-`sign` with its own key, without going through the facilitator. The
-facilitator only ever performs the final `execute` of a transaction the payer
-already signed: it never sees a private key, and it cannot move funds without
-that signature.
-
-## The payment scheme
-
-- `exact` on a `canton:*` network — the payer transfers Canton Coin (Amulet)
-  directly to your party; you receive CC.
-
-[`GET /v2/supported`](/api-reference#get-v2-supported) is the authority on
-what a given facilitator accepts — the network id and the asset to pay in.
-
-## How you get paid
-
-Settlements land directly at your **Canton party** — the payout party of the
-project your API key belongs to. The payer transfers Amulet (CC) straight to
-it; the facilitator holds no balance, so there is nothing to withdraw. That
-requires your payout party to hold a live `TransferPreapproval`. Without one,
-Amulet cannot pay it directly — the Token Standard turns the transfer into an
-offer the party must accept — so the facilitator **refuses** the payment rather
-than relaying one that lands somewhere the payer can still withdraw it (see
-[What settlement does](/facilitator#what-settlement-does)). Completed
-settlements show up on the Settlements page of the merchant dashboard.
-
-## Your API key is the facilitator credential
-
-A key you create on the API keys page of the merchant dashboard is what your
-server sends as `Authorization: Bearer` to `/v2/verify` and `/v2/settle`. You
-can create and rotate keys in the dashboard yourself — no facilitator redeploy
-— and the key itself is never stored: what is kept is its hash, plus its
-`sk_live_`/`sk_test_` prefix and last four characters so you can tell your keys
-apart. A revocation can take up to a
-couple of minutes to take effect.
-
-::: tip Next
-[Getting started](/getting-started) takes you from a fresh account to a paid
-endpoint.
-:::
+speak to a ledger, hold a wallet, or run a node. [The facilitator](/concepts/facilitator)
+explains what it does and why it is non-custodial.

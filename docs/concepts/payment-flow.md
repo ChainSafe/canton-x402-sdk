@@ -6,8 +6,8 @@ description: Every paid request, from the 402 to the on-ledger update id — and
 
 A paid request end to end under `exact` on Canton — from the `402` your route
 returns to the on-ledger update id it settles with. This is what runs
-underneath the route you gated in [Getting started](/getting-started), and
-[The facilitator](/facilitator) then zooms in on steps 5 and 6. You write
+underneath the route you gated in [Accept payments](/get-started/accept-payments), and
+[The facilitator](/concepts/facilitator) then zooms in on steps 5 and 6. You write
 almost none of it: the merchant side (steps 1, 5 and 6) is handled via
 [`@chainsafe/x402-express`](https://www.npmjs.com/package/@chainsafe/x402-express),
 and the payer side (steps 2–4) via the payer's own SDK,
@@ -66,7 +66,7 @@ server (step 4).
 
 6. **Facilitator executes on Canton**
 
-   `/v2/settle` re-runs [every verify check](/facilitator#what-verify-guarantees),
+   `/v2/settle` re-runs [every verify check](/concepts/facilitator#what-verify-guarantees),
    then calls Canton's `executeAndWaitForTransaction` with the payer-signed
    blob. On success it returns the update id as `transaction`. The middleware
    puts the whole settle answer on your response as `PAYMENT-RESPONSE`
@@ -78,7 +78,7 @@ transfer — much of Node's ~16 KB default, which covers all of a request's
 headers together — so a Node/Express merchant server should set
 `maxHeaderSize` (e.g. `--max-http-header-size`) or the paid retry dies with
 `431 Request Header Fields Too Large` before your handler ever runs. Step 6 of
-[Getting started](/getting-started#wire-up-your-server) shows where it goes.
+[Accept payments](/get-started/accept-payments#wire-up-your-server) shows where it goes.
 The scheme spec asks every server and proxy on the way to accept at least
 16 KiB for this header. A proxy in front needs it too: nginx's default
 `large_client_header_buffers 4 8k` refuses any single header over 8 KiB.

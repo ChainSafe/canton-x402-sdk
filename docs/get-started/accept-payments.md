@@ -2,18 +2,17 @@
 description: Link your payout party, create an API key, gate an Express route, and take your first payment.
 ---
 
-# Getting started
+# Accept payments
 
 This takes a merchant from a fresh account to a live, paid endpoint: link the
 Canton party that gets paid, create an API key, gate an Express route with
 `@chainsafe/x402-express`, and take your first payment. The facilitator does
-the on-ledger work — you write a few lines of middleware. [The overview](/)
-explains what the facilitator is; this page is the hands-on part. Building the
-paying side instead? Skip to [the buyer side](#the-buyer-side) below.
+the on-ledger work — you write a few lines of middleware.
+[The facilitator](/concepts/facilitator) explains what it is; this page is the
+hands-on part. Building the paying side instead? See
+[Pay for an API](/get-started/pay-for-an-api).
 
-## The merchant side: gating an endpoint {#the-merchant-side}
-
-### Before you start
+## Before you start
 
 - A **Canton party** to receive payouts — you link it in step 1, and it
   becomes your payout party.
@@ -22,7 +21,7 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
   merchant dashboard's **API keys** page shows it, with the other values the
   server below reads, as a `.env` you can copy.
 
-### Set up your account
+## Set up your account
 
 1. **Sign in and link your payout party**
 
@@ -30,17 +29,17 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
    another way, link a Canton key on the dashboard's **Account** page. The
    key's party is your `payTo`: the payer transfers Canton Coin straight to it,
    and the facilitator holds no balance. A direct transfer needs a
-   `TransferPreapproval` on the party — see [How you get paid](/#how-you-get-paid).
+   `TransferPreapproval` on the party — see [How you get paid](/concepts/facilitator#how-you-get-paid).
 
 2. **Create an API key**
 
    On the merchant dashboard's **API keys** page, create a key. It is shown
    once — copy it now. Your server sends it as `Authorization: Bearer` to the
    facilitator on every verify and settle. The full key is never stored —
-   [Your API key is the facilitator credential](/#your-api-key-is-the-facilitator-credential)
+   [Your API key is the facilitator credential](/concepts/facilitator#your-api-key-is-the-facilitator-credential)
    covers what is kept, rotation, and revocation.
 
-### Wire up your server
+## Wire up your server
 
 3. **Install the SDK**
 
@@ -59,7 +58,7 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
    validates, each with the registry party that admins it.
 
    The middleware reads this for you. Name the instrument by id — `asset:
-   "Amulet"` — and the rest comes from the facilitator: the synchronizer, the
+"Amulet"` — and the rest comes from the facilitator: the synchronizer, the
    party that relays your payments, and the registry party they are validated
    against. These are the facilitator's own facts, so you cannot configure
    them: a wrong one would only fail at verify, after the payer had signed.
@@ -71,7 +70,7 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
    it is discovered, or name it to choose. If the facilitator settles that
    instrument on more than one network, naming one is required rather than
    guessed. The
-   [API reference](/api-reference#get-v2-supported) describes every field.
+   [HTTP API reference](/reference/http-api#get-v2-supported) describes every field.
 
 5. **Gate a route**
 
@@ -90,7 +89,7 @@ paying side instead? Skip to [the buyer side](#the-buyer-side) below.
    nginx's default `large_client_header_buffers 4 8k` refuses any single header
    over 8 KiB.
 
-### Putting it together
+## Putting it together
 
 <<< @/snippets/gate-express.ts#snippet
 
@@ -98,74 +97,17 @@ Its settings are the integration panel's `.env`: `FACILITATOR_URL`,
 `FACILITATOR_API_KEY` and `MERCHANT_PARTY`. `NETWORK_ID` and `AMULET_ADMIN` are
 not among them — those come from `/v2/supported`, as step 4 describes.
 
-### Take your first payment
+## Take your first payment
 
 7. **Pay the route and confirm it**
 
    Call your gated route from a payer wired up with the payer SDK
-   ([the buyer side](#the-buyer-side) below shows how). Once it settles, the
+   ([Pay for an API](/get-started/pay-for-an-api) shows how). Once it settles, the
    payment shows up on the merchant dashboard's **Settlements** page with its
    on-ledger update id.
 
-## The buyer side: paying for one {#the-buyer-side}
-
-If your service is the one _calling_ a paid API, you pay from the other side
-with `@chainsafe/x402-server-sdk`. Given your Canton party key and a wallet-sdk
-ledger connection, it prepares and Ed25519-signs a Canton Coin transfer and
-wraps `fetch` so a `402` is paid and the request retried transparently — you
-call the URL and get the paid response back.
-
-### Before you start
-
-- A **funded payer party** — its `partyId` and Ed25519 signing key
-  (`privateKey`, the 32-byte seed; the public half is published on the ledger,
-  which is where a facilitator reads it), holding enough Canton Coin to cover
-  the price.
-- A connection to your **participant's Ledger API** — its URL plus OAuth2
-  client credentials (LocalNet uses a self-signed token instead).
-- The **Amulet Token Standard registry** URL — your validator's scan-proxy for
-  Amulet, where the payer fetches the `TransferFactory`.
-- The **DSO party** (the Amulet asset admin) — from
-  `extra.instruments[].instrumentId.admin` in
-  `GET $FACILITATOR_URL/v2/supported` on the facilitator the API you are paying
-  uses. (`extra.asset.instrumentId.admin` is the older spelling of the same
-  party; prefer `instruments`.)
-
-### Steps
-
-1. **Install the payer SDK**
-
-   The payer SDK and the Canton wallet-sdk it signs with.
-
-   ```bash
-   npm install @chainsafe/x402-server-sdk @canton-network/wallet-sdk
-   ```
-
-2. **Connect and build the payer**
-
-   Pick the network preset (`devnetConfig`, `mainnetConfig`, or
-   `localnetConfig`), open a wallet-sdk connection with `SDK.create()`, then
-   construct a `CantonX402Payer` from your party key and the Amulet registry.
-   The payer only pays requirements on its own `network`, so that must be the
-   `network` that `GET $FACILITATOR_URL/v2/supported` returns; pass
-   `network` to the preset to override its default.
-
-3. **Wrap fetch and call the endpoint**
-
-   `createX402Fetch(payer)` returns a `fetch` that pays `402`s for you. Call
-   the gated URL through it and read the paid response — no 402 handling in
-   your own code.
-
-### Putting it together
-
-<<< @/snippets/pay-with-fetch.ts#snippet
-
-The [`examples/mortgage`](https://github.com/ChainSafe/canton-x402-sdk/tree/main/examples/mortgage)
-pair in the SDK repo is a full runnable payer + merchant, with the complete
-credential wiring in its `.env.example`.
-
 ::: tip Next
-[The payment flow](/payment-flow) walks every request end to end, and the
-[API reference](/api-reference) has the full request and response spec for
-`/v2/verify` and `/v2/settle`.
+[The payment flow](/concepts/payment-flow) walks every request end to end, and
+the [HTTP API reference](/reference/http-api) has the full request and response
+spec for `/v2/verify` and `/v2/settle`.
 :::

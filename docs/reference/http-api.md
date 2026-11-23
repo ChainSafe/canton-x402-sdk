@@ -2,14 +2,14 @@
 description: The three endpoints an integration calls, with request and response shapes, status codes, and curl.
 ---
 
-# API reference
+# Facilitator HTTP API
 
 The three endpoints an integration calls, with request and response shapes,
 status codes, and curl. `@chainsafe/x402-express` already calls `/v2/verify`
-and `/v2/settle` for you (steps 5 and 6 of [the payment flow](/payment-flow));
+and `/v2/settle` for you (steps 5 and 6 of [the payment flow](/concepts/payment-flow));
 this page is for calling the facilitator directly, or for reading what the
 middleware sends. What each verify check means is on
-[The facilitator](/facilitator#what-verify-guarantees).
+[The facilitator](/concepts/facilitator#what-verify-guarantees).
 
 `$FACILITATOR_URL` below is your facilitator's base URL. The integration panel
 on the merchant dashboard's **API keys** page shows it, and `$FACILITATOR_API_KEY`
