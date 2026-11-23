@@ -1,0 +1,29 @@
+{
+  "name": "@chainsafe/x402-example-one-job-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Google sign-in, WebAuthn fingerprint gate, and rate-limited paid calls to the one-job merchant.",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chainsafe/x402-example-one-job-catalog": "workspace:^",
+    "@simplewebauthn/server": "^13.1.1",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.5",
+    "express": "^5.0.0",
+    "express-session": "^1.18.1",
+    "openid-client": "^6.4.0"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.8",
+    "@types/express": "^5.0.0",
+    "@types/express-session": "^1.18.1",
+    "@types/node": "^22.20.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -22,14 +22,19 @@ corepack pnpm install
 corepack pnpm --filter @chainsafe/x402-core --filter @chainsafe/x402-client --filter @chainsafe/x402-express exec tsup --no-dts
 ```
 
-Two terminals:
+Three terminals:
 
 ```bash
 corepack pnpm --filter @chainsafe/x402-example-one-job-api dev
+cp examples/one-job-apis/gateway/.env.example examples/one-job-apis/gateway/.env
+# Add Google OAuth client ID/secret, or set ALLOW_DEV_LOGIN=1 until credentials exist
+corepack pnpm --filter @chainsafe/x402-example-one-job-gateway dev
 corepack pnpm --filter @chainsafe/x402-example-one-job-web dev
 ```
 
-Open http://localhost:5180 (default). The UI proxies `/api` to the API on port 8787.
+Open http://localhost:5180. **Continue with Google** → **Enable fingerprint** → pick a tool → **Place finger**.
+
+The UI proxies `/api` to the merchant (:8787) and `/gateway` to the auth service (:8790). Deploying on **Google Cloud** (GCS for the built UI, Cloud Run for the gateway) is in [docs/DEPLOY-GCP.md](./docs/DEPLOY-GCP.md). WebAuthn does not run on GCS alone.
 
 Quick check without the UI:
 
@@ -49,6 +54,7 @@ corepack pnpm --filter @chainsafe/x402-example-one-job-api test
 | --- | --- |
 | `catalog/` | Seventy tools, prices, live flags |
 | `api/` | Express merchant + in-process facilitator + twelve handlers |
-| `web/` | Phone-friendly UI and the **What happened** panel |
+| `web/` | Phone-friendly UI, fingerprint UX, **What happened** panel |
+| `gateway/` | Google sign-in, WebAuthn, daily spend cap, paid-call proxy |
 
 Start with `hash.sha256`: unpaid 402, Pay, then the trace and the digest.
