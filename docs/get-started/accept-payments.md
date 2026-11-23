@@ -17,9 +17,10 @@ hands-on part. Building the paying side instead? See
 - A **Canton party** to receive payouts — you link it in step 1, and it
   becomes your payout party.
 - A **Node.js + Express** server — the API you want to charge for.
-- Your facilitator's base URL, `FACILITATOR_URL`. The integration panel on the
-  merchant dashboard's **API keys** page shows it, with the other values the
-  server below reads, as a `.env` you can copy.
+- Your facilitator's base URL, `FACILITATOR_URL` — the DevNet and MainNet
+  facilitators are listed on [Networks](/get-started/networks). The
+  integration panel on the merchant dashboard's **API keys** page shows it, with
+  the other values the server below reads, as a `.env` you can copy.
 
 ## Set up your account
 

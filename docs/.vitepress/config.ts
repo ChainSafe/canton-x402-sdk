@@ -21,6 +21,7 @@ const SECTIONS = [
     items: [
       { text: "Accept payments", link: "/get-started/accept-payments" },
       { text: "Pay for an API", link: "/get-started/pay-for-an-api" },
+      { text: "Networks", link: "/get-started/networks" },
     ],
   },
   {
