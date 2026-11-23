@@ -1,6 +1,6 @@
-// Getting started, the merchant side: the "Putting it together" block.
+// Accept payments: the "Putting it together" block.
 //
-// Transcluded into docs/getting-started.md (only the `snippet` region is
+// Transcluded into docs/get-started/accept-payments.md (only the `snippet` region is
 // shown), and compiled by `pnpm typecheck` but never run: no facilitator, no
 // key, no ledger. A breaking change to an SDK signature this calls fails the
 // typecheck here, so edit the code in this file, not in the page (#69).

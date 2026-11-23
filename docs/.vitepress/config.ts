@@ -5,12 +5,39 @@
 // workspace compiles, and the pages transclude it (#69).
 //
 // WHY THE SIDEBAR IS WRITTEN OUT rather than generated from the directory:
-// these six pages are a reading order, not a folder. Someone meeting x402 for
-// the first time should be walked from what it is to how to call it, and
-// alphabetical or filesystem order would not do that.
+// each section is a reading order, not a folder. Get started is a task to do,
+// Concepts is what to understand once it works, Reference is what to look up,
+// and within each the pages go in the order a newcomer needs them.
+//
+// Pages that moved are sent on from their old URLs by theme/redirects.ts.
 import { readFileSync } from "node:fs";
 
 import { defineConfig } from "vitepress";
+
+/** The sidebar, and the nav's dropdowns: one list, so the two cannot drift. */
+const SECTIONS = [
+  {
+    text: "Get started",
+    items: [
+      { text: "Accept payments", link: "/get-started/accept-payments" },
+      { text: "Pay for an API", link: "/get-started/pay-for-an-api" },
+    ],
+  },
+  {
+    text: "Concepts",
+    items: [
+      { text: "The facilitator", link: "/concepts/facilitator" },
+      { text: "The payment flow", link: "/concepts/payment-flow" },
+    ],
+  },
+  {
+    text: "Reference",
+    items: [
+      { text: "Facilitator HTTP API", link: "/reference/http-api" },
+      { text: "Protocol spec", link: "/protocol/spec" },
+    ],
+  },
+];
 
 export default defineConfig({
   // WHERE THE SITE IS SERVED FROM. GitHub project Pages serve under
@@ -18,7 +45,10 @@ export default defineConfig({
   // from the root instead: set DOCS_BASE=/ then, or drop this once the domain
   // is the only way in.
   base: process.env.DOCS_BASE ?? "/canton-x402-sdk/",
-  title: "Canton x402",
+  title: "x402 on Canton",
+  // docs/snippets is code the pages transclude, plus the CHANGELOG its package
+  // gets from changesets: none of it is a page.
+  srcExclude: ["snippets/**"],
   markdown: {
     // A `<<< file#region` whose region does not exist renders the WHOLE file,
     // silently: rename a region and a 40-line program becomes the file with its
@@ -42,29 +72,14 @@ export default defineConfig({
   description:
     "Pay for an HTTP request on Canton: the x402 facilitator, and the SDK that talks to it.",
   themeConfig: {
+    // The home page has no sidebar (VitePress's home layout never shows one),
+    // so the nav carries every section as a dropdown: any page is one click
+    // from anywhere, the home page included.
     nav: [
-      { text: "Guide", link: "/" },
-      { text: "API reference", link: "/api-reference" },
+      ...SECTIONS.map((section) => ({ text: section.text, items: section.items })),
       { text: "npm", link: "https://www.npmjs.com/org/chainsafe" },
     ],
-    sidebar: [
-      {
-        text: "Guide",
-        items: [
-          { text: "The x402 facilitator", link: "/" },
-          { text: "Getting started", link: "/getting-started" },
-          { text: "The payment flow", link: "/payment-flow" },
-          { text: "The facilitator", link: "/facilitator" },
-        ],
-      },
-      {
-        text: "Reference",
-        items: [
-          { text: "API reference", link: "/api-reference" },
-          { text: "Protocol spec", link: "/protocol/spec" },
-        ],
-      },
-    ],
+    sidebar: SECTIONS,
     socialLinks: [{ icon: "github", link: "https://github.com/ChainSafe/canton-x402-sdk" }],
     search: { provider: "local" },
   },

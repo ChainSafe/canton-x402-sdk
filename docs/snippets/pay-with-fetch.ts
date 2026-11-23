@@ -1,6 +1,6 @@
-// Getting started, the buyer side: the "Putting it together" block.
+// Pay for an API: the "Putting it together" block.
 //
-// Transcluded into docs/getting-started.md (only the `snippet` region is
+// Transcluded into docs/get-started/pay-for-an-api.md (only the `snippet` region is
 // shown), and compiled by `pnpm typecheck` but never run: no ledger, no
 // credentials, no network. Edit the code in this file, not in the page (#69).
 
