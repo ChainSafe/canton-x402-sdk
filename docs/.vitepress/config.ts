@@ -27,7 +27,13 @@ const SECTIONS = [
   },
   {
     text: "Guides",
-    items: [{ text: "Upgrading to 1.0", link: "/guides/upgrading-to-1-0" }],
+    items: [
+      { text: "Express middleware", link: "/guides/express-middleware" },
+      { text: "Payer SDK", link: "/guides/payer-sdk" },
+      { text: "Facilitator client", link: "/guides/facilitator-client" },
+      { text: "Pending payments", link: "/guides/pending-payments" },
+      { text: "Upgrading to 1.0", link: "/guides/upgrading-to-1-0" },
+    ],
   },
   {
     text: "Concepts",
