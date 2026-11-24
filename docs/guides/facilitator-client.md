@@ -8,7 +8,7 @@ description: Call a facilitator's verify, settle and supported from code with Fa
 `/v2/verify`, `/v2/settle` and `/v2/supported`. The Express middleware uses it
 for you; call it yourself to verify and settle from another server framework,
 or to drive settlement from a backend. The
-[HTTP API reference](/reference/http-api) describes the endpoints underneath.
+endpoints underneath are on [Facilitator APIs](/reference/http-api).
 
 ```bash
 npm install @chainsafe/x402-client

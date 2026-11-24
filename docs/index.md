@@ -70,5 +70,6 @@ transaction the payer signed.
   [Upgrading to 1.0](/guides/upgrading-to-1-0)
 - **Concepts** — [The facilitator](/concepts/facilitator) ·
   [The payment flow](/concepts/payment-flow)
-- **Reference** — [Facilitator HTTP API](/reference/http-api) ·
-  [Error codes](/reference/error-codes) · [Protocol spec](/protocol/spec)
+- **Reference** — [Facilitator APIs](/reference/http-api) ·
+  [SDK APIs](/api/) · [Error codes](/reference/error-codes) ·
+  [Protocol spec](/protocol/spec)

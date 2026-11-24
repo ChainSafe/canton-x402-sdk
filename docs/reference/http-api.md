@@ -2,7 +2,7 @@
 description: The three endpoints an integration calls, with request and response shapes, status codes, and curl.
 ---
 
-# Facilitator HTTP API
+# Facilitator APIs
 
 The three endpoints an integration calls, with request and response shapes,
 status codes, and curl. `@chainsafe/x402-express` already calls `/v2/verify`

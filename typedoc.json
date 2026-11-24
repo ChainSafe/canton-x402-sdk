@@ -1,0 +1,23 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPointStrategy": "packages",
+  "entryPoints": ["packages/*"],
+  "packageOptions": {
+    "entryPoints": ["src/index.ts"],
+    "tsconfig": "../../tsconfig.typedoc.json",
+    "readme": "none"
+  },
+  "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],
+  "out": "docs/api",
+  "docsRoot": "docs",
+  "readme": "docs/.vitepress/api-reference.md",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "name": "SDK APIs",
+  "hideBreadcrumbs": true,
+  "useCodeBlocks": true,
+  "sidebar": {
+    "pretty": true,
+    "collapsed": true
+  }
+}

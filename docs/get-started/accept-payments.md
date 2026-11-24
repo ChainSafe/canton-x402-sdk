@@ -70,8 +70,8 @@ hands-on part. Building the paying side instead? See
    something, so each entry says what. `network` is optional: leave it out and
    it is discovered, or name it to choose. If the facilitator settles that
    instrument on more than one network, naming one is required rather than
-   guessed. The
-   [HTTP API reference](/reference/http-api#get-v2-supported) describes every field.
+   guessed. Every field
+   is described on [Facilitator APIs](/reference/http-api#get-v2-supported).
 
 5. **Gate a route**
 
