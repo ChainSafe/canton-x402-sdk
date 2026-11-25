@@ -10,8 +10,13 @@
 // works, Reference is what to look up, and within each the pages go in the
 // order a newcomer needs them.
 //
+// The one exception is the SDK APIs reference under /api/: TypeDoc generates it
+// from the packages' source on every build (`pnpm docs:api`), so it describes
+// the code being published rather than a copy someone remembered to refresh.
+// It is gitignored for the same reason.
+//
 // Pages that moved are sent on from their old URLs by theme/redirects.ts.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { defineConfig } from "vitepress";
 
@@ -27,7 +32,13 @@ const SECTIONS = [
   },
   {
     text: "Guides",
-    items: [{ text: "Upgrading to 1.0", link: "/guides/upgrading-to-1-0" }],
+    items: [
+      { text: "Express middleware", link: "/guides/express-middleware" },
+      { text: "Payer SDK", link: "/guides/payer-sdk" },
+      { text: "Facilitator client", link: "/guides/facilitator-client" },
+      { text: "Pending payments", link: "/guides/pending-payments" },
+      { text: "Upgrading to 1.0", link: "/guides/upgrading-to-1-0" },
+    ],
   },
   {
     text: "Concepts",
@@ -39,12 +50,24 @@ const SECTIONS = [
   {
     text: "Reference",
     items: [
-      { text: "Facilitator HTTP API", link: "/reference/http-api" },
+      { text: "Facilitator APIs", link: "/reference/http-api" },
       { text: "Error codes", link: "/reference/error-codes" },
+      { text: "SDK APIs", link: "/api/" },
       { text: "Protocol spec", link: "/protocol/spec" },
     ],
   },
 ];
+
+/**
+ * The SDK APIs' own sidebar: one collapsed entry per package, written by
+ * TypeDoc beside the pages. Missing when `vitepress dev` runs without
+ * `pnpm docs:api` first; the build always generates it, and its dead-link
+ * check fails on the "SDK APIs" link if it never was.
+ */
+const API_SIDEBAR_FILE = new URL("../api/typedoc-sidebar.json", import.meta.url);
+const API_SIDEBAR = existsSync(API_SIDEBAR_FILE)
+  ? JSON.parse(readFileSync(API_SIDEBAR_FILE, "utf8"))
+  : [];
 
 export default defineConfig({
   // WHERE THE SITE IS SERVED FROM. GitHub project Pages serve under
@@ -86,7 +109,12 @@ export default defineConfig({
       ...SECTIONS.map((section) => ({ text: section.text, items: section.items })),
       { text: "npm", link: "https://www.npmjs.com/org/chainsafe" },
     ],
-    sidebar: SECTIONS,
+    // The SDK APIs keep the guide's sections above its own tree, so a
+    // reader looking up a type is still one click from the page that uses it.
+    sidebar: {
+      "/api/": [...SECTIONS, { text: "SDK APIs", link: "/api/", items: API_SIDEBAR }],
+      "/": SECTIONS,
+    },
     socialLinks: [{ icon: "github", link: "https://github.com/ChainSafe/canton-x402-sdk" }],
     search: { provider: "local" },
   },

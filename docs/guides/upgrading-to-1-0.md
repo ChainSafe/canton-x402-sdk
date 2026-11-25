@@ -23,7 +23,8 @@ payer.
 ## Merchants: `@chainsafe/x402-express`
 
 Configure ways to pay, not Canton details. Each entry in `accepts` names an
-instrument by id and an amount in **atomic units** (10 decimals, so 0.05 CC is
+instrument by id and an amount in **atomic units** (10 decimals for every
+instrument, so 0.05 CC is
 `"500000000"`). The registry admin, the synchronizer and the fee payer come from
 the facilitator's `/v2/supported`, and can no longer be set.
 
@@ -92,8 +93,8 @@ paymentRequired({
 - `verify`, `settle` and `supported` send and return the spec's shapes from
   `@chainsafe/x402-core` 1.0.
 - **`settlement_pending` is not a failure.** Check it with
-  `isSettlementPending`, and retry settle with the same payload to learn the
-  outcome.
+  `isSettlementPending`, and don't ask for a new payment; see
+  [Pending payments](/guides/pending-payments).
 - `supported()` caches its answer for `supportedTtlMs` (5 minutes by default);
   `supported({ refresh: true })` skips the cache.
 

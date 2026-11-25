@@ -2,7 +2,7 @@
 description: The three endpoints an integration calls, with request and response shapes, status codes, and curl.
 ---
 
-# Facilitator HTTP API
+# Facilitator APIs
 
 The three endpoints an integration calls, with request and response shapes,
 status codes, and curl. `@chainsafe/x402-express` already calls `/v2/verify`
@@ -234,9 +234,10 @@ JSON
 Re-runs verify, reserves the payment so a concurrent replay cannot spend it, and
 submits the payer-signed transaction to Canton. Returns the on-ledger update id.
 
-Settling the same payload twice is safe: the second call answers with the
-first one's outcome rather than submitting again. That is how a
-`settlement_pending` answer is resolved: retry with the same payload.
+Settling the same payload twice is safe: the second call never submits again.
+It answers `invalid_exact_canton_execute_failed` if the first relay was
+rejected, and `settlement_pending` otherwise, even once it has committed. See
+[Pending payments](/guides/pending-payments).
 
 ### Request headers
 
@@ -298,9 +299,10 @@ units like the requirements' `amount`.
 ### Response 200 — pending
 
 The transaction was relayed but its outcome is not known yet. This is **not a
-failure**: do not ask the payer for a new payment. Retry settle with the same
-payload, and it answers with the outcome. There is no update id until the
-transaction commits, so `transaction` is its `preparedTxHash`.
+failure**: do not ask the payer for a new payment. A retry with the same
+payload tells you if it failed; see
+[Pending payments](/guides/pending-payments). There is no update id until
+the transaction commits, so `transaction` is its `preparedTxHash`.
 
 ```json
 {

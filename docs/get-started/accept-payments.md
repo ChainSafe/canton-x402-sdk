@@ -70,8 +70,8 @@ hands-on part. Building the paying side instead? See
    something, so each entry says what. `network` is optional: leave it out and
    it is discovered, or name it to choose. If the facilitator settles that
    instrument on more than one network, naming one is required rather than
-   guessed. The
-   [HTTP API reference](/reference/http-api#get-v2-supported) describes every field.
+   guessed. Every field
+   is described on [Facilitator APIs](/reference/http-api#get-v2-supported).
 
 5. **Gate a route**
 
@@ -108,7 +108,7 @@ not among them — those come from `/v2/supported`, as step 4 describes.
    on-ledger update id.
 
 ::: tip Next
-[The payment flow](/concepts/payment-flow) walks every request end to end, and
-the [HTTP API reference](/reference/http-api) has the full request and response
-spec for `/v2/verify` and `/v2/settle`.
+[Express middleware](/guides/express-middleware) covers every option: several
+ways to pay, memos and `preSettle`, and what each request goes through.
+[The payment flow](/concepts/payment-flow) walks a request end to end.
 :::

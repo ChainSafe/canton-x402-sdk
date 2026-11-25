@@ -31,6 +31,12 @@ Consumed by [`@chainsafe/x402-client`](../x402-client),
 [`@chainsafe/x402-express`](../x402-express), and
 [`@chainsafe/x402-server-sdk`](../x402-server-sdk).
 
+## Documentation
+
+The guides and reference are at
+[chainsafe.github.io/canton-x402-sdk](https://chainsafe.github.io/canton-x402-sdk/),
+including [Error codes](https://chainsafe.github.io/canton-x402-sdk/reference/error-codes.html).
+
 ## License
 
 Apache-2.0
