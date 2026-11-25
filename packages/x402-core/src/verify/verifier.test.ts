@@ -1469,17 +1469,28 @@ describe("cantonExactVerifier", () => {
       );
     });
 
-    it("accepts a factory the instrument's admin did not sign", async () => {
-      // Who signs a factory is an implementation's own choice — the Token
-      // Standard constrains it nowhere — and real bytes differ: Canton Coin's
-      // is signed by the DSO, while a Utility Registry transfer exercises the
-      // MERCHANT's own preapproval, signed by the merchant. A rule inferred
-      // from Canton Coin refused every registry payment on MainNet.
-      //
-      // What ties the factory to the issuer is `expectedAdmin`, which the
-      // ledger holds against the factory's own admin.
+    it("refuses a Canton Coin factory that is not the DSO's alone (spec Rule 3)", async () => {
+      // ExternalPartyAmuletRules is `signatory dso`, and spec Rule 3 asks for
+      // the DSO as its only signatory. One signed by someone else is a
+      // contract the payer could have created; one signed by the DSO and
+      // someone else is not Splice's template.
+      for (const signatories of [
+        ["someone-else::1220other"],
+        ["DSO::1220dso", "someone-else::1220other"],
+      ]) {
+        const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
+          factory: { inputContracts: [{ signatories }] },
+        });
+        expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
+          factoryRefusal("factory_signatories"),
+        );
+      }
+    });
+
+    it("compares the Canton Coin factory's signatories as a set", async () => {
+      // The DSO named twice is still the DSO alone.
       const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
-        factory: { inputContracts: [{ signatories: ["someone-else::1220other"] }] },
+        factory: { inputContracts: [{ signatories: ["DSO::1220dso", "DSO::1220dso"] }] },
       });
       expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
@@ -1491,17 +1502,48 @@ describe("cantonExactVerifier", () => {
       expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
     });
 
-    it("accepts a factory whose template is not Canton Coin's", async () => {
-      // The rule matches the Token Standard INTERFACE, which every registry
-      // implements with its own template. Checking Canton Coin's template
-      // instead would refuse every other registry's instrument, which this
-      // package routes payments to by design.
-      const { payload, requirements, payerPublicKeys } = await buildSignedFixture({
-        factory: {
-          templateId: { moduleName: "Other.Registry.Rules", entityName: "OtherRules" },
-        },
-      });
-      expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject({ isValid: true });
+    it("refuses a Canton Coin transfer through any factory but ExternalPartyAmuletRules (spec Rule 3)", async () => {
+      // The interface is every registry's, so it does not say whose factory
+      // this is. Signed by the DSO or not, another template is not Canton
+      // Coin's, and the template is what it answers. Module and entity are
+      // each changed on their own, so neither half of the match can be dropped.
+      const other = { moduleName: "Other.Registry.Rules", entityName: "OtherRules" };
+      for (const factory of [
+        { templateId: other },
+        { templateId: { moduleName: other.moduleName } },
+        { templateId: { entityName: other.entityName } },
+        { templateId: other, inputContracts: [{ signatories: ["someone-else::1220other"] }] },
+      ]) {
+        const { payload, requirements, payerPublicKeys } = await buildSignedFixture({ factory });
+        expect(await verifier.verify(payload, requirements, { payerPublicKeys })).toMatchObject(
+          factoryRefusal("factory_not_amulet_rules"),
+        );
+      }
+    });
+
+    it("holds Canton Coin's factory to Rule 3 whatever registry parties the caller passes", async () => {
+      // Nothing about the Canton Coin arm is configured, so `registryParties`
+      // neither turns it on nor off.
+      const stranger = { inputContracts: [{ signatories: ["someone-else::1220other"] }] };
+      for (const registryParties of [undefined, {}, { "DSO::1220dso": ["operator::1220op"] }]) {
+        const context = (
+          registryParties === undefined ? {} : { registryParties }
+        ) as Partial<CantonVerifyContext>;
+        const honest = await buildSignedFixture();
+        expect(
+          await verifier.verify(honest.payload, honest.requirements, {
+            payerPublicKeys: honest.payerPublicKeys,
+            ...context,
+          }),
+        ).toMatchObject({ isValid: true });
+        const forged = await buildSignedFixture({ factory: stranger });
+        expect(
+          await verifier.verify(forged.payload, forged.requirements, {
+            payerPublicKeys: forged.payerPublicKeys,
+            ...context,
+          }),
+        ).toMatchObject(factoryRefusal("factory_signatories"));
+      }
     });
 
     it("accepts an exercise and a disclosure whose package IDS differ", async () => {

@@ -409,10 +409,11 @@ function readDelivered(
  * the registry app that administers the instruments for which this transfer
  * factory can be used", so for a well-formed registry they are one party, and
  * the real Canton Coin payment carries the DSO in both. `factoryViolation` in
- * `transfer-rules.ts` deliberately checks no signatory, so this equality is the
- * only place the two admins are tied together. A registry that split them would
- * be refused right here, which is the one thing to look at first if an honest
- * non-Amulet transfer is ever rejected.
+ * `transfer-rules.ts` reads the factory contract's own signatories and fields
+ * (spec Rule 3), but `expectedAdmin` is what the ledger holds the factory to,
+ * and this equality is what ties it to the instrument. A registry that split
+ * them would be refused right here, which is the one thing to look at first if
+ * an honest non-Amulet transfer is ever rejected.
  *
  * What it buys: `expectedAdmin` is what the ledger guards on, so pinning it to
  * an admin a facilitator has pinned to the real DSO means a transfer aimed at

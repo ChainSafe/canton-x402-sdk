@@ -83,6 +83,7 @@ type CreateDetail = "create_unissued";
 type FactoryDetail =
   | "factory_unresolved"
   | "factory_interface"
+  | "factory_not_amulet_rules"
   | "factory_not_preapproval"
   | "factory_signatories"
   | "factory_receiver"
@@ -444,21 +445,24 @@ function registryTrustViolation(
  * here and enforced at settlement — a caller that verifies without settling
  * gets no protection from it.
  *
- * The issuer binding is not here either — for Canton Coin, or for a registry
- * token whose caller passes no `registryParties`. It runs through `expectedAdmin`,
- * which the transfer names and which the standard requires the factory to
- * validate against its own admin — see `readTransfer`. That admin is
- * MERCHANT-QUOTED, so closing the last gap needs the real DSO party, which
- * this layer has no way to know; the facilitator holds it as
- * `provider.dsoPartyId` and is where that comparison belongs.
+ * The admin it is held to is MERCHANT-QUOTED. Canton Coin's factory must be
+ * signed by the instrument's admin, and a transfer names that admin as
+ * `expectedAdmin` too — see `readTransfer` — but both are the quote's admin,
+ * held equal to it before this runs. Closing that last gap needs the real DSO
+ * party, which this layer has no way to know; the facilitator holds it as
+ * `provider.dsoPartyId` and is where that comparison belongs. A registry
+ * token whose caller passes no `registryParties` has no issuer binding here
+ * at all beyond `expectedAdmin`.
  *
  * What the rule does buy: a payer cannot swap in a contract of their own that
  * merely exposes a same-named choice and have it SETTLE, which before this
  * check it could.
  *
- * A REGISTRY TOKEN'S FACTORY is also held to the one spec Rule 3 names, when
- * the caller says which registrars it trusts — see
- * {@link registryFactoryViolation}. Canton Coin's arm is unchanged.
+ * EACH ARM IS HELD TO THE FACTORY spec Rule 3 names for it: Canton Coin to
+ * the DSO's `ExternalPartyAmuletRules` ({@link amuletFactoryViolation}),
+ * always; a registry token to the receiver's own preapproval
+ * ({@link registryFactoryViolation}), when the caller says which registrars
+ * it trusts.
  */
 export function factoryViolation(
   transfer: DecodedTransfer,
@@ -482,13 +486,47 @@ export function factoryViolation(
   // Canton Coin refused those outright. So it is checked per arm, from what
   // spec Rule 3 names for that arm, never from one shape for both.
   //
-  // Canton Coin's arm is still not checked here. What binds its factory to the
-  // issuer is `expectedAdmin`, held to the instrument's admin where the
-  // transfer is read, and which the standard requires the factory to validate
-  // against its own admin — the ledger's to enforce, and the facilitator holds
-  // the admin to its own DSO party.
+  // The arm is chosen by the instrument, as the delivery and inputs rules
+  // choose theirs, never by the factory: choosing it from the contract would
+  // let a payer pick the weaker rule by disclosing the contract that selects it.
   if (transfer.instrumentId.id !== AMULET_INSTRUMENT_ID) {
     return registryFactoryViolation(transfer, exercised, requirements, registryTrust);
+  }
+  return amuletFactoryViolation(transfer, exercised);
+}
+
+/**
+ * Canton Coin's transfer factory, which spec Rule 3 requires a Canton Coin
+ * transfer to exercise. Matched on module and entity, like every template
+ * here: the package id moves with each Splice release.
+ */
+const AMULET_RULES = {
+  moduleName: "Splice.ExternalPartyAmuletRules",
+  entityName: "ExternalPartyAmuletRules",
+};
+
+/**
+ * Why a Canton Coin transfer's factory is not the one spec Rule 3 names, or
+ * null: "`Splice.ExternalPartyAmuletRules:ExternalPartyAmuletRules` whose only
+ * signatory is `extra.instrumentId.admin` (the DSO)".
+ *
+ * ALWAYS ON, unlike the registry arm: nothing about it is configured. The
+ * template and its one signatory are Splice's (`signatory dso`), so an honest
+ * Canton Coin payment meets it whatever the caller passes.
+ *
+ * The admin read is the transfer's, which the amount, receiver and instrument
+ * check has already held equal to the quote's `extra.instrumentId.admin`.
+ */
+function amuletFactoryViolation(
+  transfer: DecodedTransfer,
+  factory: NonNullable<DecodedTransfer["exercisedContract"]>,
+): FactoryDetail | null {
+  if (!sameTemplate(factory.templateId, AMULET_RULES)) return "factory_not_amulet_rules";
+  // The DSO's alone. Compared as a set, so a repeated signatory is still one
+  // party.
+  const signatories = new Set(factory.signatories);
+  if (signatories.size !== 1 || !signatories.has(transfer.instrumentId.admin)) {
+    return "factory_signatories";
   }
   return null;
 }
