@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { getPublicKey, hashes } from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha2.js";
 import {
@@ -24,6 +25,9 @@ import {
   encodePreparedTransactionGraph,
   EXERCISED_CID,
   holdingCid,
+  REGISTRY_OPERATOR,
+  REGISTRY_PROVIDER,
+  REGISTRY_RULE_TEMPLATE,
   stringField,
   wrap,
 } from "./prepared-tx.fixtures";
@@ -1833,6 +1837,393 @@ describe("cantonExactVerifier", () => {
         extensions: { detail: "amount" },
       });
     });
+  });
+});
+
+describe("the registry infrastructure parties (spec Rule 7)", () => {
+  const verifier = createCantonExactVerifier(NETWORK);
+  const usdx = { id: "USDX", admin: "usdx-issuer::1220issuer" };
+  const stranger = "stranger::1220stranger";
+  /** What the fixture's rule and holdings name, trusted for the fixture's registrar. */
+  const trusted = { [usdx.admin]: [REGISTRY_OPERATOR, REGISTRY_PROVIDER] };
+  const refusal = (payer: string, detail: string) => ({
+    isValid: false,
+    invalidReason: "invalid_exact_canton_preapproval_missing",
+    payer,
+    extensions: { detail },
+  });
+  const verifyWith = async (
+    overrides: Parameters<typeof buildSignedFixture>[0],
+    registryParties?: unknown,
+  ) => {
+    const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture({
+      instrumentId: usdx,
+      delivery: REGISTRY_RULE_TEMPLATE,
+      ...overrides,
+    });
+    const context = (
+      registryParties === undefined ? { payerPublicKeys } : { payerPublicKeys, registryParties }
+    ) as CantonVerifyContext;
+    return { payer, result: await verifier.verify(payload, requirements, context) };
+  };
+
+  it("does not run when the caller configures no registry parties, as before it existed", async () => {
+    // Every caller written before the field verifies exactly as it did: a rule
+    // naming a party nobody configured still passes.
+    const { payer, result } = await verifyWith({
+      delivery: { ...REGISTRY_RULE_TEMPLATE, operator: stranger },
+    });
+    expect(result).toEqual(verified(payer));
+  });
+
+  it("does not run when the caller passes registryParties as undefined, as a forwarded unset config does", async () => {
+    // `registryParties: config.registryParties` with nothing configured. Only
+    // a value the caller actually set opts in.
+    const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture({
+      instrumentId: usdx,
+      delivery: { ...REGISTRY_RULE_TEMPLATE, operator: stranger },
+    });
+    const context: CantonVerifyContext = { payerPublicKeys, registryParties: undefined };
+    expect(await verifier.verify(payload, requirements, context)).toEqual(verified(payer));
+  });
+
+  it("accepts a registry payment relying only on parties trusted for its registrar", async () => {
+    const { payer, result } = await verifyWith({}, trusted);
+    expect(result).toEqual(verified(payer));
+  });
+
+  it("refuses a registry token whose registrar the caller configured nobody for", async () => {
+    // Opting in makes the map authoritative: an absent registrar fails closed.
+    const { payer, result } = await verifyWith({}, {});
+    expect(result).toEqual(refusal(payer, "delivery_registry_unconfigured"));
+  });
+
+  it("does not let another registrar's entry stand in for this one", async () => {
+    const { payer, result } = await verifyWith(
+      {},
+      { "other-issuer::1220other": [REGISTRY_OPERATOR, REGISTRY_PROVIDER] },
+    );
+    expect(result).toEqual(refusal(payer, "delivery_registry_unconfigured"));
+  });
+
+  it("refuses a rule co-signed by a party nobody configured", async () => {
+    const { payer, result } = await verifyWith(
+      {
+        delivery: {
+          ...REGISTRY_RULE_TEMPLATE,
+          signatories: [REGISTRY_PROVIDER, usdx.admin, stranger],
+        },
+      },
+      trusted,
+    );
+    expect(result).toEqual(refusal(payer, "delivery_registry_untrusted"));
+  });
+
+  it("refuses a rule whose operator nobody configured, though the operator never signs it", async () => {
+    // The captured rule is signed by its provider and the registrar only, so
+    // the signatories alone would never show the operator.
+    const { payer, result } = await verifyWith(
+      { delivery: { ...REGISTRY_RULE_TEMPLATE, operator: stranger } },
+      trusted,
+    );
+    expect(result).toEqual(refusal(payer, "delivery_registry_untrusted"));
+  });
+
+  it("refuses a rule whose provider nobody configured, even when its signatories are trusted", async () => {
+    const { payer, result } = await verifyWith(
+      {
+        delivery: {
+          ...REGISTRY_RULE_TEMPLATE,
+          provider: stranger,
+          signatories: [REGISTRY_PROVIDER, usdx.admin],
+        },
+      },
+      trusted,
+    );
+    expect(result).toEqual(refusal(payer, "delivery_registry_untrusted"));
+  });
+
+  it("refuses an input holding whose operator nobody configured", async () => {
+    // Answered as Rule 7, not as insufficient inputs: the holding pays, it is
+    // the party it names that is untrusted.
+    const { payer, result } = await verifyWith({ holdings: [{ operator: stranger }] }, trusted);
+    expect(result).toEqual(refusal(payer, "delivery_registry_untrusted"));
+  });
+
+  it("refuses an input holding whose provider nobody configured", async () => {
+    const { payer, result } = await verifyWith(
+      { holdings: [{}, { provider: stranger, amount: "0" }] },
+      trusted,
+    );
+    expect(result).toEqual(refusal(payer, "delivery_registry_untrusted"));
+  });
+
+  it("compares the parties as a set, not by role", async () => {
+    // The configuration says who is trusted, not which field each one fills.
+    const { payer, result } = await verifyWith(
+      {
+        delivery: {
+          ...REGISTRY_RULE_TEMPLATE,
+          operator: REGISTRY_PROVIDER,
+          provider: REGISTRY_OPERATOR,
+          signatories: [REGISTRY_OPERATOR, usdx.admin],
+        },
+        holdings: [{ operator: REGISTRY_PROVIDER, provider: REGISTRY_OPERATOR }],
+      },
+      trusted,
+    );
+    expect(result).toEqual(verified(payer));
+  });
+
+  it("trusts the registrar itself in any role, as cBTC's holdings name it their provider", async () => {
+    const { payer, result } = await verifyWith(
+      { holdings: [{ provider: usdx.admin }] },
+      { [usdx.admin]: [REGISTRY_OPERATOR, REGISTRY_PROVIDER] },
+    );
+    expect(result).toEqual(verified(payer));
+  });
+
+  it("reads an empty list as trusting the registrar alone, not as no entry", async () => {
+    const alone = { operator: usdx.admin, provider: usdx.admin };
+    const { payer, result } = await verifyWith(
+      {
+        delivery: { ...REGISTRY_RULE_TEMPLATE, ...alone, signatories: [usdx.admin] },
+        holdings: [alone],
+      },
+      { [usdx.admin]: [] },
+    );
+    expect(result).toEqual(verified(payer));
+    // The same list refuses a payment that names anyone else.
+    const named = await verifyWith({}, { [usdx.admin]: [] });
+    expect(named.result).toEqual(refusal(named.payer, "delivery_registry_untrusted"));
+  });
+
+  it("reads the rule's parties at their declared positions when its record is unlabeled", async () => {
+    // The fields under test carry no label, so only their position says which
+    // is which, as the engine binds them: `operator` and `provider` are
+    // fields 0 and 1. A reader that looked them up by label would find neither.
+    const unlabeled = ["operator", "provider"];
+    const honest = await verifyWith(
+      { delivery: { ...REGISTRY_RULE_TEMPLATE, blankDisclosureLabels: unlabeled } },
+      trusted,
+    );
+    expect(honest.result).toEqual(verified(honest.payer));
+    const forged = await verifyWith(
+      {
+        delivery: {
+          ...REGISTRY_RULE_TEMPLATE,
+          operator: stranger,
+          blankDisclosureLabels: unlabeled,
+        },
+      },
+      trusted,
+    );
+    expect(forged.result).toEqual(refusal(forged.payer, "delivery_registry_untrusted"));
+  });
+
+  it("refuses a rule whose operator it cannot find, rather than skipping it", async () => {
+    // A party the reader cannot find is not one it trusts. Labelled, the
+    // record has no `operator` at all; positional (one label blank), field 0
+    // carries a label that contradicts the one declared there. Each label
+    // appears once, so the record itself still decodes.
+    for (const delivery of [
+      { ...REGISTRY_RULE_TEMPLATE, relabelDisclosure: { operator: "custodian" } },
+      {
+        ...REGISTRY_RULE_TEMPLATE,
+        relabelDisclosure: { operator: "custodian" },
+        blankDisclosureLabels: ["registrar"],
+      },
+    ]) {
+      const { payer, result } = await verifyWith({ delivery }, trusted);
+      expect(result).toEqual(refusal(payer, "delivery_registry_untrusted"));
+    }
+  });
+
+  it("refuses a holding whose operator is missing, or is not a Party", async () => {
+    // inputsViolation never reads these fields, so it would pass both.
+    const { payer } = await buildSignedFixture();
+    const holding = (operator: { label: string; value: Uint8Array }[]) => ({
+      argument: [
+        ...operator,
+        { label: "provider", value: damlValue.party(REGISTRY_PROVIDER) },
+        { label: "registrar", value: damlValue.party(usdx.admin) },
+        { label: "owner", value: damlValue.party(payer) },
+        {
+          label: "instrument",
+          value: damlValue.record([
+            { label: "source", value: damlValue.party(usdx.admin) },
+            { label: "id", value: damlValue.text(usdx.id) },
+            { label: "scheme", value: damlValue.text("RegistrarInternalScheme") },
+          ]),
+        },
+        { label: "label", value: damlValue.text("") },
+        { label: "amount", value: damlValue.numeric("0.01") },
+      ],
+    });
+    for (const operator of [
+      [],
+      [{ label: "operator", value: damlValue.text(REGISTRY_OPERATOR) }],
+    ]) {
+      const { result } = await verifyWith({ holdings: [holding(operator)] }, trusted);
+      expect(result).toEqual(refusal(payer, "delivery_registry_untrusted"));
+    }
+    // The control: the same record with the operator as a Party.
+    const honest = await verifyWith(
+      { holdings: [holding([{ label: "operator", value: damlValue.party(REGISTRY_OPERATOR) }])] },
+      trusted,
+    );
+    expect(honest.result).toEqual(verified(payer));
+  });
+
+  it("leaves an input that does not resolve to the inputs check, which answers it precisely", async () => {
+    const { payer, result } = await verifyWith({ holdings: [{ omitDisclosure: true }] }, trusted);
+    expect(result).toEqual({
+      isValid: false,
+      invalidReason: "invalid_exact_canton_insufficient_inputs",
+      payer,
+      extensions: { detail: "inputs_unresolved" },
+    });
+  });
+
+  it("leaves an input that is not a registry holding to the inputs check", async () => {
+    const { payer, result } = await verifyWith(
+      { holdings: [], declaredInputs: [EXERCISED_CID] },
+      trusted,
+    );
+    expect(result).toEqual({
+      isValid: false,
+      invalidReason: "invalid_exact_canton_insufficient_inputs",
+      payer,
+      extensions: { detail: "inputs_template" },
+    });
+  });
+
+  it("is ignored by Canton Coin, configured or not", async () => {
+    for (const registryParties of [{}, trusted, "garbage"]) {
+      const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture();
+      const context = { payerPublicKeys, registryParties } as unknown as CantonVerifyContext;
+      expect(await verifier.verify(payload, requirements, context)).toEqual(verified(payer));
+    }
+  });
+
+  it("reads a configuration it cannot use as trusting nobody, never as absent", async () => {
+    // Present means the caller meant to configure trust; garbage must not
+    // switch the check off.
+    for (const registryParties of [
+      null,
+      "garbage",
+      [REGISTRY_OPERATOR],
+      { [usdx.admin]: REGISTRY_OPERATOR },
+      // An inherited entry is not one the caller configured.
+      Object.create({ [usdx.admin]: [REGISTRY_OPERATOR, REGISTRY_PROVIDER] }),
+    ]) {
+      const { payer, result } = await verifyWith({}, registryParties);
+      expect(result).toEqual(refusal(payer, "delivery_registry_unconfigured"));
+    }
+  });
+
+  it("ignores an entry's non-string members rather than refusing the whole entry", async () => {
+    const { payer, result } = await verifyWith(
+      {},
+      { [usdx.admin]: [REGISTRY_OPERATOR, 42, REGISTRY_PROVIDER, null] },
+    );
+    expect(result).toEqual(verified(payer));
+  });
+});
+
+describe("the MainNet USDCx capture (spec Rule 7)", () => {
+  // A real USDCx transfer, from the x402 project (see __fixtures__/NOTICE).
+  // It was never signed and its deadline has passed. Verify takes the payer's
+  // keys from the caller, so signing its hash with a throwaway key stands in
+  // for the payer's signature, and the clock is pinned inside its deadline.
+  const capture = readFileSync(
+    new URL("./__fixtures__/mainnet-usdcx-transfer-preapproval.b64", import.meta.url),
+    "utf8",
+  ).trim();
+  const REGISTRAR =
+    "decentralized-usdc-interchain-rep::12208115f1e168dd7e792320be9c4ca720c751a02a3053c7606e1c1cd3dad9bf60ef";
+  const OPERATOR =
+    "auth0_007c6643538f2eadd3e573dd05b9::12205bcc106efa0eaa7f18dc491e5c6f5fb9b0cc68dc110ae66f4ed6467475d7c78e";
+  const PROVIDER =
+    "Bridge-Operator::1220c8448890a70e65f6906bd48d797ee6551f094e9e6a53e329fd5b2b549334f13f";
+  const verifier = createCantonExactVerifier(MAINNET_NETWORK);
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Verify the capture as a merchant quoting exactly what it moves would. */
+  const verifyCapture = async (registryParties?: Record<string, readonly string[]>) => {
+    const transfer = decodePreparedTransaction(capture);
+    if (!transfer?.executeBeforeMicros) throw new Error("the USDCx capture no longer decodes");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Number(transfer.executeBeforeMicros / 1000n) - 60_000);
+
+    const seed = new Uint8Array(32).fill(9);
+    const preparedTxHash = await computePreparedTransactionHash(capture, HashingSchemeVersion.V2);
+    const requirements: CantonPaymentRequirements = {
+      scheme: "exact",
+      network: MAINNET_NETWORK,
+      amount: "10000000", // the transfer's 0.001 USDCx, in atomic units
+      asset: "USDCx",
+      payTo: transfer.receiver,
+      maxTimeoutSeconds: 60,
+      extra: {
+        assetTransferMethod: "transfer-factory",
+        synchronizerId: transfer.synchronizerId as string,
+        feePayer: "x402-facilitator::1220fee",
+        executeBeforeSeconds: 120,
+        instrumentId: transfer.instrumentId,
+      },
+    };
+    const payload: CantonPaymentPayload = {
+      x402Version: 2,
+      accepted: requirements,
+      payload: {
+        assetTransferMethod: "transfer-factory",
+        preparedTransaction: gzipped(capture),
+        preparedTxHash,
+        signature: signatureToBase64(signHash(preparedTxHash, toB64(seed))),
+        hashingSchemeVersion: HashingSchemeVersion.V2,
+      },
+    };
+    const payerPublicKeys = [toB64(getPublicKey(seed))];
+    const context: CantonVerifyContext =
+      registryParties === undefined ? { payerPublicKeys } : { payerPublicKeys, registryParties };
+    return {
+      payer: transfer.sender,
+      result: await verifier.verify(payload, requirements, context),
+    };
+  };
+  const refusal = (payer: string, detail: string) => ({
+    isValid: false,
+    invalidReason: "invalid_exact_canton_preapproval_missing",
+    payer,
+    extensions: { detail },
+  });
+
+  it("passes with its registrar's operator and provider configured", async () => {
+    const { payer, result } = await verifyCapture({ [REGISTRAR]: [OPERATOR, PROVIDER] });
+    expect(result).toMatchObject({ isValid: true, payer });
+  });
+
+  it("passes, as before, when the caller configures no registry parties", async () => {
+    const { payer, result } = await verifyCapture();
+    expect(result).toMatchObject({ isValid: true, payer });
+  });
+
+  it("fails with no entry for its registrar", async () => {
+    const { payer, result } = await verifyCapture({});
+    expect(result).toEqual(refusal(payer, "delivery_registry_unconfigured"));
+  });
+
+  it("fails with either party missing", async () => {
+    // The operator never signs the rule; only its field and the holding's name it.
+    const noOperator = await verifyCapture({ [REGISTRAR]: [PROVIDER] });
+    expect(noOperator.result).toEqual(refusal(noOperator.payer, "delivery_registry_untrusted"));
+    // The provider signs the rule and is named by it and by the holding.
+    const noProvider = await verifyCapture({ [REGISTRAR]: [OPERATOR] });
+    expect(noProvider.result).toEqual(refusal(noProvider.payer, "delivery_registry_untrusted"));
   });
 });
 

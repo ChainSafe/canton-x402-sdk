@@ -100,10 +100,28 @@ type DeliveryDetail =
   | "delivery_instrument"
   | "delivery_legacy_send"
   | "delivery_receiver"
+  | "delivery_registry_unconfigured"
+  | "delivery_registry_untrusted"
   | "delivery_sender"
   | "delivery_signatories"
   | "delivery_unchecked"
   | "delivery_unresolved";
+
+/**
+ * Which registry infrastructure parties the caller trusts for this
+ * instrument's registrar (spec Rule 7), as the verifier resolved them from
+ * `CantonVerifyContext.registryParties`.
+ *
+ * - `"unchecked"`: the caller passed no `registryParties` (absent or
+ *   `undefined`), so the check does not run. This is how every caller
+ *   verified before it existed.
+ * - `"unconfigured"`: it passed `registryParties`, but with no readable list
+ *   for this registrar — `{}`, another registrar's entry, or a value that is
+ *   not a map of lists.
+ * - a list: the parties trusted beside the registrar itself. Empty is a real
+ *   answer, not a missing one: it trusts the registrar alone.
+ */
+export type RegistryTrust = "unchecked" | "unconfigured" | readonly string[];
 
 /**
  * Two on-ledger `Decimal` amounts, compared as NUMBERS.
@@ -192,10 +210,15 @@ export function senderSignedCreateViolation(transfer: DecodedTransfer): CreateDe
  * measured refusing exactly this shape: an extra consequence node cloned onto
  * a real prepared transaction and re-signed by the payer was rejected on
  * submission (Splice 0.6.0 / Canton 3.4 LocalNet).
+ *
+ * WHO A REGISTRY DELIVERY RELIES ON is checked too, when the caller says who it
+ * trusts — see {@link registryTrustViolation}. Canton Coin's arm has no
+ * registry infrastructure parties and ignores `registryTrust`.
  */
 export function deliveryViolation(
   transfer: DecodedTransfer,
   requirements: CantonPaymentRequirements,
+  registryTrust: RegistryTrust,
 ): DeliveryDetail | null {
   const consequences = transfer.consequences ?? [];
 
@@ -243,6 +266,11 @@ export function deliveryViolation(
     // honest registry payment is ever refused here, this is the line to look
     // at first.
     if (!target.signatories.includes(transfer.instrumentId.admin)) return "delivery_admin";
+    // ... and relying on no registry infrastructure party the caller has not
+    // configured for that issuer (Rule 7). The admin above proves whose rule
+    // it is; it says nothing about who else signed it or is named in it.
+    const untrusted = registryTrustViolation(transfer, target, registryTrust);
+    if (untrusted) return untrusted;
     // What the delivery MOVES, from the whole Transfer record it takes as its
     // argument — and must be what the root said it would move. The
     // reference facilitator reports catching real bytes this way: a root over
@@ -312,6 +340,83 @@ export function deliveryViolation(
   if (![...want].every((p) => signatories.has(p))) return "delivery_signatories";
   if (provider === receiver && provider === dso) return "delivery_signatories";
   if (direct.length > 0) return "delivery_unchecked";
+  return null;
+}
+
+/**
+ * The registry infrastructure parties a Utility Registry contract names, at
+ * their declaration index. The `TransferRule` and the `Holding` both open with
+ * `{operator, provider, registrar, ...}`, so one table reads both.
+ *
+ * The layout is known from two registries only — the MainNet USDCx transfer
+ * and FTP's cBTC offers — which agree: the Utility's operator first, the
+ * token's provider second. cBTC's holdings name the registrar itself as
+ * provider, which the set comparison below admits without a special case.
+ *
+ * The rule's own `registrar` (field 2) is not read here: Rule 7 asks that the
+ * rule be the registrar's, which `delivery_admin` already holds through its
+ * signatories, and a holding's registrar is bound by `inputsViolation`.
+ */
+const INFRASTRUCTURE_FIELDS = [
+  ["operator", 0],
+  ["provider", 1],
+] as const;
+
+/**
+ * Why a registry delivery relies on a party the caller does not trust for this
+ * registrar, or null (spec Rule 7: "The registry infrastructure parties that
+ * appear in a registry transfer ... are trusted only when the facilitator is
+ * configured with them for that registrar").
+ *
+ * Three places name such a party: the `TransferRule`'s signatories, the rule's
+ * own `operator` and `provider`, and each input holding's `operator` and
+ * `provider`. The rule's fields are read as well as its signatories because
+ * a real rule is signed only by its provider and the registrar, so the
+ * signatories alone never show the operator.
+ *
+ * COMPARED AS A SET, NOT BY ROLE. Each party has only to be the registrar or
+ * one the caller listed for it; the configuration does not say which party
+ * fills which field. Two captured registries agree on the layout, which is not
+ * enough to pin roles on every registry.
+ *
+ * A field the reader cannot find is refused rather than skipped: absent, at
+ * another type, or — in a record bound by declaration order — carrying a
+ * label that contradicts the one declared at its index. A party the reader
+ * cannot find is not one it trusts.
+ *
+ * The holdings are read HERE, not in `inputsViolation`, because that
+ * function's refusals answer `insufficient_inputs`, and an untrusted party is
+ * Rule 7's. This runs before `inputsViolation`, so an input that does not
+ * resolve, or is not a registry holding, is skipped and left to it: it answers
+ * those more precisely (`inputs_unresolved`, `inputs_template`).
+ */
+function registryTrustViolation(
+  transfer: DecodedTransfer,
+  rule: { signatories: readonly string[]; argument: readonly { label: string; value?: string }[] },
+  registryTrust: RegistryTrust,
+): DeliveryDetail | null {
+  // The caller never said whom it trusts, so the check does not run — the
+  // behaviour every caller had before it existed.
+  if (registryTrust === "unchecked") return null;
+  // It said whom it trusts, and named nobody for this registrar: nobody
+  // configured this token, so it does not settle.
+  if (registryTrust === "unconfigured") return "delivery_registry_unconfigured";
+
+  const trusted = new Set([transfer.instrumentId.admin, ...registryTrust]);
+  const isTrusted = (party: string | undefined): boolean =>
+    party !== undefined && trusted.has(party);
+
+  if (!rule.signatories.every(isTrusted)) return "delivery_registry_untrusted";
+  for (const [label, index] of INFRASTRUCTURE_FIELDS) {
+    if (!isTrusted(recordField(rule.argument, label, index))) return "delivery_registry_untrusted";
+  }
+  for (const input of transfer.inputs ?? []) {
+    const holding = input.contract;
+    if (!holding || !sameTemplate(holding.templateId, REGISTRY_HOLDING)) continue;
+    for (const [label, index] of INFRASTRUCTURE_FIELDS) {
+      if (!isTrusted(partyAt(holding.argument, label, index))) return "delivery_registry_untrusted";
+    }
+  }
   return null;
 }
 

@@ -33,6 +33,7 @@ import {
   factoryViolation,
   inputsViolation,
   senderSignedCreateViolation,
+  type RegistryTrust,
 } from "./transfer-rules";
 import {
   bytesToBase64,
@@ -113,6 +114,35 @@ const VIOLATION_REASON = {
   TransferViolation,
   SpecVerifyInvalidReason | CantonExactExtensionReason
 >;
+
+/**
+ * Which registry infrastructure parties the caller trusts for `registrar`,
+ * from `context.registryParties` (spec Rule 7).
+ *
+ * Read as defensively as the payer's keys are, because a caller outside
+ * TypeScript can pass anything. Only an absent or `undefined` field means the
+ * caller did not opt in, which is how every caller verified before the field
+ * existed — `undefined` included, so a caller forwarding an unset config
+ * value keeps that behaviour. Any other value is the caller configuring
+ * trust, so one this cannot read — `null`, not a map, or no list for this
+ * registrar — trusts nobody for it rather than switching the check off.
+ */
+function registryTrustFor(
+  context: CantonVerifyContext | undefined,
+  registrar: string,
+): RegistryTrust {
+  const configured: unknown = context?.registryParties;
+  if (configured === undefined) return "unchecked";
+  if (!isObj(configured) || Array.isArray(configured)) return "unconfigured";
+  // Own keys only: an inherited one such as `constructor` is not a registrar
+  // anybody configured.
+  if (!Object.hasOwn(configured, registrar)) return "unconfigured";
+  const parties = configured[registrar];
+  if (!Array.isArray(parties)) return "unconfigured";
+  // A non-string names no party, so it can never match one; dropping it keeps
+  // the comparison to party ids.
+  return parties.filter((party): party is string => typeof party === "string");
+}
 
 /** The fields Rule 2 calls the proof. */
 const PROOF_FIELDS = ["preparedTransaction", "preparedTxHash", "signature"] as const;
@@ -341,8 +371,14 @@ async function verifyCantonExact(
   // 16. the transfer must DELIVER, not leave a pending instruction. Which of
   //     the two a signed TransferFactory_Transfer does is visible only in its
   //     consequences, and relaying a pending one commits the payer's funds
-  //     without paying the merchant.
-  const delivery = deliveryViolation(transfer, quoted);
+  //     without paying the merchant. A registry delivery must also rely on
+  //     no infrastructure party the caller has not configured for its
+  //     registrar (Rule 7), when the caller passes `registryParties` at all.
+  const delivery = deliveryViolation(
+    transfer,
+    quoted,
+    registryTrustFor(context, transfer.instrumentId.admin),
+  );
   if (delivery) {
     return fail("invalid_exact_canton_preapproval_missing", payer, delivery);
   }

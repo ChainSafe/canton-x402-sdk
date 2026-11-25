@@ -75,6 +75,28 @@ export interface CantonVerifyContext {
    * one did verify comes back as `extensions.signedBy`.
    */
   payerPublicKeys: readonly string[];
+  /**
+   * The registry infrastructure parties trusted for each registrar, keyed by
+   * the registrar's party id (an instrument's `instrumentId.admin`). For the
+   * DA Registry Utility, that is its operator and the token's provider.
+   *
+   * Spec Rule 7 trusts such a party only when the facilitator is configured
+   * with it for that registrar. So for a registry token (any instrument but
+   * Canton Coin), each signatory of the `TransferRule` the payment delivers
+   * through, the rule's own `operator` and `provider`, and each input
+   * holding's `operator` and `provider` must be the registrar itself or one
+   * of the parties listed for it. They are compared as a set, not by role:
+   * the list says who is trusted, not which field each one fills.
+   *
+   * Optional, and OPT-IN. Leave it out (or pass `undefined`) and this check
+   * does not run, as before it existed: registry infrastructure parties are
+   * then not checked at all. Pass it — even `{}` — and it is authoritative: a
+   * registrar with no entry is one nobody configured, and its tokens are
+   * refused. So are they when the value is not an object at all, or when the
+   * registrar's entry is not a list; members of a list that are not strings
+   * are ignored. Canton Coin ignores the field.
+   */
+  registryParties?: Readonly<Record<string, readonly string[]>>;
 }
 
 /**
