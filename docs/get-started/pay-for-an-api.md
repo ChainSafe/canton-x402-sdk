@@ -61,7 +61,8 @@ pair in the SDK repo is a full runnable payer + merchant, with the complete
 credential wiring in its `.env.example`.
 
 ::: tip Next
-[The payment flow](/concepts/payment-flow) walks every request end to end, and the
-[HTTP API reference](/reference/http-api) has the full request and response spec for
-`/v2/verify` and `/v2/settle`.
+[Payer SDK](/guides/payer-sdk) covers auth on each
+network, several payers, and writing your own, and
+[Pending payments](/guides/pending-payments) what to do when a payment's
+outcome is not known yet.
 :::
