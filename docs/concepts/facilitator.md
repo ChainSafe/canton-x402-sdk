@@ -102,9 +102,11 @@ facilitator's alone, since only it holds the state involved:
    well.
 7. **The transfer went through a real factory** — the contract the transfer
    choice was exercised on must be one the transaction itself discloses,
-   exercised through the Token Standard `TransferFactory` interface. For a
-   registry token (USDCx, say), when the facilitator verifies it against the
-   registrars it is configured for, it must also be your own registry
+   exercised through the Token Standard `TransferFactory` interface. For
+   Canton Coin it must be the DSO's `ExternalPartyAmuletRules`, signed by the
+   instrument's admin alone. For a registry token (USDCx, say), when the
+   facilitator verifies it against the registrars it is configured for, it
+   must also be your own registry
    `TransferPreapproval`: signed by `payTo` alone, naming `payTo` as receiver
    and the instrument's admin, for a configured registrar
    (`invalid_exact_canton_malformed_payload`, with a `factory_` detail naming

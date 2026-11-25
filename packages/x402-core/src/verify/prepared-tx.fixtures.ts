@@ -593,11 +593,11 @@ export const REGISTRY_RULE_TEMPLATE = {
 } as const;
 
 /**
- * The template a fixture's exercise carries by default. Canton Coin's, because
- * a realistic fixture should look like the common case — but nothing compares
- * it against this: the verifier matches the INTERFACE, and the package id is
- * compared against nothing at all. Kept obviously synthetic so it is not
- * mistaken for a pin on some Splice release.
+ * The template a fixture's exercise carries by default: Canton Coin's, which
+ * spec Rule 3 requires a Canton Coin transfer to exercise. The verifier matches
+ * its module and entity; the package id is compared against nothing at all, so
+ * it is kept obviously synthetic and not mistaken for a pin on some Splice
+ * release.
  */
 const AMULET_FACTORY = {
   packageId: "f".repeat(64),
