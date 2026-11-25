@@ -13,6 +13,7 @@ import {
   EXACT_SCHEME_ID,
   fingerprintForPublicKey,
   gzipPreparedTransaction,
+  ledgerToAtomic,
   signatureToBase64,
   signHash,
 } from "./index";
@@ -32,6 +33,7 @@ import {
   wrap,
 } from "./prepared-tx.fixtures";
 import type { EncodeOptions } from "./prepared-tx.fixtures";
+import { deliveryViolation } from "./transfer-rules";
 import type {
   CantonPaymentPayload,
   CantonPaymentRequirements,
@@ -136,7 +138,9 @@ async function buildSignedFixture(
     executeBeforeMicros,
       ...(overrides.memo === undefined ? {} : { memo: overrides.memo }),
     },
-    // A real payer exercises the admin-signed factory; the check needs it.
+    // A real payer exercises the instrument's real factory, which the check
+    // needs: the DSO's for Canton Coin, the receiver's registry preapproval
+    // for a registry token.
     {
       factory: overrides.factory ?? {},
       ...(overrides.blankLabels === undefined ? {} : { blankLabels: overrides.blankLabels }),
@@ -218,7 +222,9 @@ async function reDeadline(
       instrumentId: requirements.extra.instrumentId,
       ...(executeBeforeMicros === undefined ? {} : { executeBeforeMicros }),
     },
-    // A real payer exercises the admin-signed factory; the check needs it.
+    // A real payer exercises the instrument's real factory, which the check
+    // needs: the DSO's for Canton Coin, the receiver's registry preapproval
+    // for a registry token.
     { factory: {}, delivery: {} },
   );
   const preparedTxHash = await computePreparedTransactionHash(protobuf, HashingSchemeVersion.V2);
@@ -1852,6 +1858,17 @@ describe("the registry infrastructure parties (spec Rule 7)", () => {
     payer,
     extensions: { detail },
   });
+  /**
+   * A registrar with no entry. Rule 3's factory check reads the same answer
+   * and runs first, so the refusal is its own: a registrar nobody configured
+   * is one whose factory no caller settles.
+   */
+  const unconfigured = (payer: string) => ({
+    isValid: false,
+    invalidReason: "invalid_exact_canton_malformed_payload",
+    payer,
+    extensions: { detail: "factory_registry_unconfigured" },
+  });
   const verifyWith = async (
     overrides: Parameters<typeof buildSignedFixture>[0],
     registryParties?: unknown,
@@ -1895,7 +1912,7 @@ describe("the registry infrastructure parties (spec Rule 7)", () => {
   it("refuses a registry token whose registrar the caller configured nobody for", async () => {
     // Opting in makes the map authoritative: an absent registrar fails closed.
     const { payer, result } = await verifyWith({}, {});
-    expect(result).toEqual(refusal(payer, "delivery_registry_unconfigured"));
+    expect(result).toEqual(unconfigured(payer));
   });
 
   it("does not let another registrar's entry stand in for this one", async () => {
@@ -1903,7 +1920,7 @@ describe("the registry infrastructure parties (spec Rule 7)", () => {
       {},
       { "other-issuer::1220other": [REGISTRY_OPERATOR, REGISTRY_PROVIDER] },
     );
-    expect(result).toEqual(refusal(payer, "delivery_registry_unconfigured"));
+    expect(result).toEqual(unconfigured(payer));
   });
 
   it("refuses a rule co-signed by a party nobody configured", async () => {
@@ -2099,7 +2116,10 @@ describe("the registry infrastructure parties (spec Rule 7)", () => {
   });
 
   it("is ignored by Canton Coin, configured or not", async () => {
-    for (const registryParties of [{}, trusted, "garbage"]) {
+    // Including an entry for the DSO itself, as a caller keying every
+    // instrument's admin would pass.
+    const dsoEntry = { "DSO::1220dso": [REGISTRY_OPERATOR] };
+    for (const registryParties of [{}, trusted, "garbage", dsoEntry]) {
       const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture();
       const context = { payerPublicKeys, registryParties } as unknown as CantonVerifyContext;
       expect(await verifier.verify(payload, requirements, context)).toEqual(verified(payer));
@@ -2118,7 +2138,7 @@ describe("the registry infrastructure parties (spec Rule 7)", () => {
       Object.create({ [usdx.admin]: [REGISTRY_OPERATOR, REGISTRY_PROVIDER] }),
     ]) {
       const { payer, result } = await verifyWith({}, registryParties);
-      expect(result).toEqual(refusal(payer, "delivery_registry_unconfigured"));
+      expect(result).toEqual(unconfigured(payer));
     }
   });
 
@@ -2131,31 +2151,165 @@ describe("the registry infrastructure parties (spec Rule 7)", () => {
   });
 });
 
-describe("the MainNet USDCx capture (spec Rule 7)", () => {
-  // A real USDCx transfer, from the x402 project (see __fixtures__/NOTICE).
-  // It was never signed and its deadline has passed. Verify takes the payer's
-  // keys from the caller, so signing its hash with a throwaway key stands in
-  // for the payer's signature, and the clock is pinned inside its deadline.
-  const capture = readFileSync(
-    new URL("./__fixtures__/mainnet-usdcx-transfer-preapproval.b64", import.meta.url),
-    "utf8",
-  ).trim();
-  const REGISTRAR =
-    "decentralized-usdc-interchain-rep::12208115f1e168dd7e792320be9c4ca720c751a02a3053c7606e1c1cd3dad9bf60ef";
-  const OPERATOR =
+describe("the registry factory (spec Rule 3)", () => {
+  const verifier = createCantonExactVerifier(NETWORK);
+  const usdx = { id: "USDX", admin: "usdx-issuer::1220issuer" };
+  const stranger = "stranger::1220stranger";
+  const trusted = { [usdx.admin]: [REGISTRY_OPERATOR, REGISTRY_PROVIDER] };
+  /** The registry's own factory, which a transfer to a payee with no preapproval exercises. */
+  const allocationFactory = {
+    moduleName: "Utility.Registry.App.V0.Service.AllocationFactory",
+    entityName: "AllocationFactory",
+  };
+  const malformed = (payer: string, detail: string) => ({
+    isValid: false,
+    invalidReason: "invalid_exact_canton_malformed_payload",
+    payer,
+    extensions: { detail },
+  });
+  const verifyWith = async (factory: EncodeOptions["factory"], registryParties?: unknown) => {
+    const { payload, requirements, payer, payerPublicKeys } = await buildSignedFixture({
+      instrumentId: usdx,
+      delivery: REGISTRY_RULE_TEMPLATE,
+      factory,
+    });
+    const context = (
+      registryParties === undefined ? { payerPublicKeys } : { payerPublicKeys, registryParties }
+    ) as CantonVerifyContext;
+    return { payer, result: await verifier.verify(payload, requirements, context) };
+  };
+
+  it("accepts the receiver's own registry preapproval, for a configured registrar", async () => {
+    const { payer, result } = await verifyWith({}, trusted);
+    expect(result).toEqual(verified(payer));
+  });
+
+  it("does not run when the caller configures no registry parties, as before it existed", async () => {
+    // Not even the answer for a payee with no preapproval moves: this one
+    // goes on to be judged by the delivery it carries, as it always was.
+    for (const factory of [
+      { templateId: allocationFactory },
+      { preapproval: { receiver: stranger } },
+      { inputContracts: [{ signatories: [stranger] }] },
+    ]) {
+      const { payer, result } = await verifyWith(factory);
+      expect(result).toEqual(verified(payer));
+    }
+  });
+
+  it("matches the preapproval on module AND entity, not either alone", async () => {
+    // Canton Coin's own preapproval shares the entity name; a proposal in the
+    // registry's module shares the module.
+    for (const templateId of [
+      { moduleName: "Splice.AmuletRules", entityName: "TransferPreapproval" },
+      {
+        moduleName: "Utility.Registry.App.V0.Model.TransferPreapproval",
+        entityName: "TransferPreapprovalProposal",
+      },
+    ]) {
+      const { payer, result } = await verifyWith({ templateId }, trusted);
+      expect(result).toEqual(malformed(payer, "factory_not_preapproval"));
+    }
+  });
+
+  it("refuses the registry's own factory, naming the preapproval the payee lacks", async () => {
+    const { payer, result } = await verifyWith({ templateId: allocationFactory }, trusted);
+    expect(result).toEqual(malformed(payer, "factory_not_preapproval"));
+  });
+
+  it("refuses any registrar the caller configured nobody for, whatever its factory", async () => {
+    for (const factory of [{}, { templateId: allocationFactory }]) {
+      const { payer, result } = await verifyWith(factory, {});
+      expect(result).toEqual(malformed(payer, "factory_registry_unconfigured"));
+    }
+  });
+
+  it("refuses a preapproval with a second signatory, or not signed by the receiver", async () => {
+    for (const signatories of [["merchant::1220merch", stranger], [usdx.admin], [stranger]]) {
+      const { payer, result } = await verifyWith({ inputContracts: [{ signatories }] }, trusted);
+      expect(result).toEqual(malformed(payer, "factory_signatories"));
+    }
+    // The control: the receiver listed twice is still one party.
+    const twice = await verifyWith(
+      { inputContracts: [{ signatories: ["merchant::1220merch", "merchant::1220merch"] }] },
+      trusted,
+    );
+    expect(twice.result).toEqual(verified(twice.payer));
+  });
+
+  it("refuses a preapproval naming another receiver", async () => {
+    // Someone else's preapproval, though the receiver signs it: the record
+    // says whose it is.
+    const { payer, result } = await verifyWith({ preapproval: { receiver: stranger } }, trusted);
+    expect(result).toEqual(malformed(payer, "factory_receiver"));
+  });
+
+  it("refuses a preapproval naming another instrument admin", async () => {
+    const { payer, result } = await verifyWith(
+      { preapproval: { instrumentAdmin: "other-issuer::1220other" } },
+      trusted,
+    );
+    expect(result).toEqual(malformed(payer, "factory_admin"));
+  });
+
+  it("reads the preapproval's fields at their declared positions when its record is unlabeled", async () => {
+    // `receiver` is field 1 and `instrumentAdmin` field 2, as the captured
+    // MainNet preapproval declares them. A reader that looked them up by
+    // label would find neither.
+    const blankLabels = ["receiver", "instrumentAdmin"];
+    const honest = await verifyWith({ preapproval: { blankLabels } }, trusted);
+    expect(honest.result).toEqual(verified(honest.payer));
+    const forged = await verifyWith({ preapproval: { blankLabels, receiver: stranger } }, trusted);
+    expect(forged.result).toEqual(malformed(forged.payer, "factory_receiver"));
+  });
+
+  it("refuses a preapproval whose receiver it cannot find, rather than skipping it", async () => {
+    // Labelled, the record has no `receiver`; positional (one label blank),
+    // field 1 carries a label that contradicts the one declared there.
+    for (const preapproval of [
+      { relabel: { receiver: "owner" } },
+      { relabel: { receiver: "owner" }, blankLabels: ["operator"] },
+    ]) {
+      const { payer, result } = await verifyWith({ preapproval }, trusted);
+      expect(result).toEqual(malformed(payer, "factory_receiver"));
+    }
+  });
+
+  it("refuses a preapproval whose instrument admin it cannot find, rather than skipping it", async () => {
+    // The same two shapes for field 2.
+    for (const preapproval of [
+      { relabel: { instrumentAdmin: "issuer" } },
+      { relabel: { instrumentAdmin: "issuer" }, blankLabels: ["operator"] },
+    ]) {
+      const { payer, result } = await verifyWith({ preapproval }, trusted);
+      expect(result).toEqual(malformed(payer, "factory_admin"));
+    }
+  });
+});
+
+describe("the MainNet registry captures (spec Rules 3 and 7)", () => {
+  // Real registry transfers: USDCx from the x402 project, cBTC from FTP's
+  // (see __fixtures__/NOTICE). None was signed and every deadline has passed.
+  // Verify takes the payer's keys from the caller, so signing a capture's hash
+  // with a throwaway key stands in for the payer's signature, and the clock is
+  // pinned inside its deadline.
+  const read = (name: string) =>
+    readFileSync(new URL(`./__fixtures__/${name}`, import.meta.url), "utf8").trim();
+  const DA_OPERATOR =
     "auth0_007c6643538f2eadd3e573dd05b9::12205bcc106efa0eaa7f18dc491e5c6f5fb9b0cc68dc110ae66f4ed6467475d7c78e";
-  const PROVIDER =
-    "Bridge-Operator::1220c8448890a70e65f6906bd48d797ee6551f094e9e6a53e329fd5b2b549334f13f";
   const verifier = createCantonExactVerifier(MAINNET_NETWORK);
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  /** Verify the capture as a merchant quoting exactly what it moves would. */
-  const verifyCapture = async (registryParties?: Record<string, readonly string[]>) => {
+  /** Verify a capture as a merchant quoting exactly what it moves would. */
+  const verifyCapture = async (
+    capture: string,
+    registryParties?: Record<string, readonly string[]>,
+  ) => {
     const transfer = decodePreparedTransaction(capture);
-    if (!transfer?.executeBeforeMicros) throw new Error("the USDCx capture no longer decodes");
+    if (!transfer?.executeBeforeMicros) throw new Error("a registry capture no longer decodes");
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Number(transfer.executeBeforeMicros / 1000n) - 60_000);
 
@@ -2164,8 +2318,8 @@ describe("the MainNet USDCx capture (spec Rule 7)", () => {
     const requirements: CantonPaymentRequirements = {
       scheme: "exact",
       network: MAINNET_NETWORK,
-      amount: "10000000", // the transfer's 0.001 USDCx, in atomic units
-      asset: "USDCx",
+      amount: String(ledgerToAtomic(transfer.amount, 10)),
+      asset: transfer.instrumentId.id,
       payTo: transfer.receiver,
       maxTimeoutSeconds: 60,
       extra: {
@@ -2201,29 +2355,100 @@ describe("the MainNet USDCx capture (spec Rule 7)", () => {
     payer,
     extensions: { detail },
   });
-
-  it("passes with its registrar's operator and provider configured", async () => {
-    const { payer, result } = await verifyCapture({ [REGISTRAR]: [OPERATOR, PROVIDER] });
-    expect(result).toMatchObject({ isValid: true, payer });
+  const malformed = (payer: string, detail: string) => ({
+    isValid: false,
+    invalidReason: "invalid_exact_canton_malformed_payload",
+    payer,
+    extensions: { detail },
   });
 
-  it("passes, as before, when the caller configures no registry parties", async () => {
-    const { payer, result } = await verifyCapture();
-    expect(result).toMatchObject({ isValid: true, payer });
+  describe("USDCx, delivered through the receiver's own preapproval", () => {
+    const capture = read("mainnet-usdcx-transfer-preapproval.b64");
+    const REGISTRAR =
+      "decentralized-usdc-interchain-rep::12208115f1e168dd7e792320be9c4ca720c751a02a3053c7606e1c1cd3dad9bf60ef";
+    const PROVIDER =
+      "Bridge-Operator::1220c8448890a70e65f6906bd48d797ee6551f094e9e6a53e329fd5b2b549334f13f";
+
+    it("passes with its registrar's operator and provider configured", async () => {
+      // Rule 3 included: its factory is the receiver's registry preapproval.
+      const { payer, result } = await verifyCapture(capture, {
+        [REGISTRAR]: [DA_OPERATOR, PROVIDER],
+      });
+      expect(result).toMatchObject({ isValid: true, payer });
+    });
+
+    it("passes, as before, when the caller configures no registry parties", async () => {
+      const { payer, result } = await verifyCapture(capture);
+      expect(result).toMatchObject({ isValid: true, payer });
+    });
+
+    it("fails with no entry for its registrar", async () => {
+      const { payer, result } = await verifyCapture(capture, {});
+      expect(result).toEqual(malformed(payer, "factory_registry_unconfigured"));
+    });
+
+    it("exercises a preapproval laid out as Rule 3 reads it", () => {
+      // The positions `registryFactoryViolation` falls back to, confirmed on
+      // real bytes: receiver at 1, instrumentAdmin at 2.
+      const exercised = decodePreparedTransaction(capture)?.exercisedContract;
+      expect(exercised?.templateId).toMatchObject({
+        moduleName: "Utility.Registry.App.V0.Model.TransferPreapproval",
+        entityName: "TransferPreapproval",
+      });
+      expect(exercised?.argument?.map((f) => f.label)).toEqual([
+        "operator",
+        "receiver",
+        "instrumentAdmin",
+        "instrumentAllowances",
+      ]);
+    });
+
+    it("is still refused by the delivery check alone, for a registrar with no entry", () => {
+      // Verify never reaches this: the factory check answers first. It stays
+      // as a backstop, so the rule is pinned on its own.
+      const transfer = decodePreparedTransaction(capture);
+      if (!transfer) throw new Error("the USDCx capture no longer decodes");
+      const requirements = { payTo: transfer.receiver } as CantonPaymentRequirements;
+      expect(deliveryViolation(transfer, requirements, "unconfigured")).toBe(
+        "delivery_registry_unconfigured",
+      );
+      expect(deliveryViolation(transfer, requirements, "unchecked")).toBeNull();
+    });
+
+    it("fails with either party missing", async () => {
+      // The operator never signs the rule; only its field and the holding's name it.
+      const noOperator = await verifyCapture(capture, { [REGISTRAR]: [PROVIDER] });
+      expect(noOperator.result).toEqual(refusal(noOperator.payer, "delivery_registry_untrusted"));
+      // The provider signs the rule and is named by it and by the holding.
+      const noProvider = await verifyCapture(capture, { [REGISTRAR]: [DA_OPERATOR] });
+      expect(noProvider.result).toEqual(refusal(noProvider.payer, "delivery_registry_untrusted"));
+    });
   });
 
-  it("fails with no entry for its registrar", async () => {
-    const { payer, result } = await verifyCapture({});
-    expect(result).toEqual(refusal(payer, "delivery_registry_unconfigured"));
-  });
+  describe("cBTC, two-step offers to a payee with no preapproval", () => {
+    // Both exercise the registry's own AllocationFactory, signed by the
+    // registrar, and leave a TransferOffer for the pool to accept.
+    const captures = [
+      read("mainnet-cbtc-registry-offer-to-pool.b64"),
+      read("mainnet-cbtc-registry-offer-beneficiary2.b64"),
+    ];
+    const REGISTRAR =
+      "cbtc-network::12205af3b949a04776fc48cdcc05a060f6bda2e470632935f375d1049a8546a3b262";
 
-  it("fails with either party missing", async () => {
-    // The operator never signs the rule; only its field and the holding's name it.
-    const noOperator = await verifyCapture({ [REGISTRAR]: [PROVIDER] });
-    expect(noOperator.result).toEqual(refusal(noOperator.payer, "delivery_registry_untrusted"));
-    // The provider signs the rule and is named by it and by the holding.
-    const noProvider = await verifyCapture({ [REGISTRAR]: [OPERATOR] });
-    expect(noProvider.result).toEqual(refusal(noProvider.payer, "delivery_registry_untrusted"));
+    it("is refused at the factory, naming the missing preapproval", async () => {
+      for (const capture of captures) {
+        const { payer, result } = await verifyCapture(capture, { [REGISTRAR]: [DA_OPERATOR] });
+        expect(result).toEqual(malformed(payer, "factory_not_preapproval"));
+      }
+    });
+
+    it("keeps today's answer when the caller configures no registry parties", async () => {
+      // Refused either way; only opting in moves the refusal to Rule 3.
+      for (const capture of captures) {
+        const { payer, result } = await verifyCapture(capture);
+        expect(result).toEqual(refusal(payer, "no_direct_delivery"));
+      }
+    });
   });
 });
 

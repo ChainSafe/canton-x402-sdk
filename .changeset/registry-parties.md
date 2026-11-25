@@ -16,8 +16,11 @@ neither the registrar nor listed for it:
 - `delivery_registry_untrusted`: a signatory of the `TransferRule` it delivers
   through, the rule's own `operator` or `provider`, or an input holding's
   `operator` or `provider`. They are compared as a set, not by role.
-- `delivery_registry_unconfigured`: the registrar has no entry. A map the
-  verifier cannot read counts as no entry.
+- A registrar with no entry is refused too; a map the verifier cannot read
+  counts as no entry. The registry factory check (spec Rule 3), which runs
+  first, answers it as `invalid_exact_canton_malformed_payload` /
+  `factory_registry_unconfigured`. The delivery check's own
+  `delivery_registry_unconfigured` stays as a backstop.
 
 Leave it out and nothing changes: the check does not run, so every existing
 caller verifies exactly as before. Canton Coin ignores it.

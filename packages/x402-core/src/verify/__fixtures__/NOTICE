@@ -1,15 +1,18 @@
+Prepared transactions captured on Canton MainNet, copied unchanged from two
+Apache-2.0 projects. None was signed and every deadline has passed. The tests
+that verify them sign each hash with a throwaway key, which verify accepts
+because the caller supplies the payer's keys, and pin the clock inside the
+capture's deadline.
+
+
 mainnet-usdcx-transfer-preapproval.b64
 
-A prepared transaction for a USDCx transfer on Canton MainNet, copied unchanged
+A direct USDCx transfer through the receiver's registry TransferPreapproval,
 from the x402 project:
 
   https://github.com/x402-foundation/x402
   typescript/packages/mechanisms/canton/src/__fixtures__/mainnet-usdcx-transfer-preapproval.b64
   commit c5bed45f7e461677642ed862108a4a078b8ad2c9
-
-It was never signed and its deadline has passed. The tests that verify it sign
-its hash with a throwaway key, which verify accepts because the caller supplies
-the payer's keys, and pin the clock inside its deadline.
 
 The x402 project's NOTICE reads:
 
@@ -28,3 +31,23 @@ The x402 project's NOTICE reads:
   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
   See the License for the specific language governing permissions and
   limitations under the License.
+
+
+mainnet-cbtc-registry-offer-to-pool.b64
+mainnet-cbtc-registry-offer-beneficiary2.b64
+
+Two cBTC transfers to a payee with no preapproval, each exercising the
+registry's own AllocationFactory and leaving a two-step TransferOffer, from
+FTP Tech's x402-canton-core:
+
+  https://github.com/FTP-Tech-LLC/x402-canton-core
+  packages/agent-wallet/src/__fixtures__/mainnet-cbtc-registry-offer-to-pool.b64
+  packages/agent-wallet/src/__fixtures__/mainnet-cbtc-registry-offer-beneficiary2.b64
+  commit 27081ea9c4a9c5682dfb7cae52cb9dc1a27f3e7b
+
+That project's NOTICE reads:
+
+  canton-x402-core
+  Copyright 2026 FTP Team (FTP Tech LLC)
+
+  This product includes software developed by FTP Tech LLC.

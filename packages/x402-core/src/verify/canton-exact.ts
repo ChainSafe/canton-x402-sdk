@@ -359,8 +359,13 @@ async function verifyCantonExact(
   // 15. the exercise must go through a real transfer factory, proved from the
   //     transaction's own input contracts. Placed after 14 because it reads
   //     the admin that step has just held equal to the quote's, so the
-  //     two cannot disagree about which instrument this is.
-  const factory = factoryViolation(transfer);
+  //     two cannot disagree about which instrument this is. A registry
+  //     token's factory must also be the receiver's own preapproval, for a
+  //     registrar the caller configured (Rule 3), when the caller passes
+  //     `registryParties` at all — the same switch as Rule 7's trust check in
+  //     step 16, which reads the same answer.
+  const registryTrust = registryTrustFor(context, transfer.instrumentId.admin);
+  const factory = factoryViolation(transfer, quoted, registryTrust);
   if (factory) return fail("invalid_exact_canton_malformed_payload", payer, factory);
   // 15b. no contract the SENDER signs may be created without the instrument's
   //      admin on it. Such a contract hands the payer's authority to whoever
@@ -374,11 +379,7 @@ async function verifyCantonExact(
   //     without paying the merchant. A registry delivery must also rely on
   //     no infrastructure party the caller has not configured for its
   //     registrar (Rule 7), when the caller passes `registryParties` at all.
-  const delivery = deliveryViolation(
-    transfer,
-    quoted,
-    registryTrustFor(context, transfer.instrumentId.admin),
-  );
+  const delivery = deliveryViolation(transfer, quoted, registryTrust);
   if (delivery) {
     return fail("invalid_exact_canton_preapproval_missing", payer, delivery);
   }

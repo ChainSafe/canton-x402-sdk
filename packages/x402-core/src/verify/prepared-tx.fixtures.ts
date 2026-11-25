@@ -337,8 +337,28 @@ export interface EncodeOptions {
   factory?: {
     /** The exercised contract id. */
     contractId?: string;
-    /** The exercise's `template_id`. Defaults to the real Canton Coin factory. */
+    /**
+     * The exercise's `template_id`. Defaults to the real Canton Coin factory —
+     * or, for a registry token, to the receiver's registry
+     * `TransferPreapproval` (see `preapproval`), which is what a real direct
+     * registry transfer exercises.
+     */
     templateId?: { packageId?: string; moduleName?: string; entityName?: string };
+    /**
+     * The registry `TransferPreapproval` a registry token's default factory
+     * discloses: `{operator, receiver, instrumentAdmin, instrumentAllowances}`,
+     * signed by the receiver alone, as on the captured MainNet USDCx transfer.
+     * Each field defaults to the honest one. Ignored when `templateId` is
+     * given, or for Canton Coin.
+     */
+    preapproval?: {
+      receiver?: string;
+      instrumentAdmin?: string;
+      /** Labels to emit blank, which binds the record by declaration order. */
+      blankLabels?: readonly string[];
+      /** Rewrite a label, e.g. `{ receiver: "owner" }`. */
+      relabel?: Readonly<Record<string, string>>;
+    };
     /**
      * The transaction's `input_contracts`, said outright.
      *
@@ -600,6 +620,17 @@ const TRANSFER_FACTORY_INTERFACE = {
 /** The package name a real Canton Coin factory and its exercise both carry. */
 const FACTORY_PACKAGE_NAME = "splice-amulet";
 
+/**
+ * The receiver's registry preapproval, which a direct registry transfer
+ * exercises as its factory, and the package both carry on the captured
+ * MainNet USDCx transfer.
+ */
+export const REGISTRY_PREAPPROVAL_TEMPLATE = {
+  moduleName: "Utility.Registry.App.V0.Model.TransferPreapproval",
+  entityName: "TransferPreapproval",
+} as const;
+const REGISTRY_APP_PACKAGE_NAME = "utility-registry-app-v0";
+
 /** `Identifier{1: package_id, 2: module_name, 3: entity_name}`. */
 function encodeIdentifier(id: { packageId?: string; moduleName?: string; entityName?: string } = {}): Uint8Array {
   return Writer.create()
@@ -661,14 +692,22 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
   // Exercise{9: choice_id, 10: chosen_value}
   // Exercise containing the transfer choice.
   const factory = opts.factory;
+  // A registry token's real factory is the receiver's registry preapproval;
+  // Canton Coin's is the DSO's ExternalPartyAmuletRules.
+  const registryFactory =
+    factory !== undefined &&
+    factory.templateId === undefined &&
+    transfer.instrumentId.id !== "Amulet";
+  const factoryTemplate = registryFactory ? REGISTRY_PREAPPROVAL_TEMPLATE : factory?.templateId;
+  const factoryPackage = registryFactory ? REGISTRY_APP_PACKAGE_NAME : FACTORY_PACKAGE_NAME;
   const exercise = Writer.create().uint32(tag(1, WIRE_LEN)).string("2.1");
   if (factory) {
     exercise.uint32(tag(2, WIRE_LEN)).string(factory.contractId ?? FACTORY_CID);
-    exercise.uint32(tag(3, WIRE_LEN)).string(FACTORY_PACKAGE_NAME);
+    exercise.uint32(tag(3, WIRE_LEN)).string(factoryPackage);
   }
   exercise
     .uint32(tag(4, WIRE_LEN))
-    .bytes(factory ? encodeIdentifier(factory.templateId) : new Uint8Array())
+    .bytes(factory ? encodeIdentifier(factoryTemplate) : new Uint8Array())
     .uint32(tag(7, WIRE_LEN))
     .string(transfer.sender);
   // 8: interface_id — the interface the choice was inherited from.
@@ -924,17 +963,30 @@ export function encodePreparedTransaction(transfer: DecodedTransfer, opts: Encod
     .string("test-transaction");
   if (factory) {
     // One disclosure by default: the exercised factory, agreeing with the
-    // exercise about what it is and signed by the instrument's admin.
+    // exercise about what it is — signed by the instrument's admin, or for a
+    // registry token's preapproval by the receiver alone.
+    const pre = factory.preapproval ?? {};
+    const preapprovalRecord = [
+      { label: "operator", value: party(REGISTRY_OPERATOR) },
+      { label: "receiver", value: party(pre.receiver ?? transfer.receiver) },
+      {
+        label: "instrumentAdmin",
+        value: party(pre.instrumentAdmin ?? transfer.instrumentId.admin),
+      },
+      { label: "instrumentAllowances", value: emptyList },
+    ].map((f) => ({ ...f, label: pre.relabel?.[f.label] ?? f.label }));
+    const signedBy = registryFactory ? [transfer.receiver] : [transfer.instrumentId.admin];
     const disclosures = factory.inputContracts ?? [{}];
     for (const d of disclosures) {
-      metadata.uint32(tag(7, WIRE_LEN)).bytes(
-        encodeInputContract(
-          d.contractId ?? factory.contractId ?? FACTORY_CID,
-          encodeIdentifier(d.templateId ?? factory.templateId),
-          d.signatories ?? [transfer.instrumentId.admin],
-          d.packageName ?? FACTORY_PACKAGE_NAME,
-        ),
+      const disclosure = encodeInputContract(
+        d.contractId ?? factory.contractId ?? FACTORY_CID,
+        encodeIdentifier(d.templateId ?? factoryTemplate),
+        d.signatories ?? signedBy,
+        d.packageName ?? factoryPackage,
+        registryFactory ? preapprovalRecord : undefined,
+        registryFactory ? new Set(pre.blankLabels ?? []) : undefined,
       );
+      metadata.uint32(tag(7, WIRE_LEN)).bytes(disclosure);
     }
   }
   // The holdings the transfer spends, disclosed as real ones are, with the
