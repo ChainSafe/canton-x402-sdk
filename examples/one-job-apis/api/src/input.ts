@@ -2,7 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-export const MAX_TEXT = 8_000;
+/** Text and base64 payloads; large enough for small images and short audio clips. */
+export const MAX_TEXT = 3_000_000;
 
 export interface JobInput {
   text: string;

@@ -1,0 +1,14 @@
+{
+  "name": "One-job APIs",
+  "short_name": "One-job",
+  "description": "Pay-per-call APIs over HTTP 402 on Canton. Send an agent, watch the owner's till.",
+  "start_url": "/#agent",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#05070c",
+  "theme_color": "#05070c",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

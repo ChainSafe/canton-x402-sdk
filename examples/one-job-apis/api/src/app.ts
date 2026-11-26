@@ -20,6 +20,9 @@ import { HANDLERS } from "./tools/registry.ts";
 
 export const TRACE_HEADER = "X-One-Job-Trace";
 
+const GATEWAY_INTERNAL_SECRET =
+  process.env.GATEWAY_INTERNAL_SECRET?.trim() ?? "dev-one-job-gateway-secret";
+
 for (const entry of TOOLS) {
   if (entry.live && HANDLERS[entry.tool] === undefined) {
     throw new Error(`one-job: ${entry.tool} is marked live and has no handler`);
@@ -35,7 +38,7 @@ export function createApp(port: number): Express {
   const facilitator = new FacilitatorClient(`http://127.0.0.1:${port}/facilitator`);
   const pending = new WeakMap<Request, Pending>();
   const app = express();
-  app.use(express.json({ limit: "64kb" }));
+  app.use(express.json({ limit: "4mb" }));
   app.use("/facilitator", facilitatorRouter());
 
   app.get("/health", (_req, res) => {
@@ -57,6 +60,43 @@ export function createApp(port: number): Express {
     });
   });
 
+  app.post("/v1/:tool/exec", async (req, res) => {
+    if (req.get("x-one-job-gateway") !== GATEWAY_INTERNAL_SECRET) {
+      res.status(403).json({ error: "Forbidden." });
+      return;
+    }
+    const tool = findTool(toolId(req));
+    if (!tool) {
+      res.status(404).json({ error: "Unknown tool." });
+      return;
+    }
+    const input = readInput(req.body, NEEDS_OTHER.has(tool.tool));
+    if ("error" in input) {
+      res.status(400).json({ error: input.error });
+      return;
+    }
+    const handler = HANDLERS[tool.tool];
+    if (!handler) {
+      res.status(500).json({ error: "No handler for this tool." });
+      return;
+    }
+    try {
+      const result = await Promise.resolve(handler.run(input));
+      res.setHeader(
+        TRACE_HEADER,
+        Buffer.from(
+          JSON.stringify({
+            prepaid: true,
+            note: "Spent bulk quota on the gateway; no per-call 402 on this request.",
+          }),
+        ).toString("base64"),
+      );
+      res.json({ result });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "The job failed." });
+    }
+  });
+
   app.post("/demo/sign", (req, res) => {
     const accepts = readAccepts(req.body);
     if (!accepts) {
@@ -72,10 +112,6 @@ export function createApp(port: number): Express {
       const tool = findTool(toolId(req));
       if (!tool) {
         res.status(404).json({ error: "Unknown tool." });
-        return;
-      }
-      if (!tool.live) {
-        res.status(501).json({ error: "This job is not in this build.", see: "hash.sha256" });
         return;
       }
       const input = readInput(req.body, NEEDS_OTHER.has(tool.tool));
@@ -101,7 +137,7 @@ export function createApp(port: number): Express {
         ],
       },
     }),
-    (req, res) => {
+    async (req, res) => {
       const job = pending.get(req);
       const handler = job ? HANDLERS[job.tool.tool] : undefined;
       if (!job || !handler) {
@@ -110,7 +146,7 @@ export function createApp(port: number): Express {
       }
       let result: unknown;
       try {
-        result = handler.run(job.input);
+        result = await Promise.resolve(handler.run(job.input));
       } catch (err) {
         res.status(500).json({ error: err instanceof Error ? err.message : "The job failed." });
         return;

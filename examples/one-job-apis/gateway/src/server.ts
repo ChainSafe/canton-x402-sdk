@@ -13,11 +13,17 @@ import { findTool } from "@chainsafe/x402-example-one-job-catalog";
 
 import { DAILY_CAP_CENTS, PORT, PUBLIC_ORIGIN, SESSION_SECRET, oauthReady } from "./config.ts";
 import { assertOauthConfigured, googleAuthUrl, googleUserFromCallback } from "./google.ts";
-import { invokeMerchant } from "./pay.ts";
+import { publicTasks, runTask, type AgentEvent } from "./agent.ts";
+import { packById, QUOTA_PACKS } from "./quota.ts";
+import { invokeMerchant, invokeMerchantPrepaid } from "./pay.ts";
+import { recordSale, tillSnapshot, tillStream } from "./till.ts";
 import {
+  addPrepaidCalls,
   canSpend,
+  consumePrepaidCall,
   findUserById,
   passkeysForUser,
+  prepaidCallsFor,
   recordSpend,
   resetSpendIfNewDay,
   upsertGoogleUser,
@@ -34,7 +40,7 @@ loadEnv({ path: fileURLToPath(new URL("../.env", import.meta.url)) });
 const app = express();
 app.set("trust proxy", 1);
 app.use(cookieParser());
-app.use(express.json({ limit: "64kb" }));
+app.use(express.json({ limit: "4mb" }));
 app.use(
   session({
     name: "onejob.sid",
@@ -60,7 +66,11 @@ function requireUser(req: express.Request, res: express.Response, next: express.
 }
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, oauth: oauthReady() });
+  res.json({
+    ok: true,
+    oauth: oauthReady(),
+    devLogin: process.env.ALLOW_DEV_LOGIN === "1",
+  });
 });
 
 app.get("/auth/me", (req, res) => {
@@ -82,7 +92,63 @@ app.get("/auth/me", (req, res) => {
     hasPasskey: passkeysForUser(fresh.id).length > 0,
     spentCentsToday: fresh.spentCentsToday,
     dailyCapCents: DAILY_CAP_CENTS,
+    prepaidCalls: prepaidCallsFor(fresh.id),
   });
+});
+
+app.get("/quota/packs", (_req, res) => {
+  res.json({
+    packs: QUOTA_PACKS.map((p) => ({
+      id: p.id,
+      title: p.title,
+      calls: p.calls,
+      priceCents: p.priceCents,
+      pitch: p.pitch,
+    })),
+  });
+});
+
+app.post("/quota/purchase", requireUser, async (req, res) => {
+  const pack = packById(String(req.body?.pack ?? ""));
+  if (!pack) {
+    res.status(400).json({ error: "Unknown pack." });
+    return;
+  }
+  const challenge = req.session.webauthnChallenge;
+  const assertion = req.body?.assertion as AuthenticationResponseJSON | undefined;
+  if (!challenge || !assertion) {
+    res.status(400).json({ error: "Approve the bulk sale with your passkey first." });
+    return;
+  }
+  try {
+    await verifyAuthentication(req.session.userId!, assertion, challenge);
+    delete req.session.webauthnChallenge;
+  } catch (err) {
+    res.status(401).json({ error: err instanceof Error ? err.message : "Passkey check failed." });
+    return;
+  }
+
+  const budget = canSpend(req.session.userId!, pack.priceCents, DAILY_CAP_CENTS);
+  if (!budget.ok) {
+    res.status(429).json({ error: budget.reason });
+    return;
+  }
+
+  try {
+    const paid = await invokeMerchant(pack.merchantTool, { text: pack.id });
+    recordSpend(req.session.userId!, pack.priceCents);
+    const remaining = addPrepaidCalls(req.session.userId!, pack.calls);
+    recordSale({
+      tool: pack.merchantTool,
+      cents: pack.priceCents,
+      caller: "person",
+      payer: payerLabel(req.session.userId!, "person"),
+      transaction: paid.receipt.transaction,
+    });
+    res.json({ pack: pack.id, granted: pack.calls, prepaidCalls: remaining, receipt: paid.receipt });
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : "Bulk purchase failed." });
+  }
 });
 
 app.get("/auth/google", async (req, res) => {
@@ -170,23 +236,54 @@ app.post("/webauthn/payment/options", requireUser, async (req, res) => {
 });
 
 app.post("/v1/:tool/pay", requireUser, async (req, res) => {
+  const userId = req.session.userId!;
   const toolId = String(req.params.tool ?? "");
-  const challenge = req.session.webauthnChallenge;
-  const assertion = req.body?.assertion as AuthenticationResponseJSON | undefined;
-  if (!challenge || !assertion) {
-    res.status(400).json({ error: "Place your finger first (payment approval missing)." });
-    return;
-  }
-
   const text = String(req.body?.text ?? "");
   const other = req.body?.other !== undefined ? String(req.body.other) : undefined;
   if (!text.trim()) {
     res.status(400).json({ error: "text is required." });
     return;
   }
+  const body = other !== undefined ? { text, other } : { text };
+  const payPerCall = req.body?.payPerCall === true;
+  const quotaLeft = prepaidCallsFor(userId);
+
+  if (quotaLeft > 0 && !payPerCall) {
+    try {
+      const paid = await invokeMerchantPrepaid(toolId, body);
+      if (!consumePrepaidCall(userId)) {
+        res.status(409).json({ error: "Quota ran out before this call could finish." });
+        return;
+      }
+      recordSale({
+        tool: toolId,
+        cents: 0,
+        caller: "person",
+        payer: payerLabel(userId, "person"),
+        transaction: paid.receipt.transaction,
+      });
+      res.json({ ...paid, prepaidCalls: prepaidCallsFor(userId) });
+      return;
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : "Call failed." });
+      return;
+    }
+  }
+
+  const challenge = req.session.webauthnChallenge;
+  const assertion = req.body?.assertion as AuthenticationResponseJSON | undefined;
+  if (!challenge || !assertion) {
+    res.status(400).json({
+      error:
+        quotaLeft > 0
+          ? "No prepaid calls left for this path — passkey required, or buy another pack."
+          : "Place your finger first (payment approval missing).",
+    });
+    return;
+  }
 
   try {
-    await verifyAuthentication(req.session.userId!, assertion, challenge);
+    await verifyAuthentication(userId, assertion, challenge);
     delete req.session.webauthnChallenge;
   } catch (err) {
     res.status(401).json({ error: err instanceof Error ? err.message : "Fingerprint check failed." });
@@ -194,21 +291,102 @@ app.post("/v1/:tool/pay", requireUser, async (req, res) => {
   }
 
   const cents = findTool(toolId)?.cents ?? 1;
-  const budget = canSpend(req.session.userId!, cents, DAILY_CAP_CENTS);
+  const budget = canSpend(userId, cents, DAILY_CAP_CENTS);
   if (!budget.ok) {
     res.status(429).json({ error: budget.reason });
     return;
   }
 
   try {
-    const body = other !== undefined ? { text, other } : { text };
     const paid = await invokeMerchant(toolId, body);
-    recordSpend(req.session.userId!, cents);
-    res.json(paid);
+    recordSpend(userId, cents);
+    recordSale({
+      tool: toolId,
+      cents,
+      caller: "person",
+      payer: payerLabel(userId, "person"),
+      transaction: paid.receipt.transaction,
+    });
+    res.json({ ...paid, prepaidCalls: prepaidCallsFor(userId) });
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : "Payment failed." });
   }
 });
+
+// ---- the owner's till ----
+
+app.get("/till", (_req, res) => {
+  res.json(tillSnapshot());
+});
+
+app.get("/till/stream", (req, res) => {
+  tillStream(req, res);
+});
+
+// ---- the delegate agent ----
+
+const MAX_AGENT_BUDGET = 50;
+
+app.get("/agent/tasks", (_req, res) => {
+  res.json({ tasks: publicTasks(), maxBudgetCents: MAX_AGENT_BUDGET });
+});
+
+/**
+ * One passkey approval covers a budget, not a call. The agent then pays each
+ * job inside that budget with no further prompt. Streams NDJSON events.
+ */
+app.post("/agent/run", requireUser, async (req, res) => {
+  const userId = req.session.userId!;
+  const challenge = req.session.webauthnChallenge;
+  const assertion = req.body?.assertion as AuthenticationResponseJSON | undefined;
+  const taskId = String(req.body?.task ?? "");
+  const budgetCents = Math.round(Number(req.body?.budgetCents ?? 0));
+
+  if (!challenge || !assertion) {
+    res.status(400).json({ error: "Approve the budget with your passkey first." });
+    return;
+  }
+  if (!Number.isFinite(budgetCents) || budgetCents < 1 || budgetCents > MAX_AGENT_BUDGET) {
+    res.status(400).json({ error: `Pick a budget between 1¢ and ${MAX_AGENT_BUDGET}¢.` });
+    return;
+  }
+  try {
+    await verifyAuthentication(userId, assertion, challenge);
+    delete req.session.webauthnChallenge;
+  } catch (err) {
+    res.status(401).json({ error: err instanceof Error ? err.message : "Passkey check failed." });
+    return;
+  }
+
+  res.writeHead(200, {
+    "content-type": "application/x-ndjson",
+    "cache-control": "no-cache, no-transform",
+    "x-accel-buffering": "no",
+  });
+  const emit = (e: AgentEvent) => res.write(`${JSON.stringify(e)}\n`);
+  try {
+    await runTask(
+      taskId,
+      budgetCents,
+      emit,
+      (tool, cents, transaction) => {
+        if (cents > 0) recordSpend(userId, cents);
+        recordSale({ tool, cents, caller: "agent", payer: payerLabel(userId, "agent"), transaction });
+      },
+      (cents) => (cents === 0 ? true : canSpend(userId, cents, DAILY_CAP_CENTS).ok),
+      userId,
+    );
+  } catch (err) {
+    res.write(`${JSON.stringify({ type: "error", error: err instanceof Error ? err.message : "The agent stopped." })}\n`);
+  }
+  res.end();
+});
+
+function payerLabel(userId: string, caller: "person" | "agent"): string {
+  const user = findUserById(userId);
+  const who = (user?.email ?? "someone").split("@")[0];
+  return caller === "agent" ? `agent of ${who}` : who;
+}
 
 createServer(app).listen(PORT, "127.0.0.1", () => {
   console.log(`[one-job-gateway] http://127.0.0.1:${PORT} (public ${PUBLIC_ORIGIN})`);

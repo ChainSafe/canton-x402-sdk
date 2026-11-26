@@ -19,6 +19,8 @@ export interface StoredUser {
   picture?: string;
   spentCentsToday: number;
   spendDay: string;
+  /** Calls left from bulk packs before per-call x402 returns. */
+  prepaidCalls: number;
 }
 
 export interface StoredPasskey {
@@ -76,6 +78,7 @@ export function upsertGoogleUser(input: {
       picture: input.picture,
       spentCentsToday: 0,
       spendDay: todayUtc(),
+      prepaidCalls: 0,
     };
     db.users.push(user);
   } else {
@@ -134,4 +137,39 @@ export function recordSpend(userId: string, cents: number): void {
   resetSpendIfNewDay(user);
   user.spentCentsToday += cents;
   save(db);
+}
+
+function withPrepaid(user: StoredUser): StoredUser {
+  if (typeof user.prepaidCalls === "number") return user;
+  return { ...user, prepaidCalls: 0 };
+}
+
+export function prepaidCallsFor(userId: string): number {
+  const user = findUserById(userId);
+  return user ? withPrepaid(user).prepaidCalls : 0;
+}
+
+export function addPrepaidCalls(userId: string, calls: number): number {
+  const db = load();
+  const user = db.users.find((u) => u.id === userId);
+  if (!user) return 0;
+  const row = withPrepaid(user);
+  row.prepaidCalls += calls;
+  const idx = db.users.findIndex((u) => u.id === userId);
+  db.users[idx] = row;
+  save(db);
+  return row.prepaidCalls;
+}
+
+export function consumePrepaidCall(userId: string): boolean {
+  const db = load();
+  const user = db.users.find((u) => u.id === userId);
+  if (!user) return false;
+  const row = withPrepaid(user);
+  if (row.prepaidCalls < 1) return false;
+  row.prepaidCalls -= 1;
+  const idx = db.users.findIndex((u) => u.id === userId);
+  db.users[idx] = row;
+  save(db);
+  return true;
 }

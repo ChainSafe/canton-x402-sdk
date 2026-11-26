@@ -1,4 +1,4 @@
-// The surface a person can browse, and the twelve jobs this build actually runs.
+// The surface a person can browse. Every job runs behind paymentRequired in this build.
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -19,24 +19,9 @@ export interface Tool {
   result: string;
   /** Illustrative price in cents of Canton Coin. Not a tariff. */
   cents: number;
-  /** This build runs the job. The others are listed and never charged. */
+  /** This build runs the job behind paymentRequired. */
   live: boolean;
 }
-
-const LIVE = new Set([
-  "hash.sha256",
-  "json.fmt",
-  "csv.json",
-  "json.csv",
-  "text.diff",
-  "html.text",
-  "text.pii",
-  "cron.english",
-  "units.convert",
-  "mime.sniff",
-  "ua.parse",
-  "jwt.read",
-]);
 
 function tool(
   tool: string,
@@ -46,7 +31,7 @@ function tool(
   result: string,
   cents: number,
 ): Tool {
-  return { tool, group, via, body, result, cents, live: LIVE.has(tool) };
+  return { tool, group, via, body, result, cents, live: true };
 }
 
 export const TOOLS: readonly Tool[] = [
@@ -126,6 +111,10 @@ export const TOOLS: readonly Tool[] = [
   tool("units.convert", "Convert", "Both", "a quantity and a target unit", "the quantity", 1),
   tool("mime.sniff", "Convert", "Call", "bytes", "media type", 1),
   tool("ics.events", "Convert", "Call", "an iCalendar snippet", "the events", 1),
+
+  tool("bulk.25", "Fact", "Call", "prepaid pack id 25", "twenty-five calls on your account", 10),
+  tool("bulk.100", "Fact", "Call", "prepaid pack id 100", "one hundred calls on your account", 35),
+  tool("bulk.500", "Fact", "Call", "prepaid pack id 500", "five hundred calls on your account", 150),
 ];
 
 export function findTool(id: string): Tool | undefined {
@@ -133,4 +122,18 @@ export function findTool(id: string): Tool | undefined {
 }
 
 /** Tools whose second field is part of the call, so a missing one is refused before payment. */
-export const NEEDS_OTHER: ReadonlySet<string> = new Set(["text.diff", "units.convert"]);
+export const NEEDS_OTHER: ReadonlySet<string> = new Set([
+  "text.diff",
+  "units.convert",
+  "text.translate",
+  "text.summary",
+  "date.parse",
+  "dns.lookup",
+  "fx.quote",
+  "img.compress",
+  "img.thumb",
+  "pdf.split",
+  "pdf.rotate",
+  "svg.png",
+  "url.shot",
+]);

@@ -16,4 +16,17 @@ export const SAMPLES: Record<string, { text: string; other?: string }> = {
   "jwt.read": {
     text: "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMjM0NTY3ODkwIn0.",
   },
+  "text.translate": { text: "Hello world", other: "de" },
+  "text.summary": { text: "one two three four five six seven eight", other: "4" },
+  "date.parse": { text: "next Friday at 3pm", other: "UTC" },
+  "dns.lookup": { text: "chainsafe.io", other: "MX" },
+  "fx.quote": { text: "100", other: "USD EUR" },
+  "qr.make": { text: "https://chainsafe.io" },
+  "url.meta": { text: "https://chainsafe.io" },
+  "phone.parse": { text: "+14155550100" },
+  "geo.code": { text: "Zürich, Switzerland" },
+  "regex.explain": { text: "/^\\d{3}-\\d{2}-\\d{4}$/" },
+  "ics.events": {
+    text: "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Demo\nDTSTART:20250101T120000Z\nDTEND:20250101T130000Z\nEND:VEVENT\nEND:VCALENDAR",
+  },
 };

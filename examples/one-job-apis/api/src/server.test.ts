@@ -58,13 +58,13 @@ describe("one-job api", () => {
     expect(body.result.hex).toBe(createHash("sha256").update("hello").digest("hex"));
   });
 
-  it("does not charge a job that is not in this build", async () => {
-    const res = await fetch(`${base}/v1/bg.remove`, {
+  it("quotes any catalog job before payment", async () => {
+    const res = await fetch(`${base}/v1/text.lang`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: "nope" }),
+      body: JSON.stringify({ text: "hello there" }),
     });
-    expect(res.status).toBe(501);
-    expect(res.headers.get("payment-required")).toBeNull();
+    expect(res.status).toBe(402);
+    expect(res.headers.get("payment-required")).toBeTruthy();
   });
 });

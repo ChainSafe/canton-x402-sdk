@@ -16,6 +16,10 @@ export const RP_ORIGIN = process.env.WEBAUTHN_ORIGIN?.trim() || PUBLIC_ORIGIN;
 
 export const DAILY_CAP_CENTS = Number(process.env.DAILY_SPEND_CAP_CENTS ?? 500);
 
+/** Shared with the merchant so the gateway can run paid jobs without another 402. */
+export const GATEWAY_INTERNAL_SECRET =
+  process.env.GATEWAY_INTERNAL_SECRET?.trim() ?? "dev-one-job-gateway-secret";
+
 export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID?.trim();
 export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET?.trim();
 export const SESSION_SECRET = process.env.SESSION_SECRET?.trim() ?? "dev-only-change-me";
